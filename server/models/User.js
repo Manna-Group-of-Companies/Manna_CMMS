@@ -22,7 +22,21 @@ const userSchema = new mongoose.Schema(
     role: {
       type: String,
       required: [true, "Role is required"],
-      enum: ["Admin", "Supervisor"],
+      enum: ["Admin", "Supervisor", "Branch"],
+    },
+    // A Branch account is tied to exactly one room: it sees that room's stock
+    // and nothing else. Admin and Supervisor accounts leave this null, since
+    // they work across every room.
+    stockRoom: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "StockRoom",
+      default: null,
+      required: [
+        function () {
+          return this.role === "Branch";
+        },
+        "A Branch user must be assigned a stock room",
+      ],
     },
   },
   {

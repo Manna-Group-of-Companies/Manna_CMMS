@@ -32,12 +32,19 @@ const issueHistorySchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    // Which room(s) the stock was drawn from, so a later return can show where
+    // it originally came from.
+    sourceRoom: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     returnStatus: {
       type: String,
       enum: ["Not Returned", "Partially Returned", "Returned"],
       default: "Not Returned",
     },
-    // How much of `quantity` has been handed back into the Restock section.
+    // How much of `quantity` has been handed back into the Red Stock Room.
     // Returns may be partial, so this is tracked separately from the status.
     returnedQuantity: {
       type: Number,

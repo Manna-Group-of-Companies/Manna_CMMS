@@ -25,9 +25,11 @@ export const NotificationProvider = ({ children }) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  const usesNotifications = !!user;
+
   // Fetch notifications from DB
   const fetchNotifications = async () => {
-    if (!user) return;
+    if (!usesNotifications) return;
     try {
       const { data } = await API.get("/notifications");
       setNotifications(data);
@@ -63,7 +65,7 @@ export const NotificationProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    if (user) {
+    if (usesNotifications) {
       fetchNotifications();
       // Poll notifications every 30 seconds for active users
       const interval = setInterval(fetchNotifications, 30000);
@@ -72,7 +74,7 @@ export const NotificationProvider = ({ children }) => {
       setNotifications([]);
       setUnreadCount(0);
     }
-  }, [user]);
+  }, [usesNotifications]);
 
   return (
     <NotificationContext.Provider

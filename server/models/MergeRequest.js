@@ -1,10 +1,14 @@
 import mongoose from "mongoose";
 
 /**
- * A batch of restock items an Admin has proposed moving back into Main Stock.
+ * Red Stock gathered into a single request for the Admin.
  *
- * Creating the request does not move any stock — that only happens when the
- * request is approved.
+ * Two things raise one: the weekly run over everything in Red Stock, and a
+ * Supervisor asking for their own returns to be moved without waiting for the
+ * week. Either way this is the only Admin approval in the return flow — a
+ * return itself creates nothing — and creating the request moves no stock. The
+ * stock moves once, when the request is approved and the Admin names the
+ * destination store room.
  */
 const mergeRequestItemSchema = new mongoose.Schema(
   {
@@ -31,7 +35,18 @@ const mergeRequestItemSchema = new mongoose.Schema(
     quantity: {
       type: Number,
       required: true,
-      min: [1, "Restock quantity must be at least 1"],
+      min: [1, "Merge quantity must be at least 1"],
+    },
+    // Filled in at approval time with the room the Admin chose for this line.
+    destinationRoom: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Guards against a line being credited twice if an approval is retried.
+    moved: {
+      type: Boolean,
+      default: false,
     },
   },
   { _id: false }
@@ -39,17 +54,32 @@ const mergeRequestItemSchema = new mongoose.Schema(
 
 const mergeRequestSchema = new mongoose.Schema(
   {
-    // Human-facing identifier, e.g. MERGE-202608-003
+    // Human-facing identifier, e.g. REQ-MERGE-00125
     requestId: {
       type: String,
       required: true,
       unique: true,
     },
+    // ISO week this merge covers, e.g. 2026-W33. One merge per week reaches
+    // approval; see utils/weeklyMerge.js.
+    weekKey: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    weekStart: {
+      type: Date,
+      required: true,
+    },
+    weekEnd: {
+      type: Date,
+      required: true,
+    },
     items: {
       type: [mergeRequestItemSchema],
       validate: {
         validator: (items) => Array.isArray(items) && items.length > 0,
-        message: "A merge request must contain at least one restock item",
+        message: "A merge request must contain at least one Red Stock item",
       },
     },
     itemCount: {
@@ -65,13 +95,22 @@ const mergeRequestSchema = new mongoose.Schema(
     status: {
       type: String,
       required: true,
-      enum: ["Pending Approval", "Merged Successfully", "Merge Rejected"],
+      enum: ["Pending Approval", "Approved", "Rejected"],
       default: "Pending Approval",
+    },
+    // Who set this merge going: the weekly scheduler, an Admin running the
+    // week early, or a Supervisor asking for their own returns to be moved.
+    // A "Supervisor" merge sits outside the weekly cycle — see
+    // utils/weeklyMerge.js.
+    createdVia: {
+      type: String,
+      enum: ["Scheduled", "Manual", "Supervisor"],
+      default: "Manual",
     },
     requestedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      default: null,
     },
     requestedAt: {
       type: Date,
@@ -79,6 +118,13 @@ const mergeRequestSchema = new mongoose.Schema(
       default: Date.now,
     },
     comment: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // The room the Admin sent the whole merge to. Individual lines may be
+    // overridden, so `items[].destinationRoom` is the authoritative record.
+    destinationRoom: {
       type: String,
       default: "",
       trim: true,
@@ -102,6 +148,13 @@ const mergeRequestSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// A week is only ever looked up together with its status ("is this week's
+// merge still open?"), which is the check that keeps merges from duplicating.
+mergeRequestSchema.index({ weekKey: 1, status: 1 });
+
+/** Statuses that mean this week has already been merged (or is mid-merge). */
+mergeRequestSchema.statics.CLAIMS_WEEK = ["Pending Approval", "Approved"];
 
 const MergeRequest = mongoose.model("MergeRequest", mergeRequestSchema);
 export default MergeRequest;

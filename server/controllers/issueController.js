@@ -2,6 +2,7 @@ import IssueHistory from "../models/IssueHistory.js";
 import Product from "../models/Product.js";
 import Notification from "../models/Notification.js";
 import { recordMovement } from "../utils/stockLedger.js";
+import { debitAcrossRooms } from "../utils/stockRooms.js";
 import { returnIssuedStock } from "./restockController.js";
 
 // Helper to generate unique issue numbers
@@ -42,9 +43,13 @@ export const issueProduct = async (req, res) => {
     // Generate issue number
     const issueNumber = generateIssueNumber();
 
-    // 1. Reduce product quantity immediately
-    product.quantity -= quantity;
-    await product.save();
+    // 1. Reduce stock immediately, drawing from the product's home room first
+    // so the room balances stay the source of truth.
+    const { drawn } = await debitAcrossRooms({
+      product,
+      preferredRoom: product.storeRoom,
+      quantity,
+    });
 
     // 2. Save issue history record
     const issue = await IssueHistory.create({
@@ -54,6 +59,7 @@ export const issueProduct = async (req, res) => {
       recipient: recipient.trim(),
       purpose: purpose ? purpose.trim() : "",
       supervisor: supervisorId,
+      sourceRoom: drawn.map((entry) => entry.room).join(", "),
     });
 
     // 3. Ledger entry so the movement page can trace the decrement
@@ -64,7 +70,9 @@ export const issueProduct = async (req, res) => {
       quantity,
       reference: issueNumber,
       performedBy: supervisorId,
-      note: `Issued to ${recipient.trim()}`,
+      note: `Issued to ${recipient.trim()} from ${drawn
+        .map((entry) => `${entry.room} (${entry.quantity})`)
+        .join(", ")}`,
     });
 
     // 4. Low stock notification if quantity dropped below threshold
@@ -120,12 +128,12 @@ export const getIssueHistory = async (req, res) => {
   }
 };
 
-// @desc    Return an issued product into the Restock section
+// @desc    Return an issued product into the Red Stock Room
 // @route   PUT /api/issues/:id/return
 // @access  Private (Supervisor)
 //
-// Returns never restore Main Stock directly — this is a thin alias over
-// POST /api/restock/returns kept so the issue-centric URL still works. The
+// Returns never restore a store room directly — this is a thin alias over
+// POST /api/red-stock/returns kept so the issue-centric URL still works. The
 // body must carry a return reason, same as the canonical endpoint.
 export const returnIssueProduct = (req, res) => {
   req.body = { ...req.body, issueId: req.params.id };

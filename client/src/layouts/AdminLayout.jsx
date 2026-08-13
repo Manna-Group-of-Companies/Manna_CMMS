@@ -1,5 +1,5 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { useAuth, homePathFor } from "../context/AuthContext";
 import Sidebar from "../components/Sidebar";
 import Navbar from "../components/Navbar";
 
@@ -23,12 +23,8 @@ const AdminLayout = () => {
   }
 
   if (user.role !== "Admin") {
-    // If not Admin, redirect to Supervisor dashboard if they are Supervisor, otherwise Login
-    return user.role === "Supervisor" ? (
-      <Navigate to="/supervisor/dashboard" replace />
-    ) : (
-      <Navigate to="/login" replace />
-    );
+    // Anyone else belongs in their own portal, not on the login screen.
+    return <Navigate to={homePathFor(user.role)} replace />;
   }
 
   // Generate dynamic page title based on path

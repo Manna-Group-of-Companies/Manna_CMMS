@@ -3,12 +3,15 @@ import Notification from "../models/Notification.js";
 // @desc    Get user notifications
 // @route   GET /api/notifications
 // @access  Private
+/** Roles that only ever see notifications addressed to them personally. */
+const OWN_ONLY_ROLES = ["Supervisor", "Branch"];
+
 export const getNotifications = async (req, res) => {
   try {
     let query = {};
 
-    if (req.user.role === "Supervisor") {
-      // Supervisor only sees their own notifications
+    if (OWN_ONLY_ROLES.includes(req.user.role)) {
+      // Supervisor and Branch only see their own notifications
       query.user = req.user._id;
     } else {
       // Admin sees notifications where user is null (admin notifications) OR specifically for them
@@ -35,8 +38,12 @@ export const markNotificationRead = async (req, res) => {
       return res.status(404).json({ message: "Notification not found" });
     }
 
-    // Verify security (Supervisor can only mark their own notification as read)
-    if (req.user.role === "Supervisor" && notification.user && notification.user.toString() !== req.user._id.toString()) {
+    // Verify security (these roles can only mark their own notification read)
+    if (
+      OWN_ONLY_ROLES.includes(req.user.role) &&
+      notification.user &&
+      notification.user.toString() !== req.user._id.toString()
+    ) {
       return res.status(403).json({ message: "Not authorized to read this notification" });
     }
 
@@ -56,7 +63,7 @@ export const markAllNotificationsRead = async (req, res) => {
   try {
     let query = {};
 
-    if (req.user.role === "Supervisor") {
+    if (OWN_ONLY_ROLES.includes(req.user.role)) {
       query.user = req.user._id;
     } else {
       query = {

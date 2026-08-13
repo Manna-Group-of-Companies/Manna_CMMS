@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 import {
   Loader2,
   Send,
@@ -17,22 +18,26 @@ const AdminIssueHistory = () => {
   const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
-  const fetchIssues = async () => {
+  /** [silent] is used by the background poll: no spinner, no error toast. */
+  const fetchIssues = async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const { data } = await API.get("/issues");
       setIssues(data);
     } catch (error) {
       console.error("Error loading issue history:", error);
-      showToast("Failed to load issue history", "error");
+      if (!silent) showToast("Failed to load issue history", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchIssues();
   }, []);
+
+  // Supervisors issue and return stock from the app.
+  useAutoRefresh(() => fetchIssues({ silent: true }));
 
   const formatDate = (dateString) => {
     const d = new Date(dateString);

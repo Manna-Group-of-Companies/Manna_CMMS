@@ -20,7 +20,7 @@ const stockReturnRequestSchema = new mongoose.Schema(
     status: {
       type: String,
       required: true,
-      enum: ["Pending", "Approved", "Rejected"],
+      enum: ["Pending", "Approved", "Rejected", "Cancelled"],
       default: "Pending",
     },
     adminComments: {

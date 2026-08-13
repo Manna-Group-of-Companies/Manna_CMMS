@@ -3,6 +3,20 @@ import API from "../services/api";
 
 const AuthContext = createContext(null);
 
+/** Where a signed-in user belongs, by role. Unknown roles go back to login. */
+export const homePathFor = (role) => {
+  switch (role) {
+    case "Admin":
+      return "/admin/dashboard";
+    case "Supervisor":
+      return "/supervisor/dashboard";
+    case "Branch":
+      return "/branch/stock";
+    default:
+      return "/login";
+  }
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -33,22 +47,25 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const { data } = await API.post("/auth/login", { email, password });
-      setUser({
+      const profile = {
         _id: data._id,
         name: data.name,
         email: data.email,
         role: data.role,
-      });
+        // Branch accounts carry the one room they are allowed to see.
+        stockRoom: data.stockRoom || null,
+      };
+      setUser(profile);
       localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify({
-        _id: data._id,
-        name: data.name,
-        email: data.email,
-        role: data.role,
-      }));
+      localStorage.setItem("user", JSON.stringify(profile));
       return data;
     } catch (error) {
-      throw error.response?.data?.message || "Invalid credentials. Please try again.";
+      if (error.response) {
+        throw error.response.data?.message || "Invalid credentials. Please try again.";
+      }
+      // No response at all — the API is down or unreachable. Saying "invalid
+      // credentials" here sends people off checking a password that is fine.
+      throw `Cannot reach the server at ${API.defaults.baseURL}. Check that the backend is running.`;
     }
   };
 

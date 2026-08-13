@@ -3,10 +3,9 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const DEFAULT_LOCAL_URI = "mongodb://127.0.0.1:27017/stockmaster";
 
 const connectDB = async () => {
-  const mongoUri = process.env.MONGO_URI || DEFAULT_LOCAL_URI;
+  const mongoUri = process.env.MONGO_URI;
 
   try {
     await mongoose.connect(mongoUri);

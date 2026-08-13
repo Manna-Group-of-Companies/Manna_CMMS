@@ -1,5 +1,5 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { useAuth, homePathFor } from "../context/AuthContext";
 import Sidebar from "../components/Sidebar";
 import Navbar from "../components/Navbar";
 
@@ -23,11 +23,7 @@ const SupervisorLayout = () => {
   }
 
   if (user.role !== "Supervisor") {
-    return user.role === "Admin" ? (
-      <Navigate to="/admin/dashboard" replace />
-    ) : (
-      <Navigate to="/login" replace />
-    );
+    return <Navigate to={homePathFor(user.role)} replace />;
   }
 
   const getPageTitle = () => {

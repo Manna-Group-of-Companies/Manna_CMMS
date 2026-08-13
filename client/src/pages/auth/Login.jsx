@@ -1,8 +1,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../../context/AuthContext";
+import { useAuth, homePathFor } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import { Lock, Mail, Boxes } from "lucide-react";
+
+/** The seeded demo logins, in the order the quick-login row shows them. */
+const DEMO_ACCOUNTS = [
+  { role: "Admin", label: "Office Admin", email: "admin@stock.com", password: "Admin@123", accent: "hover:border-brand-500/50 text-brand-700" },
+  { role: "Supervisor", label: "Store Supervisor", email: "supervisor@stock.com", password: "Supervisor@123", accent: "hover:border-emerald-500/50 text-emerald-600" },
+  { role: "Branch", label: "Branch", email: "branch@stock.com", password: "Branch@123", accent: "hover:border-indigo-500/50 text-indigo-600" },
+];
 
 const Login = () => {
   const { login } = useAuth();
@@ -27,13 +34,9 @@ const Login = () => {
     try {
       const data = await login(email, password);
       showToast(`Welcome back, ${data.name}!`, "success");
-      
+
       // Redirect based on role
-      if (data.role === "Admin") {
-        navigate("/admin/dashboard");
-      } else {
-        navigate("/supervisor/dashboard");
-      }
+      navigate(homePathFor(data.role));
     } catch (err) {
       setError(err);
       showToast(err, "error");
@@ -42,14 +45,9 @@ const Login = () => {
     }
   };
 
-  const handlePrefill = (role) => {
-    if (role === "Admin") {
-      setEmail("admin@stock.com");
-      setPassword("Admin@123");
-    } else {
-      setEmail("supervisor@stock.com");
-      setPassword("Supervisor@123");
-    }
+  const handlePrefill = (account) => {
+    setEmail(account.email);
+    setPassword(account.password);
     setError("");
   };
 
@@ -139,18 +137,15 @@ const Login = () => {
         <div className="mt-8 text-center">
           <p className="text-xs text-slate-500 mb-3">Quick Login (Demo Accounts):</p>
           <div className="flex justify-center gap-3">
-            <button
-              onClick={() => handlePrefill("Admin")}
-              className="px-3.5 py-2 rounded-lg bg-white border border-slate-200 hover:border-brand-500/50 hover:bg-slate-100 text-xs font-medium text-brand-700 transition-all cursor-pointer"
-            >
-              Office Admin
-            </button>
-            <button
-              onClick={() => handlePrefill("Supervisor")}
-              className="px-3.5 py-2 rounded-lg bg-white border border-slate-200 hover:border-emerald-500/50 hover:bg-slate-100 text-xs font-medium text-emerald-600 transition-all cursor-pointer"
-            >
-              Store Supervisor
-            </button>
+            {DEMO_ACCOUNTS.map((account) => (
+              <button
+                key={account.role}
+                onClick={() => handlePrefill(account)}
+                className={`px-3.5 py-2 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-medium transition-all cursor-pointer ${account.accent}`}
+              >
+                {account.label}
+              </button>
+            ))}
           </div>
         </div>
       </div>

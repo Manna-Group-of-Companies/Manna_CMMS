@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 import {
   Boxes,
   Loader2,
@@ -9,6 +11,7 @@ import {
   XCircle,
   AlertTriangle,
   Calendar,
+  ClipboardCheck,
 } from "lucide-react";
 
 const SupervisorDashboard = () => {
@@ -23,21 +26,25 @@ const SupervisorDashboard = () => {
     todayActivity: [],
   });
 
-  const fetchDashboardData = async () => {
+  /** [silent] is used by the background poll: no error toast. */
+  const fetchDashboardData = async ({ silent = false } = {}) => {
     try {
       const { data } = await API.get("/dashboard/supervisor");
       setMetrics(data);
     } catch (error) {
       console.error("Error fetching supervisor dashboard:", error);
-      showToast("Failed to fetch dashboard metrics", "error");
+      if (!silent) showToast("Failed to fetch dashboard metrics", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  // Counts move whenever the Admin decides a request.
+  useAutoRefresh(() => fetchDashboardData({ silent: true }));
 
   const getStatusBadge = (status) => {
     switch (status) {
@@ -74,6 +81,17 @@ const SupervisorDashboard = () => {
       color: "from-brand-600/10 to-brand-400/10 border-brand-500/20 text-brand-700",
     },
     {
+      // Stage two of the branch workflow lands here.
+      title: "Branch Requests to Approve",
+      value: metrics.branchPendingSupervisor || 0,
+      icon: ClipboardCheck,
+      link: "/supervisor/branch-approvals",
+      color:
+        metrics.branchPendingSupervisor > 0
+          ? "from-indigo-600/10 to-blue-600/10 border-indigo-500/20 text-indigo-600"
+          : "from-slate-50 to-slate-100 border-slate-200 text-slate-600",
+    },
+    {
       title: "Pending Approvals",
       value: metrics.pendingRequests,
       icon: Clock,
@@ -104,13 +122,14 @@ const SupervisorDashboard = () => {
   return (
     <div className="space-y-8">
       {/* Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {cards.map((card, index) => {
           const Icon = card.icon;
-          return (
+          const body = (
             <div
-              key={index}
-              className={`p-6 rounded-2xl border bg-gradient-to-br ${card.color} shadow-sm`}
+              className={`p-6 rounded-2xl border bg-gradient-to-br ${card.color} shadow-sm h-full ${
+                card.link ? "hover:shadow-md transition-all" : ""
+              }`}
             >
               <div className="flex justify-between items-start">
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
@@ -122,6 +141,14 @@ const SupervisorDashboard = () => {
                 {card.value}
               </h3>
             </div>
+          );
+
+          return card.link ? (
+            <Link key={index} to={card.link} className="cursor-pointer">
+              {body}
+            </Link>
+          ) : (
+            <div key={index}>{body}</div>
           );
         })}
       </div>

@@ -8,11 +8,25 @@ const generateToken = (id) => {
   });
 };
 
+/**
+ * The user as the client keeps it. A Branch account carries its room, because
+ * every screen it can reach is scoped to that one room.
+ */
+const publicUser = (user) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  stockRoom: user.stockRoom
+    ? { _id: user.stockRoom._id, name: user.stockRoom.name }
+    : null,
+});
+
 // @desc    Register a new user
 // @route   POST /api/auth/register
 // @access  Public (or Admin only, let's make it Public for initial setup, but verify role creation)
 export const registerUser = async (req, res) => {
-  const { name, email, password, role } = req.body;
+  const { name, email, password, role, stockRoom } = req.body;
 
   try {
     const userExists = await User.findOne({ email });
@@ -21,19 +35,24 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ message: "User already exists" });
     }
 
+    if (role === "Branch" && !stockRoom) {
+      return res
+        .status(400)
+        .json({ message: "A Branch user must be assigned a stock room" });
+    }
+
     const user = await User.create({
       name,
       email,
       password,
       role: role || "Supervisor", // Defaults to Supervisor
+      // Only a Branch account is pinned to a room.
+      stockRoom: role === "Branch" ? stockRoom : null,
     });
 
     if (user) {
       res.status(201).json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
+        ...publicUser(await user.populate("stockRoom", "name")),
         token: generateToken(user._id),
       });
     } else {
@@ -51,14 +70,11 @@ export const loginUser = async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).populate("stockRoom", "name");
 
     if (user && (await user.matchPassword(password))) {
       res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
+        ...publicUser(user),
         token: generateToken(user._id),
       });
     } else {
@@ -74,9 +90,11 @@ export const loginUser = async (req, res) => {
 // @access  Private
 export const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password");
+    const user = await User.findById(req.user._id)
+      .select("-password")
+      .populate("stockRoom", "name");
     if (user) {
-      res.json(user);
+      res.json(publicUser(user));
     } else {
       res.status(404).json({ message: "User not found" });
     }

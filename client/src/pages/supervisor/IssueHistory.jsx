@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 import {
   Loader2,
   Send,
@@ -9,7 +10,10 @@ import {
   Boxes,
   X,
   RotateCcw,
+  PackageOpen,
 } from "lucide-react";
+
+const RETURN_CONDITIONS = ["Good", "Damaged", "Repairable", "Expired"];
 
 const SupervisorIssueHistory = () => {
   const { showToast } = useNotifications();
@@ -17,16 +21,28 @@ const SupervisorIssueHistory = () => {
   const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
-  const fetchIssues = async () => {
+  // Return flow. The stock is in the Red Stock Room the moment this succeeds —
+  // no approval — so the form only collects what the weekly merge will need.
+  const [returnIssue, setReturnIssue] = useState(null);
+  const [returnForm, setReturnForm] = useState({
+    quantity: 1,
+    reason: "",
+    condition: "Good",
+    department: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  /** [silent] is used by the background poll: no spinner, no error toast. */
+  const fetchIssues = async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const { data } = await API.get("/issues");
       setIssues(data);
     } catch (error) {
       console.error("Error loading issue history:", error);
-      showToast("Failed to load issue history", "error");
+      if (!silent) showToast("Failed to load issue history", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -34,14 +50,69 @@ const SupervisorIssueHistory = () => {
     fetchIssues();
   }, []);
 
-  const handleReturnStock = async (issueId) => {
+  // Paused while the return form is open so the outstanding quantity the
+  // form was built from cannot change underneath it.
+  useAutoRefresh(() => fetchIssues({ silent: true }), { enabled: !returnIssue });
+
+  const outstandingOf = (issue) => issue.quantity - (issue.returnedQuantity || 0);
+
+  const openReturnModal = (issue) => {
+    setReturnIssue(issue);
+    setReturnForm({
+      quantity: outstandingOf(issue),
+      reason: "",
+      condition: "Good",
+      department: issue.recipient || "",
+    });
+  };
+
+  const handleReturnSubmit = async (e) => {
+    e.preventDefault();
+
+    const outstanding = outstandingOf(returnIssue);
+    const quantity = Number(returnForm.quantity);
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      showToast("Return quantity must be a whole number of at least 1", "error");
+      return;
+    }
+    if (quantity > outstanding) {
+      showToast(`Only ${outstanding} still outstanding on this issue`, "error");
+      return;
+    }
+    if (!returnForm.reason.trim()) {
+      showToast("A return reason is required", "error");
+      return;
+    }
+
     try {
-      await API.put(`/issues/${issueId}/return`);
-      showToast("Stock returned successfully", "success");
-      fetchIssues(); // Refresh list
+      setSubmitting(true);
+      const { data } = await API.post("/red-stock/returns", {
+        issueId: returnIssue._id,
+        quantity,
+        reason: returnForm.reason.trim(),
+        condition: returnForm.condition,
+        department: returnForm.department.trim(),
+      });
+      showToast(data.message || "Stock returned to the Red Stock Room", "success");
+      setReturnIssue(null);
+      fetchIssues();
     } catch (error) {
       console.error("Error returning stock:", error);
       showToast(error.response?.data?.message || "Failed to return stock", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const getReturnBadge = (status) => {
+    switch (status) {
+      case "Returned":
+        return "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20";
+      case "Partially Returned":
+        return "bg-amber-500/10 text-amber-600 border border-amber-500/20";
+      default:
+        return "bg-rose-500/10 text-rose-600 border border-rose-500/20";
     }
   };
 
@@ -92,78 +163,217 @@ const SupervisorIssueHistory = () => {
                   <th className="py-4 px-6">Recipient</th>
                   <th className="py-4 px-6">Purpose</th>
                   <th className="py-4 px-6">Date & Time</th>
-                  <th className="py-4 px-6 text-center">Status</th>
+                  <th className="py-4 px-6 text-center">Return Status</th>
                   <th className="py-4 px-6 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-slate-700">
-                {issues.map((issue) => (
-                  <tr key={issue._id} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-4 px-6 font-mono text-xs text-amber-600 font-bold">
-                      {issue.issueNumber}
-                    </td>
-                    <td className="py-4 px-6">
-                      <div
-                        className="flex items-center gap-3 cursor-pointer hover:bg-slate-100 p-2 rounded-lg transition-colors -ml-2"
-                        onClick={() => issue.product && setSelectedProduct(issue.product)}
-                      >
-                        <img
-                          src={
-                            issue.product?.image ||
-                            "https://images.unsplash.com/photo-1595246140707-1e5b22b271d4?w=50&auto=format"
-                          }
-                          alt={issue.product?.name}
-                          className="w-9 h-9 rounded-lg object-cover border border-slate-200"
-                        />
-                        <div>
-                          <div className="font-bold text-slate-900 group-hover:text-brand-700 transition-colors">
-                            {issue.product?.name || "Deleted Product"}
-                          </div>
-                          <div className="text-[10px] font-mono text-brand-700">
-                            {issue.product?.code || "—"} • {issue.product?.storeRoom || ""}
+                {issues.map((issue) => {
+                  const outstanding = outstandingOf(issue);
+                  return (
+                    <tr key={issue._id} className="hover:bg-slate-50 transition-colors">
+                      <td className="py-4 px-6 font-mono text-xs text-amber-600 font-bold">
+                        {issue.issueNumber}
+                      </td>
+                      <td className="py-4 px-6">
+                        <div
+                          className="flex items-center gap-3 cursor-pointer hover:bg-slate-100 p-2 rounded-lg transition-colors -ml-2"
+                          onClick={() => issue.product && setSelectedProduct(issue.product)}
+                        >
+                          <img
+                            src={
+                              issue.product?.image ||
+                              "https://images.unsplash.com/photo-1595246140707-1e5b22b271d4?w=50&auto=format"
+                            }
+                            alt={issue.product?.name}
+                            className="w-9 h-9 rounded-lg object-cover border border-slate-200"
+                          />
+                          <div>
+                            <div className="font-bold text-slate-900 group-hover:text-brand-700 transition-colors">
+                              {issue.product?.name || "Deleted Product"}
+                            </div>
+                            <div className="text-[10px] font-mono text-brand-700">
+                              {issue.product?.code || "—"} • {issue.product?.storeRoom || ""}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="py-4 px-6 text-center">
-                      <span className="bg-amber-500/10 text-amber-600 border border-amber-500/20 px-2.5 py-0.5 rounded text-xs font-bold">
-                        −{issue.quantity} {issue.product?.unit || ""}
-                      </span>
-                    </td>
-                    <td className="py-4 px-6 font-semibold text-slate-900">{issue.recipient}</td>
-                    <td className="py-4 px-6 text-xs text-slate-600 italic max-w-[200px] truncate">
-                      {issue.purpose || "—"}
-                    </td>
-                    <td className="py-4 px-6 text-xs text-slate-600 flex items-center gap-1.5">
-                      <Calendar className="h-3.5 w-3.5 opacity-65" />
-                      {formatDate(issue.createdAt)}
-                    </td>
-                    <td className="py-4 px-6 text-center">
-                      {issue.returnStatus === "Returned" ? (
-                        <span className="px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 text-xs font-semibold">
-                          Returned
+                      </td>
+                      <td className="py-4 px-6 text-center">
+                        <span className="bg-amber-500/10 text-amber-600 border border-amber-500/20 px-2.5 py-0.5 rounded text-xs font-bold">
+                          −{issue.quantity} {issue.product?.unit || ""}
                         </span>
-                      ) : (
-                        <span className="px-2 py-1 rounded-md bg-rose-500/10 text-rose-600 border border-rose-500/20 text-xs font-semibold">
-                          Not Returned
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-4 px-6 text-center">
-                      {issue.returnStatus !== "Returned" && (
-                        <button
-                          onClick={() => handleReturnStock(issue._id)}
-                          className="p-1.5 hover:bg-slate-100 rounded-lg text-indigo-600 hover:text-indigo-600 transition-all cursor-pointer"
-                          title="Request Stock Return"
+                      </td>
+                      <td className="py-4 px-6 font-semibold text-slate-900">{issue.recipient}</td>
+                      <td className="py-4 px-6 text-xs text-slate-600 italic max-w-[200px] truncate">
+                        {issue.purpose || "—"}
+                      </td>
+                      <td className="py-4 px-6 text-xs text-slate-600 flex items-center gap-1.5">
+                        <Calendar className="h-3.5 w-3.5 opacity-65" />
+                        {formatDate(issue.createdAt)}
+                      </td>
+                      <td className="py-4 px-6 text-center">
+                        <span
+                          className={`px-2 py-1 rounded-md text-xs font-semibold ${getReturnBadge(
+                            issue.returnStatus
+                          )}`}
                         >
-                          <RotateCcw className="h-4 w-4" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                          {issue.returnStatus || "Not Returned"}
+                        </span>
+                        {outstanding > 0 && (issue.returnedQuantity || 0) > 0 && (
+                          <span className="block mt-1 text-[10px] text-slate-500">
+                            {issue.returnedQuantity} of {issue.quantity} returned
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-4 px-6 text-center">
+                        {outstanding > 0 && (
+                          <button
+                            onClick={() => openReturnModal(issue)}
+                            className="p-1.5 hover:bg-slate-100 rounded-lg text-rose-600 hover:text-rose-700 transition-all cursor-pointer"
+                            title={`Return to Red Stock (${outstanding} outstanding)`}
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Return to Red Stock Modal */}
+      {returnIssue && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+          <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 overflow-hidden shadow-2xl animate-fade-in text-left">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
+                  <PackageOpen className="h-5 w-5 text-rose-600" />
+                  Return to Red Stock
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">{returnIssue.issueNumber}</p>
+              </div>
+              <button
+                onClick={() => setReturnIssue(null)}
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 cursor-pointer transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleReturnSubmit} className="p-6 space-y-4">
+              {/* Product summary */}
+              <div className="flex gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <img
+                  src={
+                    returnIssue.product?.image ||
+                    "https://images.unsplash.com/photo-1595246140707-1e5b22b271d4?w=80&auto=format"
+                  }
+                  alt={returnIssue.product?.name}
+                  className="w-14 h-14 rounded-lg object-cover border border-slate-200"
+                />
+                <div className="text-xs">
+                  <h4 className="text-sm font-bold text-slate-900">
+                    {returnIssue.product?.name || "Deleted Product"}
+                  </h4>
+                  <span className="font-mono text-brand-700 block mt-0.5">
+                    {returnIssue.product?.code || "—"}
+                  </span>
+                  <span className="text-slate-600 block mt-0.5">
+                    Issued from <strong>{returnIssue.sourceRoom || returnIssue.product?.storeRoom || "a store room"}</strong>
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-500/20 text-[11px] text-rose-900 leading-relaxed">
+                This goes straight into the <strong>Red Stock Room</strong> — no approval needed.
+                It stays there until the Admin approves the weekly merge into a store room.
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                  Quantity to Return * <span className="font-normal text-slate-500">
+                    ({outstandingOf(returnIssue)} outstanding)
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max={outstandingOf(returnIssue)}
+                  value={returnForm.quantity}
+                  onChange={(e) => setReturnForm({ ...returnForm, quantity: e.target.value })}
+                  required
+                  className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                  Condition *
+                </label>
+                <select
+                  value={returnForm.condition}
+                  onChange={(e) => setReturnForm({ ...returnForm, condition: e.target.value })}
+                  className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
+                >
+                  {RETURN_CONDITIONS.map((condition) => (
+                    <option key={condition} value={condition}>
+                      {condition}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                  Returning Department *
+                </label>
+                <input
+                  type="text"
+                  value={returnForm.department}
+                  onChange={(e) => setReturnForm({ ...returnForm, department: e.target.value })}
+                  required
+                  placeholder="e.g. Maintenance"
+                  className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                  Reason for Return *
+                </label>
+                <textarea
+                  value={returnForm.reason}
+                  onChange={(e) => setReturnForm({ ...returnForm, reason: e.target.value })}
+                  required
+                  rows="3"
+                  placeholder="e.g. Job completed, surplus material returned"
+                  className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500 resize-none"
+                ></textarea>
+              </div>
+
+              <div className="pt-4 border-t border-slate-200 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setReturnIssue(null)}
+                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-white border border-slate-200 text-slate-600 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-rose-600 hover:bg-rose-500 text-white disabled:opacity-50 cursor-pointer active:scale-98 transition-all flex items-center gap-2"
+                >
+                  {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Send to Red Stock
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

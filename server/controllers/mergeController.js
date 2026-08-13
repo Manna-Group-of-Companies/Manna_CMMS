@@ -1,102 +1,156 @@
-import mongoose from "mongoose";
 import MergeRequest from "../models/MergeRequest.js";
 import RestockItem from "../models/RestockItem.js";
 import Product from "../models/Product.js";
+import StockRoom from "../models/StockRoom.js";
 import Notification from "../models/Notification.js";
 import { recordMovement } from "../utils/stockLedger.js";
+import { creditRoom, resolveRoom, roomBreakdownFor } from "../utils/stockRooms.js";
+import {
+  runWeeklyMerge,
+  requestSupervisorMerge,
+  weekWindowFor,
+  mergeForWeek,
+  openMergeRequest,
+  eligibleRedStock,
+  nextMergeRunAt,
+} from "../utils/weeklyMerge.js";
 
 /**
- * MERGE-YYYYMM-NNN, where NNN restarts each calendar month. Merge reviews are
- * a weekly ritual, so a date-anchored id is easier to talk about than a
- * random one.
+ * @desc    Raise this week's Red Stock merge request
+ * @route   POST /api/merge-requests/weekly
+ * @access  Private (Admin)
+ *
+ * The scheduler normally does this; the endpoint lets an Admin run the week's
+ * merge early. Either way only one merge per week reaches approval.
  */
-const generateRequestId = async (now = new Date()) => {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const prefix = `MERGE-${year}${month}`;
+export const createWeeklyMergeRequest = async (req, res) => {
+  const { comment, restockItemIds } = req.body || {};
 
-  const countThisMonth = await MergeRequest.countDocuments({
-    requestId: { $regex: `^${prefix}-` },
-  });
+  try {
+    const result = await runWeeklyMerge({
+      user: req.user,
+      comment,
+      restockItemIds: Array.isArray(restockItemIds) && restockItemIds.length ? restockItemIds : null,
+      createdVia: "Manual",
+    });
 
-  return `${prefix}-${String(countThisMonth + 1).padStart(3, "0")}`;
+    if (!result.created) {
+      return res.status(409).json({ message: result.reason, mergeRequest: result.mergeRequest });
+    }
+
+    res.status(201).json({ message: result.reason, mergeRequest: result.mergeRequest });
+  } catch (error) {
+    console.error("Error creating weekly merge request:", error);
+    res.status(500).json({ message: error.message });
+  }
 };
 
 /**
- * @desc    Open a merge request over selected restock items
- * @route   POST /api/merge-requests
- * @access  Private (Admin)
+ * @desc    Supervisor asks for their own Red Stock to be merged into a store
+ *          room, instead of waiting for the weekly run
+ * @route   POST /api/merge-requests/mine
+ * @access  Private (Supervisor)
+ *
+ * Nothing moves here: this puts the request on the Admin's desk, and the
+ * supervisor follows it from their Red Stock Room screen.
  */
-export const createMergeRequest = async (req, res) => {
-  const { restockItemIds, comment } = req.body;
+export const createSupervisorMergeRequest = async (req, res) => {
+  const { comment, restockItemIds } = req.body || {};
 
   try {
-    if (!Array.isArray(restockItemIds) || restockItemIds.length === 0) {
-      return res.status(400).json({ message: "Select at least one restock item to merge" });
+    const result = await requestSupervisorMerge({
+      user: req.user,
+      comment,
+      restockItemIds:
+        Array.isArray(restockItemIds) && restockItemIds.length ? restockItemIds : null,
+    });
+
+    if (!result.created) {
+      return res.status(409).json({ message: result.reason, mergeRequest: result.mergeRequest });
     }
 
-    const validIds = restockItemIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
-    if (validIds.length !== restockItemIds.length) {
-      return res.status(400).json({ message: "One or more restock item ids are invalid" });
-    }
+    res.status(201).json({ message: result.reason, mergeRequest: result.mergeRequest });
+  } catch (error) {
+    console.error("Error creating supervisor merge request:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
 
-    const items = await RestockItem.find({ _id: { $in: validIds } });
+/**
+ * @desc    The merges a supervisor has raised, newest first, so they can see
+ *          where each one stands
+ * @route   GET /api/merge-requests/mine
+ * @access  Private (Supervisor)
+ */
+export const getMyMergeRequests = async (req, res) => {
+  try {
+    const requests = await MergeRequest.find({
+      createdVia: "Supervisor",
+      requestedBy: req.user._id,
+    })
+      .populate("reviewedBy", "name email")
+      .populate("items.product", "name code unit image")
+      .sort({ createdAt: -1 })
+      .limit(25);
 
-    if (items.length !== validIds.length) {
-      return res.status(404).json({ message: "One or more restock items no longer exist" });
-    }
+    res.json(requests);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
-    // An item already sitting in an open request must not be double-counted.
-    const unavailable = items.filter(
-      (item) => !RestockItem.MERGEABLE_STATUSES.includes(item.status)
-    );
-    if (unavailable.length > 0) {
-      return res.status(400).json({
-        message: `These items are not available to merge: ${unavailable
-          .map((item) => `${item.restockNumber} (${item.status})`)
-          .join(", ")}`,
-      });
-    }
+/**
+ * @desc    Where this week stands: what is in Red Stock, whether the merge has
+ *          been raised, and when the next one is due
+ * @route   GET /api/merge-requests/weekly/status
+ * @access  Private (Admin)
+ */
+export const getWeeklyMergeStatus = async (req, res) => {
+  try {
+    const window = weekWindowFor();
+    const [thisWeek, open, eligible] = await Promise.all([
+      mergeForWeek(window.weekKey),
+      openMergeRequest(),
+      eligibleRedStock(),
+    ]);
 
-    const requestId = await generateRequestId();
-
-    const mergeRequest = await MergeRequest.create({
-      requestId,
-      items: items.map((item) => ({
-        restockItem: item._id,
-        product: item.product,
+    // Grouped the way the merge request itself reads: one line per product.
+    const byProduct = new Map();
+    for (const item of eligible) {
+      const key = String(item.product?._id || item.product);
+      const row = byProduct.get(key) || {
+        productId: key,
         productName: item.productName,
         unit: item.unit,
-        quantity: item.quantity,
-      })),
-      itemCount: items.length,
-      totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
-      requestedBy: req.user._id,
-      requestedAt: new Date(),
-      comment: (comment || "").trim(),
-    });
+        quantity: 0,
+        returns: 0,
+      };
+      row.quantity += item.quantity;
+      row.returns += 1;
+      byProduct.set(key, row);
+    }
 
-    // Lock the items to this request. No stock moves yet.
-    await RestockItem.updateMany(
-      { _id: { $in: items.map((item) => item._id) } },
-      { status: "Merge Requested", mergeRequest: mergeRequest._id, rejectionReason: "" }
-    );
-
-    await Notification.create({
-      message: `Merge request ${requestId} raised by ${req.user.name}: ${mergeRequest.totalQuantity} pcs across ${mergeRequest.itemCount} item(s), pending approval`,
-      type: "MERGE_REQUESTED",
-    });
-
-    const populated = await MergeRequest.findById(mergeRequest._id)
-      .populate("requestedBy", "name email")
-      .populate("items.product", "name code unit storeRoom image");
-
-    res.status(201).json({
-      message: `Merge request ${requestId} created and is pending approval`,
-      mergeRequest: populated,
+    res.json({
+      ...window,
+      nextMergeRunAt: nextMergeRunAt(),
+      alreadyMerged: Boolean(thisWeek),
+      thisWeekRequest: thisWeek
+        ? {
+            _id: thisWeek._id,
+            requestId: thisWeek.requestId,
+            status: thisWeek.status,
+            totalQuantity: thisWeek.totalQuantity,
+            itemCount: thisWeek.itemCount,
+          }
+        : null,
+      openRequestId: open?.requestId || null,
+      eligibleItems: eligible.length,
+      eligibleQuantity: eligible.reduce((sum, item) => sum + item.quantity, 0),
+      eligibleByProduct: [...byProduct.values()].sort((a, b) =>
+        a.productName.localeCompare(b.productName)
+      ),
     });
   } catch (error) {
-    console.error("Error creating merge request:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -109,10 +163,9 @@ export const createMergeRequest = async (req, res) => {
 export const getMergeRequests = async (req, res) => {
   try {
     const query = {};
-    const { status } = req.query;
-    if (status && status !== "All") {
-      query.status = status;
-    }
+    const { status, weekKey } = req.query;
+    if (status && status !== "All") query.status = status;
+    if (weekKey) query.weekKey = weekKey;
 
     const requests = await MergeRequest.find(query)
       .populate("requestedBy", "name email")
@@ -127,7 +180,8 @@ export const getMergeRequests = async (req, res) => {
 };
 
 /**
- * @desc    One merge request with its restock items resolved
+ * @desc    One merge request with everything the approval decision needs:
+ *          Red Stock held, current store room balances, and return history
  * @route   GET /api/merge-requests/:id
  * @access  Private (Admin)
  */
@@ -143,21 +197,79 @@ export const getMergeRequestById = async (req, res) => {
       return res.status(404).json({ message: "Merge request not found" });
     }
 
-    res.json(request);
+    const rooms = await StockRoom.find({ isActive: true }).sort({ name: 1 });
+
+    const lines = await Promise.all(
+      request.items.map(async (line) => {
+        const productId = line.product?._id || line.product;
+
+        const [redStock, breakdown, history] = await Promise.all([
+          // Everything this product still holds in Red Stock, including the
+          // quantity on this request.
+          RestockItem.aggregate([
+            {
+              $match: {
+                product: productId,
+                status: { $in: ["In Red Stock", "Weekly Merge Pending"] },
+              },
+            },
+            { $group: { _id: null, total: { $sum: "$quantity" } } },
+          ]).then((rows) => rows[0]?.total || 0),
+          roomBreakdownFor(productId),
+          RestockItem.find({ product: productId })
+            .populate("returnedBy", "name email")
+            .sort({ returnDate: -1 })
+            .limit(5),
+        ]);
+
+        return {
+          ...(line.toObject ? line.toObject() : line),
+          redStockQuantity: redStock,
+          roomQuantities: rooms.map((room) => ({
+            stockRoomId: room._id,
+            stockRoom: room.name,
+            quantity:
+              breakdown.find((entry) => String(entry.stockRoomId) === String(room._id))
+                ?.quantity || 0,
+          })),
+          returnHistory: history.map((item) => ({
+            restockNumber: item.restockNumber,
+            quantity: item.quantity,
+            condition: item.condition,
+            reason: item.reason,
+            department: item.department,
+            sourceRoom: item.sourceRoom,
+            returnDate: item.returnDate,
+            status: item.status,
+            returnedBy: item.returnedBy?.name || "Unknown",
+          })),
+        };
+      })
+    );
+
+    res.json({ ...request.toObject(), items: lines, stockRooms: rooms });
   } catch (error) {
+    console.error("Error loading merge request:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
 /**
- * @desc    Approve a merge request — the only path back into Main Stock
+ * @desc    Approve the weekly merge — the only path out of Red Stock and into
+ *          a store room. The Admin names the destination here.
  * @route   PUT /api/merge-requests/:id/approve
  * @access  Private (Admin)
  */
 export const approveMergeRequest = async (req, res) => {
-  const { comment } = req.body;
+  const { comment, destinationRoom, lineDestinations } = req.body;
 
   try {
+    if (!destinationRoom) {
+      return res.status(400).json({
+        message: "Choose a destination store room for the approved quantity",
+      });
+    }
+
     const request = await MergeRequest.findById(req.params.id);
     if (!request) {
       return res.status(404).json({ message: "Merge request not found" });
@@ -168,13 +280,19 @@ export const approveMergeRequest = async (req, res) => {
       });
     }
 
+    const defaultRoom = await resolveRoom(destinationRoom);
+    if (!defaultRoom) {
+      return res.status(404).json({ message: "Destination store room not found" });
+    }
+
     const merged = [];
 
     for (const line of request.items) {
+      // A line is only ever credited once, however often approval is retried.
+      if (line.moved) continue;
+
       const restockItem = await RestockItem.findById(line.restockItem);
-      // Skip anything that vanished or was already merged rather than
-      // double-counting it into Main Stock.
-      if (!restockItem || restockItem.status === "Merged") continue;
+      if (!restockItem || restockItem.status !== "Weekly Merge Pending") continue;
 
       const product = await Product.findById(line.product);
       if (!product) {
@@ -182,13 +300,24 @@ export const approveMergeRequest = async (req, res) => {
         continue;
       }
 
-      product.quantity += line.quantity;
-      await product.save();
+      // Per-line overrides let a merge split across both store rooms; without
+      // one the whole merge lands in the room chosen for the request.
+      const override = lineDestinations?.[String(line.restockItem)];
+      const room = override ? (await resolveRoom(override)) || defaultRoom : defaultRoom;
 
-      restockItem.status = "Merged";
+      const { roomQuantity } = await creditRoom({
+        product,
+        room,
+        quantity: line.quantity,
+      });
+
+      restockItem.status = "Moved to Stock Room";
+      restockItem.destinationRoom = room.name;
       restockItem.mergedAt = new Date();
-      restockItem.rejectionReason = "";
       await restockItem.save();
+
+      line.destinationRoom = room.name;
+      line.moved = true;
 
       await recordMovement({
         product,
@@ -197,39 +326,44 @@ export const approveMergeRequest = async (req, res) => {
         quantity: line.quantity,
         reference: request.requestId,
         performedBy: req.user._id,
-        note: `Merged from restock ${restockItem.restockNumber}`,
+        note: `Weekly merge of ${restockItem.restockNumber} from Red Stock into ${room.name}`,
+        fromRoom: "Red Stock Room",
+        toRoom: room.name,
       });
 
       merged.push({
         restockNumber: restockItem.restockNumber,
         productName: product.name,
         quantity: line.quantity,
+        destinationRoom: room.name,
+        roomQuantity,
         newBalance: product.quantity,
         returnedBy: restockItem.returnedBy,
       });
     }
 
-    request.status = "Merged Successfully";
+    request.status = "Approved";
+    request.destinationRoom = defaultRoom.name;
     request.reviewedBy = req.user._id;
     request.reviewedAt = new Date();
     request.rejectionReason = "";
     if (comment && comment.trim()) request.comment = comment.trim();
     await request.save();
 
-    // Tell each supervisor whose returns made it back into Main Stock.
+    // Tell each supervisor whose returns reached a store room.
     const supervisorIds = [...new Set(merged.map((entry) => String(entry.returnedBy)))];
     await Promise.all(
       supervisorIds.map((supervisorId) =>
         Notification.create({
           user: supervisorId,
-          message: `Your returned stock has been merged into Main Stock (${request.requestId})`,
+          message: `Your returned stock has moved from Red Stock into ${defaultRoom.name} (${request.requestId})`,
           type: "MERGE_APPROVED",
         })
       )
     );
 
     await Notification.create({
-      message: `Merge ${request.requestId} approved by ${req.user.name}: ${request.totalQuantity} pcs moved into Main Stock`,
+      message: `Weekly merge ${request.requestId} approved by ${req.user.name}: ${request.totalQuantity} pcs moved into ${defaultRoom.name}`,
       type: "MERGE_APPROVED",
     });
 
@@ -239,7 +373,7 @@ export const approveMergeRequest = async (req, res) => {
       .populate("items.product", "name code unit storeRoom image");
 
     res.json({
-      message: `Merge ${request.requestId} completed. ${merged.length} item(s) moved into Main Stock.`,
+      message: `Merge ${request.requestId} approved. ${merged.length} item(s) moved out of Red Stock.`,
       mergeRequest: populated,
       merged,
     });
@@ -250,7 +384,8 @@ export const approveMergeRequest = async (req, res) => {
 };
 
 /**
- * @desc    Reject a merge request — stock stays in Restock
+ * @desc    Reject the weekly merge — nothing moves and the stock stays in Red
+ *          Stock, ready for next week
  * @route   PUT /api/merge-requests/:id/reject
  * @access  Private (Admin)
  */
@@ -274,33 +409,43 @@ export const rejectMergeRequest = async (req, res) => {
 
     const reason = rejectionReason.trim();
 
-    // The stock never left Restock, so rejection only relabels it. Items go
-    // back to being selectable for a later merge.
+    // The stock never left Red Stock, so rejection only releases the claim on
+    // it. The rejection is recorded on each item so its history survives.
+    const releasedItems = await RestockItem.find({
+      mergeRequest: request._id,
+      status: "Weekly Merge Pending",
+    });
+
     await RestockItem.updateMany(
-      { mergeRequest: request._id, status: "Merge Requested" },
-      { status: "Merge Rejected", rejectionReason: reason }
+      { mergeRequest: request._id, status: "Weekly Merge Pending" },
+      {
+        status: "In Red Stock",
+        mergeRequest: null,
+        lastRejection: { reason, requestId: request.requestId, at: new Date() },
+      }
     );
 
-    request.status = "Merge Rejected";
+    request.status = "Rejected";
     request.reviewedBy = req.user._id;
     request.reviewedAt = new Date();
     request.rejectionReason = reason;
     await request.save();
 
-    const restockItems = await RestockItem.find({ mergeRequest: request._id });
-    const supervisorIds = [...new Set(restockItems.map((item) => String(item.returnedBy)))];
+    const supervisorIds = [
+      ...new Set(releasedItems.map((item) => String(item.returnedBy))),
+    ];
     await Promise.all(
       supervisorIds.map((supervisorId) =>
         Notification.create({
           user: supervisorId,
-          message: `Merge ${request.requestId} was rejected — your returned stock stays in Restock. Reason: ${reason}`,
+          message: `Merge ${request.requestId} was rejected — your returned stock stays in Red Stock for the next weekly merge. Reason: ${reason}`,
           type: "MERGE_REJECTED",
         })
       )
     );
 
     await Notification.create({
-      message: `Merge ${request.requestId} rejected by ${req.user.name}. Reason: ${reason}`,
+      message: `Weekly merge ${request.requestId} rejected by ${req.user.name}. Stock remains in Red Stock. Reason: ${reason}`,
       type: "MERGE_REJECTED",
     });
 
@@ -310,7 +455,7 @@ export const rejectMergeRequest = async (req, res) => {
       .populate("items.product", "name code unit storeRoom image");
 
     res.json({
-      message: `Merge ${request.requestId} rejected. Stock remains in Restock.`,
+      message: `Merge ${request.requestId} rejected. ${releasedItems.length} item(s) stay in Red Stock.`,
       mergeRequest: populated,
     });
   } catch (error) {
@@ -318,3 +463,7 @@ export const rejectMergeRequest = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+// Kept so any client still posting to the old collection endpoint lands on the
+// weekly merge rather than opening a second, parallel merge.
+export const createMergeRequest = createWeeklyMergeRequest;

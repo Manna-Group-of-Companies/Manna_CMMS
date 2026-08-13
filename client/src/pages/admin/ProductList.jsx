@@ -1,31 +1,20 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
+import ProductFormModal from "./ProductFormModal";
 import {
   Search,
-  Filter,
   Plus,
   Edit,
-  ArrowUpRight,
-  ArrowDownRight,
-  RotateCcw,
+  Trash2,
   Eye,
   X,
   Boxes,
   Loader2,
   AlertCircle,
   HelpCircle,
-  Send,
 } from "lucide-react";
-
-// Pre-defined sample images for easy product creation
-const SAMPLE_IMAGES = [
-  { name: "Default Box", url: "" },
-  { name: "Mouse/Keyboard", url: "https://images.unsplash.com/photo-1615663245857-ac93bb7c39e7?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3" },
-  { name: "Monitor/Screen", url: "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3" },
-  { name: "Office Chair", url: "https://images.unsplash.com/photo-1505797149-43b0069ec26b?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3" },
-  { name: "Laptop/Computer", url: "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3" },
-];
 
 const ProductList = () => {
   const { showToast } = useNotifications();
@@ -42,10 +31,28 @@ const ProductList = () => {
   // Modals Toggles
   const [activeModal, setActiveModal] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
-  const fetchProducts = async () => {
+  const handleDelete = async () => {
     try {
-      setLoading(true);
+      setDeleting(true);
+      const { data } = await API.delete(`/products/${selectedProduct._id}`);
+      showToast(data.message || "Product deleted", "success");
+      setActiveModal(null);
+      setSelectedProduct(null);
+      fetchProducts();
+    } catch (error) {
+      console.error("Error deleting product:", error);
+      showToast(error.response?.data?.message || "Failed to delete product", "error");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  /** [silent] is used by the background poll: no spinner, no error toast. */
+  const fetchProducts = async ({ silent = false } = {}) => {
+    try {
+      if (!silent) setLoading(true);
       const params = {};
       if (searchTerm) params.search = searchTerm;
       if (selectedCategory) params.category = selectedCategory;
@@ -56,9 +63,9 @@ const ProductList = () => {
       setProducts(data);
     } catch (error) {
       console.error("Error loading products:", error);
-      showToast("Could not load product list", "error");
+      if (!silent) showToast("Could not load product list", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -75,6 +82,10 @@ const ProductList = () => {
     fetchProducts();
     fetchCategories();
   }, [searchTerm, selectedCategory, selectedStoreRoom, stockStatus]);
+
+  // Supervisors issue stock and raise requests that change these quantities.
+  // Paused while a modal is open so an edit form cannot be reset mid-typing.
+  useAutoRefresh(() => fetchProducts({ silent: true }), { enabled: !activeModal });
 
 
 
@@ -120,8 +131,8 @@ const ProductList = () => {
               className="px-3 py-2 text-xs rounded-xl bg-white border border-slate-200 text-slate-700 focus:outline-none focus:border-brand-500"
             >
               <option value="">All Rooms</option>
-              <option value="Store Room 1">Store Room 1</option>
-              <option value="Store Room 2">Store Room 2</option>
+              <option value="Engineer Room">Engineer Room</option>
+              <option value="Consumables Room">Consumables Room</option>
             </select>
 
             {/* Stock Level Select */}
@@ -137,8 +148,16 @@ const ProductList = () => {
           </div>
         </div>
 
-        {/* Submit Request Button */}
-
+        <button
+          onClick={() => {
+            setSelectedProduct(null);
+            setActiveModal("form");
+          }}
+          className="w-full md:w-auto px-4 py-2.5 text-xs font-bold rounded-xl bg-brand-600 hover:bg-brand-500 text-white cursor-pointer shadow active:scale-98 transition-all flex items-center justify-center gap-2"
+        >
+          <Plus className="h-4 w-4" />
+          Add Product
+        </button>
       </div>
 
       {/* Catalog Grid / Table */}
@@ -231,6 +250,28 @@ const ProductList = () => {
                           >
                             <Eye className="h-4 w-4" />
                           </button>
+                          {/* Edit */}
+                          <button
+                            onClick={() => {
+                              setSelectedProduct(product);
+                              setActiveModal("form");
+                            }}
+                            className="p-1.5 hover:bg-slate-100 rounded-lg text-brand-700 transition-all cursor-pointer"
+                            title="Edit Product"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                          {/* Delete */}
+                          <button
+                            onClick={() => {
+                              setSelectedProduct(product);
+                              setActiveModal("delete");
+                            }}
+                            className="p-1.5 hover:bg-rose-50 rounded-lg text-rose-600 transition-all cursor-pointer"
+                            title="Delete Product"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -249,6 +290,58 @@ const ProductList = () => {
       {/* Modal Backdrop */}
       {activeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+
+          {/* 0. Modal: CREATE / EDIT PRODUCT */}
+          {activeModal === "form" && (
+            <ProductFormModal
+              product={selectedProduct}
+              onClose={() => setActiveModal(null)}
+              onSaved={fetchProducts}
+            />
+          )}
+
+          {/* 0b. Modal: DELETE CONFIRMATION */}
+          {activeModal === "delete" && selectedProduct && (
+            <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 overflow-hidden shadow-2xl animate-fade-in text-left">
+              <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                <h3 className="font-bold text-lg text-slate-900">Delete Product</h3>
+                <button
+                  onClick={() => setActiveModal(null)}
+                  className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 cursor-pointer transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-slate-700">
+                  Delete <strong>{selectedProduct.name}</strong> ({selectedProduct.code})?
+                </p>
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-500/20 text-[11px] text-rose-900 leading-relaxed">
+                  This removes the product and its {selectedProduct.quantity} {selectedProduct.unit}{" "}
+                  from every stock room, and it disappears from the Supervisor catalog. Issue
+                  history and past requests are kept for the record. This cannot be undone.
+                </div>
+
+                <div className="pt-4 border-t border-slate-200 flex justify-end gap-3">
+                  <button
+                    onClick={() => setActiveModal(null)}
+                    className="px-4 py-2 text-xs font-semibold rounded-xl bg-white border border-slate-200 text-slate-600 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="px-4 py-2 text-xs font-semibold rounded-xl bg-rose-600 hover:bg-rose-500 text-white disabled:opacity-50 cursor-pointer active:scale-98 transition-all flex items-center gap-2"
+                  >
+                    {deleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Delete Permanently
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 1. Modal: PRODUCT DETAILS */}
           {activeModal === "details" && selectedProduct && (

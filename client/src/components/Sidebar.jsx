@@ -9,6 +9,9 @@ import {
   User,
   ShieldCheck,
   Send,
+  PackageOpen,
+  Warehouse,
+  ClipboardCheck,
 } from "lucide-react";
 
 const Sidebar = () => {
@@ -42,6 +45,11 @@ const Sidebar = () => {
       path: "/admin/issues",
       icon: Send,
     },
+    {
+      name: "Branch Requests",
+      path: "/admin/branch-requests",
+      icon: ClipboardCheck,
+    },
   ];
 
   const supervisorLinks = [
@@ -65,9 +73,37 @@ const Sidebar = () => {
       path: "/supervisor/issues",
       icon: Send,
     },
+    {
+      name: "My Returns",
+      path: "/supervisor/returns",
+      icon: PackageOpen,
+    },
+    {
+      name: "Branch Approvals",
+      path: "/supervisor/branch-approvals",
+      icon: ClipboardCheck,
+    },
   ];
 
-  const links = user?.role === "Admin" ? adminLinks : supervisorLinks;
+  // A branch sees its own room's stock, and the requests it has raised on it.
+  const branchLinks = [
+    {
+      name: user?.stockRoom?.name ? `${user.stockRoom.name} Stock` : "Room Stock",
+      path: "/branch/stock",
+      icon: Warehouse,
+    },
+    {
+      name: "My Requests",
+      path: "/branch/requests",
+      icon: ClipboardList,
+    },
+  ];
+
+  const linksByRole = {
+    Admin: adminLinks,
+    Branch: branchLinks,
+  };
+  const links = linksByRole[user?.role] || supervisorLinks;
 
   return (
     <aside className="w-64 min-h-screen flex flex-col bg-navy-900 text-slate-300">
@@ -89,6 +125,8 @@ const Sidebar = () => {
         <div className="bg-brand-600/20 h-10 w-10 rounded-full flex items-center justify-center border border-brand-500/30">
           {user?.role === "Admin" ? (
             <ShieldCheck className="h-5 w-5 text-brand-400" />
+          ) : user?.role === "Branch" ? (
+            <Warehouse className="h-5 w-5 text-brand-400" />
           ) : (
             <User className="h-5 w-5 text-brand-400" />
           )}

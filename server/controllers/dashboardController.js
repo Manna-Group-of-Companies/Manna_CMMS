@@ -6,9 +6,32 @@ import StockReturnRequest from "../models/StockReturnRequest.js";
 import IssueHistory from "../models/IssueHistory.js";
 import RestockItem from "../models/RestockItem.js";
 import MergeRequest from "../models/MergeRequest.js";
+import StockRoom from "../models/StockRoom.js";
+import StockRoomInventory from "../models/StockRoomInventory.js";
+import BranchRequest from "../models/BranchRequest.js";
 
-/** Items sitting in Restock that an Admin could still pull into a merge. */
-const awaitingMergeFilter = { status: { $in: ["Restock Pending", "Merge Rejected"] } };
+/** Red Stock the next weekly merge would pick up. */
+const awaitingMergeFilter = { status: { $in: RestockItem.MERGEABLE_STATUSES } };
+
+/**
+ * Where the branch request queue stands, by stage. Both approvers get the same
+ * numbers so each can see what the other is holding.
+ */
+const branchRequestCounts = async (filter = {}) => {
+  const [pendingAdmin, pendingSupervisor, approved, rejected] = await Promise.all([
+    BranchRequest.countDocuments({ ...filter, status: BranchRequest.PENDING_ADMIN }),
+    BranchRequest.countDocuments({ ...filter, status: BranchRequest.PENDING_SUPERVISOR }),
+    BranchRequest.countDocuments({ ...filter, status: "Approved" }),
+    BranchRequest.countDocuments({ ...filter, status: "Rejected" }),
+  ]);
+
+  return {
+    branchPendingAdmin: pendingAdmin,
+    branchPendingSupervisor: pendingSupervisor,
+    branchApproved: approved,
+    branchRejected: rejected,
+  };
+};
 
 // @desc    Get dashboard metrics for Admin
 // @route   GET /api/dashboard/admin
@@ -117,7 +140,7 @@ export const getAdminDashboard = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(10);
 
-    // 7. Restock section and weekly merge queue
+    // 7. Red Stock Room and weekly merge queue
     const [restockPendingCount, restockPendingQuantity, mergePendingCount, recentRestockItems] =
       await Promise.all([
         RestockItem.countDocuments(awaitingMergeFilter),
@@ -132,6 +155,9 @@ export const getAdminDashboard = async (req, res) => {
           .limit(10),
       ]);
 
+    // The branch queue, so the Admin sees stage-one work from the dashboard.
+    const branchCounts = await branchRequestCounts();
+
     res.json({
       totalProducts,
       pendingRequests,
@@ -139,6 +165,7 @@ export const getAdminDashboard = async (req, res) => {
       rejectedRequests,
       lowStockProductsCount,
       lowStockProducts,
+      ...branchCounts,
       todayRequestsCount: todayRequestsList.length,
       todayRequests: todayRequestsList,
       issuedTodayCount,
@@ -147,6 +174,66 @@ export const getAdminDashboard = async (req, res) => {
       restockPendingQuantity,
       mergePendingCount,
       recentRestockItems,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Stock held in the branch's own room — the only thing a Branch
+//          account can read. No requests, no other room, no catalog.
+// @route   GET /api/dashboard/branch
+// @access  Private (Branch only)
+export const getBranchDashboard = async (req, res) => {
+  try {
+    // The room comes off the account, never off the query string, so a Branch
+    // user cannot ask for a room that is not theirs.
+    const room = await StockRoom.findById(req.user.stockRoom);
+    if (!room) {
+      return res.status(404).json({
+        message: "No stock room is assigned to this branch account",
+      });
+    }
+
+    const rows = await StockRoomInventory.find({ stockRoom: room._id })
+      .populate("product", "name code unit image category minStock maxStock")
+      .sort({ quantity: -1 });
+
+    // A row whose product was deleted has nothing left to show.
+    const items = rows
+      .filter((row) => row.product)
+      .map((row) => ({
+        _id: row._id,
+        productId: row.product._id,
+        name: row.product.name,
+        code: row.product.code,
+        category: row.product.category,
+        unit: row.product.unit,
+        image: row.product.image,
+        minStock: row.product.minStock ?? 0,
+        maxStock: row.product.maxStock ?? 0,
+        quantity: row.quantity,
+        isOutOfStock: row.quantity === 0,
+        isLowStock: row.quantity > 0 && row.quantity <= (row.product.minStock ?? 0),
+        updatedAt: row.updatedAt,
+      }));
+
+    // This branch's own request queue, by stage.
+    const branchCounts = await branchRequestCounts({ branch: req.user._id });
+
+    res.json({
+      room: {
+        _id: room._id,
+        name: room.name,
+        description: room.description,
+      },
+      ...branchCounts,
+      itemCount: items.length,
+      totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
+      lowStockCount: items.filter((item) => item.isLowStock).length,
+      outOfStockCount: items.filter((item) => item.isOutOfStock).length,
+      categoryCount: new Set(items.map((item) => item.category).filter(Boolean)).size,
+      items,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -169,6 +256,12 @@ export const getSupervisorDashboard = async (req, res) => {
     const lowStockProductsCount = await Product.countDocuments({
       $expr: { $lte: ["$quantity", "$minStock"] },
     });
+
+    // 2b. Total pieces on hand across every product and room
+    const [stockTotals] = await Product.aggregate([
+      { $group: { _id: null, total: { $sum: "$quantity" } } },
+    ]);
+    const totalStockQuantity = stockTotals?.total ?? 0;
 
     // 3. Request status counts specific to this supervisor
     const [
@@ -243,11 +336,14 @@ export const getSupervisorDashboard = async (req, res) => {
 
     todayActivity.sort((a, b) => new Date(b.time) - new Date(a.time));
 
-    // 5. This supervisor's own returns still parked in Restock
+    // 5. This supervisor's own returns still sitting in Red Stock
     const [restockPendingCount, mergedReturnsCount] = await Promise.all([
       RestockItem.countDocuments({ returnedBy: supervisorId, ...awaitingMergeFilter }),
-      RestockItem.countDocuments({ returnedBy: supervisorId, status: "Merged" }),
+      RestockItem.countDocuments({ returnedBy: supervisorId, status: "Moved to Stock Room" }),
     ]);
+
+    // Stage-two work waiting on this portal.
+    const branchCounts = await branchRequestCounts();
 
     res.json({
       totalProducts,
@@ -255,6 +351,8 @@ export const getSupervisorDashboard = async (req, res) => {
       approvedRequests,
       rejectedRequests,
       lowStockProductsCount,
+      totalStockQuantity,
+      ...branchCounts,
       todayActivity,
       restockPendingCount,
       mergedReturnsCount,

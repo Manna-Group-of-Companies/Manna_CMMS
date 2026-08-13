@@ -7,6 +7,8 @@ import {
   getMyRequests,
   getAllRequests,
   processRequest,
+  updateOwnRequest,
+  cancelOwnRequest,
 } from "../controllers/requestController.js";
 import { protect, authorizeRoles } from "../middleware/auth.js";
 
@@ -18,6 +20,11 @@ router.post("/stockin", protect, authorizeRoles("Supervisor"), createStockInRequ
 router.post("/stockout", protect, authorizeRoles("Supervisor"), createStockOutRequest);
 router.post("/stockreturn", protect, authorizeRoles("Supervisor"), createStockReturnRequest);
 router.get("/myrequests", protect, authorizeRoles("Supervisor"), getMyRequests);
+
+// Supervisors may change their own requests while they are still Pending.
+// Ownership is enforced in the controller, not just by role.
+router.put("/:type/:id", protect, authorizeRoles("Supervisor"), updateOwnRequest);
+router.delete("/:type/:id", protect, authorizeRoles("Supervisor"), cancelOwnRequest);
 
 // Admin endpoints
 router.get("/all", protect, authorizeRoles("Admin"), getAllRequests);

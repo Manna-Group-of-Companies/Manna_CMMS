@@ -3,14 +3,16 @@ import Product from "../models/Product.js";
 import RestockItem from "../models/RestockItem.js";
 import Notification from "../models/Notification.js";
 import { recordMovement } from "../utils/stockLedger.js";
+import { weekWindowFor, nextMergeRunAt } from "../utils/weeklyMerge.js";
 
 const generateRestockNumber = () => `RT-${Math.floor(100000 + Math.random() * 900000)}`;
 
 const RETURN_CONDITIONS = ["Good", "Damaged", "Repairable", "Expired"];
 
 /**
- * @desc    Return issued stock into the Restock section (never into Main Stock)
- * @route   POST /api/restock/returns
+ * @desc    Return issued stock into the Red Stock Room. No Admin approval —
+ *          the stock is in Red Stock the moment this succeeds.
+ * @route   POST /api/red-stock/returns
  * @access  Private (Supervisor)
  */
 export const returnIssuedStock = async (req, res) => {
@@ -73,6 +75,8 @@ export const returnIssuedStock = async (req, res) => {
       department: (department && department.trim()) || issue.recipient,
       returnDate: new Date(),
       sourceIssue: issue._id,
+      sourceRoom: issue.sourceRoom || product.storeRoom || "",
+      status: "In Red Stock",
     });
 
     issue.returnedQuantity = (issue.returnedQuantity || 0) + returnQty;
@@ -80,41 +84,45 @@ export const returnIssuedStock = async (req, res) => {
       issue.returnedQuantity >= issue.quantity ? "Returned" : "Partially Returned";
     await issue.save();
 
-    // Main Stock is deliberately untouched — the stock is parked in Restock.
+    // The store rooms are deliberately untouched — the stock sits
+    // in Red Stock until an approved weekly merge moves it.
     await recordMovement({
       product,
-      type: "RETURN_TO_RESTOCK",
+      type: "RETURN_TO_RED_STOCK",
       direction: "NONE",
       quantity: returnQty,
       reference: restockItem.restockNumber,
       performedBy: req.user._id,
-      note: `Returned from ${issue.issueNumber}; awaiting merge approval`,
+      note: `Returned from ${issue.issueNumber} into Red Stock; awaiting the weekly merge`,
+      fromRoom: restockItem.sourceRoom,
+      toRoom: "Red Stock Room",
     });
 
-    // Admin-facing: something new is waiting in Restock.
+    // Admin-facing: visibility only, there is nothing for them to approve yet.
     await Notification.create({
-      message: `Restock pending: ${returnQty} × "${product.name}" returned by ${req.user.name} (${restockItem.restockNumber})`,
+      message: `Red Stock: ${returnQty} × "${product.name}" returned by ${req.user.name} (${restockItem.restockNumber})`,
       type: "STOCK_RETURNED",
     });
 
     const populated = await RestockItem.findById(restockItem._id)
       .populate("product", "name code unit storeRoom image")
-      .populate("returnedBy", "name email");
+      .populate("returnedBy", "name email")
+      .populate("sourceIssue", "issueNumber recipient sourceRoom");
 
     res.status(201).json({
-      message: `Returned ${returnQty} ${product.unit} of "${product.name}" to Restock. Awaiting weekly merge approval.`,
+      message: `Returned ${returnQty} ${product.unit} of "${product.name}" to the Red Stock Room.`,
       restockItem: populated,
       outstanding: issue.quantity - issue.returnedQuantity,
     });
   } catch (error) {
-    console.error("Error returning stock to restock:", error);
+    console.error("Error returning stock to Red Stock:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
 /**
- * @desc    List restock items. Admins see everything; supervisors see their own.
- * @route   GET /api/restock?status=Restock%20Pending
+ * @desc    The Red Stock Room. Admins see everything; supervisors see their own.
+ * @route   GET /api/red-stock?status=In%20Red%20Stock
  * @access  Private
  */
 export const getRestockItems = async (req, res) => {
@@ -133,19 +141,26 @@ export const getRestockItems = async (req, res) => {
     const items = await RestockItem.find(query)
       .populate("product", "name code unit storeRoom image")
       .populate("returnedBy", "name email")
-      .populate("sourceIssue", "issueNumber recipient")
-      .populate("mergeRequest", "requestId status")
+      .populate("sourceIssue", "issueNumber recipient sourceRoom")
+      .populate("mergeRequest", "requestId status weekKey destinationRoom")
       .sort({ createdAt: -1 });
 
-    res.json(items);
+    // Weekly merge eligibility is a property of the status, so it is derived
+    // here rather than stored and kept in sync.
+    res.json(
+      items.map((item) => ({
+        ...item.toObject(),
+        eligibleForWeeklyMerge: RestockItem.MERGEABLE_STATUSES.includes(item.status),
+      }))
+    );
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
 /**
- * @desc    Restock totals for the Admin's weekly review header
- * @route   GET /api/restock/summary
+ * @desc    Red Stock totals for the Admin's weekly review header
+ * @route   GET /api/red-stock/summary
  * @access  Private (Admin)
  */
 export const getRestockSummary = async (req, res) => {
@@ -155,10 +170,9 @@ export const getRestockSummary = async (req, res) => {
     ]);
 
     const summary = {
-      "Restock Pending": { items: 0, quantity: 0 },
-      "Merge Requested": { items: 0, quantity: 0 },
-      Merged: { items: 0, quantity: 0 },
-      "Merge Rejected": { items: 0, quantity: 0 },
+      "In Red Stock": { items: 0, quantity: 0 },
+      "Weekly Merge Pending": { items: 0, quantity: 0 },
+      "Moved to Stock Room": { items: 0, quantity: 0 },
     };
 
     for (const row of grouped) {
@@ -167,13 +181,60 @@ export const getRestockSummary = async (req, res) => {
       }
     }
 
-    // Everything an Admin could still pull into a merge request this week.
-    summary.awaitingMerge = {
-      items: summary["Restock Pending"].items + summary["Merge Rejected"].items,
-      quantity: summary["Restock Pending"].quantity + summary["Merge Rejected"].quantity,
-    };
+    // What the next weekly merge would pick up.
+    summary.awaitingMerge = summary["In Red Stock"];
+    summary.week = weekWindowFor();
+    summary.nextMergeRunAt = nextMergeRunAt();
 
     res.json(summary);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/**
+ * @desc    The Red Stock Room as a room: contents rolled up per product, the
+ *          same shape the store rooms are read in
+ * @route   GET /api/red-stock/room
+ * @access  Private
+ */
+export const getRedStockRoom = async (req, res) => {
+  try {
+    const items = await RestockItem.find({
+      status: { $in: ["In Red Stock", "Weekly Merge Pending"] },
+    })
+      .populate("product", "name code unit image")
+      .sort({ returnDate: -1 });
+
+    const byProduct = new Map();
+    for (const item of items) {
+      const key = String(item.product?._id || item.product);
+      const row = byProduct.get(key) || {
+        productId: key,
+        name: item.productName,
+        code: item.productCode,
+        unit: item.unit,
+        image: item.product?.image || "",
+        quantity: 0,
+        awaitingMerge: 0,
+        inOpenMerge: 0,
+      };
+      row.quantity += item.quantity;
+      if (item.status === "In Red Stock") row.awaitingMerge += item.quantity;
+      else row.inOpenMerge += item.quantity;
+      byProduct.set(key, row);
+    }
+
+    const rows = [...byProduct.values()].sort((a, b) => b.quantity - a.quantity);
+
+    res.json({
+      name: "Red Stock Room",
+      itemCount: rows.length,
+      totalQuantity: rows.reduce((sum, row) => sum + row.quantity, 0),
+      items: rows,
+      week: weekWindowFor(),
+      nextMergeRunAt: nextMergeRunAt(),
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

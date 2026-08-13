@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 import { Loader2, ClipboardList, Eye, Calendar, HelpCircle, Check, X, Clock } from "lucide-react";
 
 const MyRequests = () => {
@@ -9,22 +10,26 @@ const MyRequests = () => {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("All"); // All | Pending | Approved | Rejected
 
-  const fetchMyRequests = async () => {
+  /** [silent] is used by the background poll: no spinner, no error toast. */
+  const fetchMyRequests = async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const { data } = await API.get("/requests/myrequests");
       setRequests(data);
     } catch (error) {
       console.error("Error fetching my requests:", error);
-      showToast("Could not load request history", "error");
+      if (!silent) showToast("Could not load request history", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchMyRequests();
   }, []);
+
+  // An Admin decision lands on their console, so re-read on a timer.
+  useAutoRefresh(() => fetchMyRequests({ silent: true }));
 
   const getStatusStyle = (status) => {
     switch (status) {
