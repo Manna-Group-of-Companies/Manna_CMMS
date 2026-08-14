@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- AppColors.primary from lib/core/palette.dart, the same teal the web
+         client exposes as the brand-600 custom property. -->
+    <color name="ic_launcher_background">#0D9488</color>
+</resources>

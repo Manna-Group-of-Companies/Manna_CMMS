@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The StockMaster mark as a standalone, self-contained logo: teal tile plus
+     white glyph. Unlike ic_launcher_foreground this one draws its own
+     background, because nothing masks or backs it when it is used on the
+     launch screen. The glyph is scaled to ~62% of the tile, matching the
+     proportion of the web favicon in client/public/favicon.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#0D9488"
+        android:pathData="M24,0h60a24,24 0 0 1 24,24v60a24,24 0 0 1 -24,24h-60a24,24 0 0 1 -24,-24v-60a24,24 0 0 1 24,-24z" />
+    <group
+        android:pivotX="0"
+        android:pivotY="0"
+        android:scaleX="2.8"
+        android:scaleY="2.8"
+        android:translateX="20.4"
+        android:translateY="20.4">
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M2.97,12.92A2,2 0 0 0 2,14.63v3.24a2,2 0 0 0 0.97,1.71l3,1.8a2,2 0 0 0 2.06,0L12,19v-5.5l-5,-3z" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M7,16.5L2.26,13.65" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M7,16.5l5,-3" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M7,16.5v5.17" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M12,13.5V19l3.97,2.38a2,2 0 0 0 2.06,0l3,-1.8a2,2 0 0 0 0.97,-1.71v-3.24a2,2 0 0 0 -0.97,-1.71L17,10.5z" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M17,16.5l-5,-3" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M17,16.5l4.74,-2.85" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M17,16.5v5.17" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M7.97,4.42A2,2 0 0 0 7,6.13v4.37l5,3 5,-3V6.13a2,2 0 0 0 -0.97,-1.71l-3,-1.8a2,2 0 0 0 -2.06,0z" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M12,8L7.26,5.15" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M12,8l4.74,-2.85" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M12,13.5V8" />
+    </group>
+</vector>

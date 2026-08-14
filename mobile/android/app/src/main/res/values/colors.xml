@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- AppColors.canvas from lib/core/palette.dart. The app ships a light
+         theme only, so this is deliberately not overridden in values-night —
+         the launch screen should match the UI it hands over to, not the
+         system's dark setting. -->
+    <color name="launch_background">#F4F6F7</color>
+</resources>
