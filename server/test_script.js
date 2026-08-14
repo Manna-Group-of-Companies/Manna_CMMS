@@ -3,7 +3,12 @@ async function test() {
     const loginRes = await fetch('http://localhost:5000/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'supervisor@stock.com', password: 'Supervisor@123' })
+      // Accounts sign in with their name and 4-digit PIN. Pass the PIN an
+      // admin issued to this account: TEST_PIN=1234 node test_script.js
+      body: JSON.stringify({
+        name: process.env.TEST_NAME || 'Store Supervisor',
+        pin: process.env.TEST_PIN || '1234',
+      })
     });
     const loginData = await loginRes.json();
     const token = loginData.token;

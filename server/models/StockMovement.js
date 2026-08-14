@@ -5,7 +5,7 @@ import mongoose from "mongoose";
  * how a product got to its current quantity.
  *
  * `direction` describes the effect on **Main Stock** specifically. A return
- * into the Restock section is direction "NONE": the stock left Main Stock when
+ * into the Red Stock Room is direction "NONE": the stock left Main Stock when
  * it was issued and does not come back until a merge is approved.
  */
 const stockMovementSchema = new mongoose.Schema(
@@ -30,6 +30,11 @@ const stockMovementSchema = new mongoose.Schema(
       required: true,
       enum: [
         "ISSUE",
+        // Into the Red Stock Room. Store room balances are unchanged, so these
+        // are direction "NONE".
+        "RETURN_TO_RED_STOCK",
+        // Pre-Red-Stock name for the same movement, kept so old ledger rows
+        // still validate.
         "RETURN_TO_RESTOCK",
         "MERGE_IN",
         "STOCK_IN",
@@ -37,7 +42,21 @@ const stockMovementSchema = new mongoose.Schema(
         "STOCK_RETURN",
         "PRODUCT_CREATED",
         "PRODUCT_EDITED",
+        // Stock moved between rooms. Main Stock is unchanged, so these are
+        // always direction "NONE".
+        "TRANSFER",
       ],
+    },
+    /** Rooms involved, when the movement was room-specific. */
+    fromRoom: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    toRoom: {
+      type: String,
+      default: "",
+      trim: true,
     },
     direction: {
       type: String,

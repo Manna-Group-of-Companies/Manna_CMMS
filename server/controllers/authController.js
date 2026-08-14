@@ -1,4 +1,4 @@
-import User from "../models/User.js";
+import User, { PIN_LENGTH, isValidPin, nameMatcher } from "../models/User.js";
 import jwt from "jsonwebtoken";
 
 // Generate JWT Token
@@ -8,37 +8,66 @@ const generateToken = (id) => {
   });
 };
 
-// @desc    Register a new user
+/**
+ * The user as the client keeps it. A Branch account carries its room, because
+ * every screen it can reach is scoped to that one room.
+ *
+ * The PIN itself never leaves the server; `hasPin` says only whether an admin
+ * has issued one, which is what the user list needs to show.
+ */
+const publicUser = (user) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  hasPin: Boolean(user.pin),
+  stockRoom: user.stockRoom
+    ? { _id: user.stockRoom._id, name: user.stockRoom.name }
+    : null,
+});
+
+// @desc    Create a user
 // @route   POST /api/auth/register
-// @access  Public (or Admin only, let's make it Public for initial setup, but verify role creation)
+// @access  Admin
 export const registerUser = async (req, res) => {
-  const { name, email, password, role } = req.body;
+  const { name, pin, email, role, stockRoom } = req.body;
 
   try {
-    const userExists = await User.findOne({ email });
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ message: "Name is required" });
+    }
 
-    if (userExists) {
-      return res.status(400).json({ message: "User already exists" });
+    // The name is the login identifier, so a duplicate would make it ambiguous
+    // which account a PIN belongs to.
+    const nameTaken = await User.findOne({ name: nameMatcher(name) });
+    if (nameTaken) {
+      return res.status(400).json({ message: "That name is already taken" });
+    }
+
+    // A PIN is optional here: an account can be created now and issued its PIN
+    // later. It just cannot sign in until then.
+    if (pin && !isValidPin(pin)) {
+      return res
+        .status(400)
+        .json({ message: `The PIN must be exactly ${PIN_LENGTH} digits` });
+    }
+
+    if (role === "Branch" && !stockRoom) {
+      return res
+        .status(400)
+        .json({ message: "A Branch user must be assigned a stock room" });
     }
 
     const user = await User.create({
-      name,
-      email,
-      password,
+      name: String(name).trim(),
+      email: email || "",
+      pin: pin || null,
       role: role || "Supervisor", // Defaults to Supervisor
+      // Only a Branch account is pinned to a room.
+      stockRoom: role === "Branch" ? stockRoom : null,
     });
 
-    if (user) {
-      res.status(201).json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        token: generateToken(user._id),
-      });
-    } else {
-      res.status(400).json({ message: "Invalid user data" });
-    }
+    res.status(201).json(publicUser(await user.populate("stockRoom", "name")));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -48,21 +77,28 @@ export const registerUser = async (req, res) => {
 // @route   POST /api/auth/login
 // @access  Public
 export const loginUser = async (req, res) => {
-  const { email, password } = req.body;
+  const { name, pin } = req.body;
 
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ name: nameMatcher(name) })
+      .select("+pin")
+      .populate("stockRoom", "name");
 
-    if (user && (await user.matchPassword(password))) {
+    // Spelled out rather than folded into the generic failure: an account
+    // waiting on its PIN is an admin task, not a typo the user can fix.
+    if (user && !user.pin) {
+      return res.status(403).json({
+        message: "No PIN has been set for this account yet. Ask an admin to issue one.",
+      });
+    }
+
+    if (user && (await user.matchPin(pin))) {
       res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
+        ...publicUser(user),
         token: generateToken(user._id),
       });
     } else {
-      res.status(401).json({ message: "Invalid email or password" });
+      res.status(401).json({ message: "Invalid name or PIN" });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -74,12 +110,97 @@ export const loginUser = async (req, res) => {
 // @access  Private
 export const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password");
+    const user = await User.findById(req.user._id)
+      .select("+pin")
+      .populate("stockRoom", "name");
     if (user) {
-      res.json(user);
+      res.json(publicUser(user));
     } else {
       res.status(404).json({ message: "User not found" });
     }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Every account, so an admin can see who still needs a PIN
+// @route   GET /api/auth/users
+// @access  Admin
+export const listUsers = async (req, res) => {
+  try {
+    const users = await User.find()
+      .select("+pin")
+      .populate("stockRoom", "name")
+      .sort({ role: 1, name: 1 });
+    res.json(users.map(publicUser));
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Remove an account
+// @route   DELETE /api/auth/users/:id
+// @access  Admin
+export const deleteUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Deleting the account you are signed in as would end the session mid-way
+    // through the work, and there is no way to undo it afterwards.
+    if (String(user._id) === String(req.user._id)) {
+      return res
+        .status(400)
+        .json({ message: "You cannot delete the account you are signed in as" });
+    }
+
+    // The last Admin holds the only key to the console: without one, nobody can
+    // issue a PIN or add a user ever again.
+    if (user.role === "Admin") {
+      const admins = await User.countDocuments({ role: "Admin" });
+      if (admins <= 1) {
+        return res
+          .status(400)
+          .json({ message: "The last Admin account cannot be deleted" });
+      }
+    }
+
+    await user.deleteOne();
+
+    res.json({ _id: user._id, message: `${user.name} was removed` });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Issue or change an account's PIN
+// @route   PUT /api/auth/users/:id/pin
+// @access  Admin
+export const setUserPin = async (req, res) => {
+  const { pin } = req.body;
+
+  try {
+    if (!isValidPin(pin)) {
+      return res
+        .status(400)
+        .json({ message: `The PIN must be exactly ${PIN_LENGTH} digits` });
+    }
+
+    const user = await User.findById(req.params.id).populate("stockRoom", "name");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Assigned through the document so the pre-save hook hashes it.
+    user.pin = String(pin);
+    await user.save();
+
+    res.json({
+      ...publicUser(user),
+      message: `PIN updated for ${user.name}`,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

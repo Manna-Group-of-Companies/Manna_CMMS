@@ -1,6 +1,10 @@
 import express from "express";
 import {
   createMergeRequest,
+  createWeeklyMergeRequest,
+  createSupervisorMergeRequest,
+  getMyMergeRequests,
+  getWeeklyMergeStatus,
   getMergeRequests,
   getMergeRequestById,
   approveMergeRequest,
@@ -10,8 +14,22 @@ import { protect, authorizeRoles } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// Every merge operation is Admin-only.
-router.use(protect, authorizeRoles("Admin"));
+router.use(protect);
+
+// A Supervisor may raise a merge over their own returns and follow it, but
+// nothing more — the decision stays with the Admin. Registered before the
+// Admin guard, and before "/:id" so "mine" is not read as an id.
+router
+  .route("/mine")
+  .post(authorizeRoles("Supervisor"), createSupervisorMergeRequest)
+  .get(authorizeRoles("Supervisor"), getMyMergeRequests);
+
+// Every other merge operation is Admin-only.
+router.use(authorizeRoles("Admin"));
+
+// The weekly ritual: where this week stands, and running it.
+router.get("/weekly/status", getWeeklyMergeStatus);
+router.post("/weekly", createWeeklyMergeRequest);
 
 router.route("/").post(createMergeRequest).get(getMergeRequests);
 router.get("/:id", getMergeRequestById);

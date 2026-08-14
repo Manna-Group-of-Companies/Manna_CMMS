@@ -15,6 +15,8 @@ export const recordMovement = async ({
   reference = "",
   performedBy = null,
   note = "",
+  fromRoom = "",
+  toRoom = "",
 }) => {
   try {
     await StockMovement.create({
@@ -28,6 +30,8 @@ export const recordMovement = async ({
       reference,
       performedBy,
       note,
+      fromRoom,
+      toRoom,
     });
   } catch (error) {
     console.error("Failed to record stock movement:", error.message);

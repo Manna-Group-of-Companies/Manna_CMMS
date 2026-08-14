@@ -15,8 +15,8 @@ export const protect = async (req, res, next) => {
       // Verify token
       const decoded = jwt.verify(token, process.env.JWT_SECRET || "default_jwt_secret_key_12345");
 
-      // Get user from the token, exclude password
-      req.user = await User.findById(decoded.id).select("-password");
+      // Get user from the token. The PIN is select:false, so it stays out.
+      req.user = await User.findById(decoded.id);
 
       if (!req.user) {
         return res.status(401).json({ message: "Not authorized, user not found" });

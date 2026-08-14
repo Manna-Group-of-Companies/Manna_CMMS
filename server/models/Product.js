@@ -28,6 +28,8 @@ const productSchema = new mongoose.Schema(
       required: [true, "Supplier is required"],
       trim: true,
     },
+    // Maintained by utils/stockRooms.js as the sum of this product's room
+    // rows. Never assign it directly; call creditRoom/debitRoom instead.
     quantity: {
       type: Number,
       required: [true, "Quantity is required"],
@@ -51,10 +53,14 @@ const productSchema = new mongoose.Schema(
       default: 100,
       min: [0, "Maximum stock cannot be negative"],
     },
+    // The product's home room: where stock lands when a flow does not name a
+    // room, and what the catalog filter matches on. The authoritative
+    // per-room balances live in StockRoomInventory — a product may hold
+    // stock in several rooms at once.
     storeRoom: {
       type: String,
       required: [true, "Store Room is required"],
-      enum: ["Store Room 1", "Store Room 2"],
+      trim: true,
     },
     description: {
       type: String,

@@ -1,11 +1,12 @@
 import mongoose from "mongoose";
 
 /**
- * One returned batch sitting in the Restock section.
+ * One returned batch sitting in the Red Stock Room.
  *
- * Returned stock never goes straight back to Main Stock: it lands here as
- * "Restock Pending" and only reaches the product's quantity once an Admin
- * approves a merge request that includes it.
+ * A supervisor's return needs no approval: it lands here as "In Red Stock"
+ * immediately. It never touches a store room on its own — the
+ * weekly merge picks it up, and only an approved merge moves the quantity into
+ * the store room the Admin chooses.
  */
 const restockItemSchema = new mongoose.Schema(
   {
@@ -71,22 +72,32 @@ const restockItemSchema = new mongoose.Schema(
     status: {
       type: String,
       required: true,
-      enum: ["Restock Pending", "Merge Requested", "Merged", "Merge Rejected"],
-      default: "Restock Pending",
+      enum: ["In Red Stock", "Weekly Merge Pending", "Moved to Stock Room"],
+      default: "In Red Stock",
     },
-    // The issuance this stock came back from.
+    // The issuance this stock came back from. Null for a return that came in
+    // as a stock return request rather than against an issue.
     sourceIssue: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "IssueHistory",
-      required: true,
+      default: null,
     },
-    // Set while the item is part of an open or decided merge request.
+    // Where the stock was issued from, snapshotted at return time so the Red
+    // Stock list can show its origin even after the product moves rooms.
+    sourceRoom: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Set while the item is part of an open weekly merge, and kept afterwards
+    // as the record of the merge that moved it.
     mergeRequest: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "MergeRequest",
       default: null,
     },
-    rejectionReason: {
+    // The store room an approved merge moved this quantity into.
+    destinationRoom: {
       type: String,
       default: "",
       trim: true,
@@ -95,14 +106,21 @@ const restockItemSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // A rejected merge leaves the stock in Red Stock, so the rejection is
+    // recorded beside the item rather than as its status.
+    lastRejection: {
+      reason: { type: String, default: "", trim: true },
+      requestId: { type: String, default: "", trim: true },
+      at: { type: Date, default: null },
+    },
   },
   {
     timestamps: true,
   }
 );
 
-/** Items an Admin is allowed to pull into a new merge request. */
-restockItemSchema.statics.MERGEABLE_STATUSES = ["Restock Pending", "Merge Rejected"];
+/** Red Stock a weekly merge is allowed to pick up. */
+restockItemSchema.statics.MERGEABLE_STATUSES = ["In Red Stock"];
 
 const RestockItem = mongoose.model("RestockItem", restockItemSchema);
 export default RestockItem;

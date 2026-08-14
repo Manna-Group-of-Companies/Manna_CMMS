@@ -3,6 +3,10 @@ import cors from "cors";
 import dotenv from "dotenv";
 import connectDB from "./config/db.js";
 import seedData from "./utils/seeder.js";
+import {
+  migrateRedStockStatuses,
+  startWeeklyMergeScheduler,
+} from "./utils/weeklyMerge.js";
 
 // Routes imports
 import authRoutes from "./routes/authRoutes.js";
@@ -14,15 +18,35 @@ import issueRoutes from "./routes/issueRoutes.js";
 import restockRoutes from "./routes/restockRoutes.js";
 import mergeRoutes from "./routes/mergeRoutes.js";
 import movementRoutes from "./routes/movementRoutes.js";
+import stockRoomRoutes from "./routes/stockRoomRoutes.js";
+import branchRequestRoutes from "./routes/branchRequestRoutes.js";
 
 dotenv.config();
 
 const app = express();
 
-// Configure CORS - allow React frontend (typically port 5173)
+// Configure CORS - allow the deployed client plus local dev servers.
+// Extra origins can be added at deploy time via CORS_ORIGINS (comma separated).
+const allowedOrigins = [
+  "https://cmms.odd-wind-70a0.workers.dev", // Cloudflare Worker (production client)
+  "http://localhost:5173", // vite dev
+  "http://localhost:4173", // vite preview
+  ...(process.env.CORS_ORIGINS || "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean),
+];
+
 app.use(
   cors({
-    origin: "*", // Or specify exact frontend URLs like http://localhost:5173
+    origin: (origin, callback) => {
+      // Requests without an Origin header (mobile app, curl, server-to-server)
+      // aren't subject to CORS, so let them through.
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+    },
     credentials: true,
   })
 );
@@ -38,13 +62,25 @@ app.use("/api/requests", requestRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/issues", issueRoutes);
+app.use("/api/red-stock", restockRoutes);
+// The Red Stock Room was called Restock; the old path still works.
 app.use("/api/restock", restockRoutes);
 app.use("/api/merge-requests", mergeRoutes);
 app.use("/api/movements", movementRoutes);
+app.use("/api/stock-rooms", stockRoomRoutes);
+app.use("/api/branch-requests", branchRequestRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
   res.json({ status: "healthy", timestamp: new Date() });
+});
+
+// Turn CORS rejections into a plain 403 instead of a 500 with a stack trace.
+app.use((err, req, res, next) => {
+  if (err && err.message?.startsWith("Origin not allowed by CORS")) {
+    return res.status(403).json({ message: err.message });
+  }
+  return next(err);
 });
 
 const PORT = process.env.PORT || 5000;
@@ -56,9 +92,25 @@ const start = async () => {
     // Seed initial data (users & products) if DB is empty
     await seedData();
 
-    app.listen(PORT, () => {
+    // Bring any pre-Red-Stock records onto the current status vocabulary
+    await migrateRedStockStatuses();
+
+    // Raises one merge request per week over whatever is in Red Stock
+    startWeeklyMergeScheduler();
+
+    const server = app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
     });
+
+    // The mobile app re-reads the API every 10 seconds over a pooled, kept-
+    // alive connection. Node hangs up an idle socket after 5 seconds by
+    // default, so the phone writes its next request into a socket the server
+    // has already closed and gets no answer at all — the request hangs until
+    // the client gives up ("No response from ..."), then repeats on the next
+    // poll. Outliving the poll interval keeps the socket usable.
+    // headersTimeout must stay above keepAliveTimeout, or it closes first.
+    server.keepAliveTimeout = 65_000;
+    server.headersTimeout = 70_000;
   } catch (error) {
     console.error("Server Error:", error.message);
     process.exit(1);

@@ -7,8 +7,9 @@ const router = express.Router();
 // Supervisor: Issue a product (direct stock decrement)
 router.post("/", protect, authorizeRoles("Supervisor"), issueProduct);
 
-// Both Admin and Supervisor: View issue history
-router.get("/", protect, getIssueHistory);
+// Both Admin and Supervisor: View issue history. Branch accounts are stock-
+// only and have no part in issuing.
+router.get("/", protect, authorizeRoles("Admin", "Supervisor"), getIssueHistory);
 
 // Supervisor: Return an issued product
 router.put("/:id/return", protect, authorizeRoles("Supervisor"), returnIssueProduct);
