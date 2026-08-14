@@ -5,6 +5,7 @@ import { NotificationProvider } from "./context/NotificationContext";
 // Layout wrappers
 import AdminLayout from "./layouts/AdminLayout";
 import SupervisorLayout from "./layouts/SupervisorLayout";
+import BranchLayout from "./layouts/BranchLayout";
 
 // Pages
 import Login from "./pages/auth/Login";
@@ -16,9 +17,15 @@ import SupervisorDashboard from "./pages/supervisor/SupervisorDashboard";
 import ProductList from "./pages/supervisor/ProductList";
 import MyRequests from "./pages/supervisor/MyRequests";
 import SupervisorIssueHistory from "./pages/supervisor/IssueHistory";
+import MyReturns from "./pages/supervisor/MyReturns";
+import BranchDashboard from "./pages/branch/BranchDashboard";
+import BranchMyRequests from "./pages/branch/MyRequests";
+import AdminBranchRequests from "./pages/admin/BranchRequests";
+import AdminUsers from "./pages/admin/Users";
+import BranchApprovals from "./pages/supervisor/BranchApprovals";
 
 // Protected Route Root Switcher
-import { useAuth } from "./context/AuthContext";
+import { useAuth, homePathFor } from "./context/AuthContext";
 
 const RootRoute = () => {
   const { user, loading } = useAuth();
@@ -35,11 +42,7 @@ const RootRoute = () => {
     return <Navigate to="/login" replace />;
   }
 
-  if (user.role === "Admin") {
-    return <Navigate to="/admin/dashboard" replace />;
-  }
-
-  return <Navigate to="/supervisor/dashboard" replace />;
+  return <Navigate to={homePathFor(user.role)} replace />;
 };
 
 function App() {
@@ -57,6 +60,11 @@ function App() {
               <Route path="products" element={<AdminProductList />} />
               <Route path="requests" element={<RequestManagement />} />
               <Route path="issues" element={<AdminIssueHistory />} />
+              <Route path="branch-requests" element={<AdminBranchRequests />} />
+              <Route path="users" element={<AdminUsers />} />
+              {/* Red Stock is decided in Request Control now; an old link or a
+                  bookmark lands on the dashboard rather than a dead route. */}
+              <Route path="red-stock" element={<Navigate to="/admin/dashboard" replace />} />
               <Route path="" element={<Navigate to="dashboard" replace />} />
             </Route>
 
@@ -66,7 +74,18 @@ function App() {
               <Route path="products" element={<ProductList />} />
               <Route path="requests" element={<MyRequests />} />
               <Route path="issues" element={<SupervisorIssueHistory />} />
+              <Route path="returns" element={<MyReturns />} />
+              <Route path="branch-approvals" element={<BranchApprovals />} />
               <Route path="" element={<Navigate to="dashboard" replace />} />
+            </Route>
+
+            {/* Branch Portal Route Group — one room's stock, read-only */}
+            <Route path="/branch" element={<BranchLayout />}>
+              <Route path="stock" element={<BranchDashboard />} />
+              <Route path="requests" element={<BranchMyRequests />} />
+              {/* "dashboard" is the habit from the other two portals. */}
+              <Route path="dashboard" element={<Navigate to="/branch/stock" replace />} />
+              <Route path="" element={<Navigate to="stock" replace />} />
             </Route>
 
             {/* Default Catch-All */}

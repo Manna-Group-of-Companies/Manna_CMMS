@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 import {
   Boxes,
   Loader2,
@@ -12,6 +13,7 @@ import {
   Calendar,
   ChevronRight,
   TrendingUp,
+  ClipboardCheck,
 } from "lucide-react";
 
 const AdminDashboard = () => {
@@ -28,21 +30,25 @@ const AdminDashboard = () => {
     todayRequests: [],
   });
 
-  const fetchAdminDashboard = async () => {
+  /** [silent] is used by the background poll: no error toast. */
+  const fetchAdminDashboard = async ({ silent = false } = {}) => {
     try {
       const { data } = await API.get("/dashboard/admin");
       setMetrics(data);
     } catch (error) {
       console.error("Error loading admin metrics:", error);
-      showToast("Failed to fetch administrator metrics", "error");
+      if (!silent) showToast("Failed to fetch administrator metrics", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchAdminDashboard();
   }, []);
+
+  // Counts move whenever a supervisor acts in the app.
+  useAutoRefresh(() => fetchAdminDashboard({ silent: true }));
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -70,6 +76,10 @@ const AdminDashboard = () => {
     );
   }
 
+  // What the Request Control console shows under "Pending": the four request
+  // types plus any merge waiting on a decision.
+  const pendingTotal = metrics.pendingRequests + (metrics.mergePendingCount || 0);
+
   const cardData = [
     {
       title: "Total Catalog Products",
@@ -79,10 +89,11 @@ const AdminDashboard = () => {
     },
     {
       title: "Pending Requests",
-      value: metrics.pendingRequests,
+      // Merges are decided in the same console, so they count here too.
+      value: pendingTotal,
       icon: Clock,
-      color: metrics.pendingRequests > 0 
-        ? "from-amber-500/20 to-yellow-500/20 border-amber-500/30 text-amber-600 animate-pulse" 
+      color: pendingTotal > 0
+        ? "from-amber-500/20 to-yellow-500/20 border-amber-500/30 text-amber-600 animate-pulse"
         : "from-slate-50 to-slate-100 border-slate-200 text-slate-600",
     },
     {
@@ -101,8 +112,18 @@ const AdminDashboard = () => {
       title: "Low Stock Products",
       value: metrics.lowStockProductsCount,
       icon: AlertTriangle,
-      color: metrics.lowStockProductsCount > 0 
-        ? "from-rose-500/20 to-orange-500/20 border-rose-500/30 text-rose-600" 
+      color: metrics.lowStockProductsCount > 0
+        ? "from-rose-500/20 to-orange-500/20 border-rose-500/30 text-rose-600"
+        : "from-slate-50 to-slate-100 border-slate-200 text-slate-600",
+    },
+    {
+      // Stage one of the branch workflow; stage two sits with the Supervisor.
+      title: "Branch Requests to Approve",
+      value: metrics.branchPendingAdmin || 0,
+      icon: ClipboardCheck,
+      link: "/admin/branch-requests",
+      color: metrics.branchPendingAdmin > 0
+        ? "from-amber-500/20 to-yellow-500/20 border-amber-500/30 text-amber-600"
         : "from-slate-50 to-slate-100 border-slate-200 text-slate-600",
     },
   ];
@@ -110,13 +131,14 @@ const AdminDashboard = () => {
   return (
     <div className="space-y-8">
       {/* Metrics Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {cardData.map((card, idx) => {
           const Icon = card.icon;
-          return (
+          const body = (
             <div
-              key={idx}
-              className={`p-6 rounded-2xl border bg-gradient-to-br ${card.color} shadow-sm`}
+              className={`p-6 rounded-2xl border bg-gradient-to-br ${card.color} shadow-sm h-full ${
+                card.link ? "hover:shadow-md transition-all" : ""
+              }`}
             >
               <div className="flex justify-between items-start">
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
@@ -128,6 +150,14 @@ const AdminDashboard = () => {
                 {card.value}
               </h3>
             </div>
+          );
+
+          return card.link ? (
+            <Link key={idx} to={card.link} className="cursor-pointer">
+              {body}
+            </Link>
+          ) : (
+            <div key={idx}>{body}</div>
           );
         })}
       </div>

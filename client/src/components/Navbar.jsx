@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useNotifications } from "../context/NotificationContext";
-import { Bell, Check, CheckSquare } from "lucide-react";
+import { Bell, Check, CheckSquare, Menu } from "lucide-react";
 
-const Navbar = ({ title }) => {
+const Navbar = ({ title, onMenuClick }) => {
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
@@ -37,12 +37,23 @@ const Navbar = ({ title }) => {
   };
 
   return (
-    <header className="h-16 flex items-center justify-between px-8 border-b border-slate-200 bg-slate-50 backdrop-blur-md sticky top-0 z-30">
-      {/* Title */}
-      <h2 className="text-xl font-semibold text-slate-900 tracking-tight">{title}</h2>
+    <header className="h-16 flex items-center justify-between gap-2 px-4 sm:px-6 lg:px-8 border-b border-slate-200 bg-slate-50 backdrop-blur-md sticky top-0 z-30">
+      <div className="flex items-center gap-2 min-w-0">
+        {/* The sidebar is a drawer below lg, so it needs a way in. */}
+        <button
+          onClick={onMenuClick}
+          className="p-2 -ml-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer lg:hidden"
+          aria-label="Open menu"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <h2 className="text-base sm:text-lg lg:text-xl font-semibold text-slate-900 tracking-tight truncate">
+          {title}
+        </h2>
+      </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 shrink-0">
         {/* Notification Bell */}
         <div className="relative" ref={dropdownRef}>
           <button
@@ -57,9 +68,9 @@ const Navbar = ({ title }) => {
             )}
           </button>
 
-          {/* Dropdown Card */}
+          {/* Dropdown Card — never wider than the viewport on a phone. */}
           {dropdownOpen && (
-            <div className="absolute right-0 mt-2 w-80 glass-premium border border-slate-200 rounded-xl shadow-lg overflow-hidden z-50">
+            <div className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-2rem))] glass-premium border border-slate-200 rounded-xl shadow-lg overflow-hidden z-50">
               <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
                 <span className="text-sm font-semibold text-slate-900">Notifications</span>
                 {unreadCount > 0 && (

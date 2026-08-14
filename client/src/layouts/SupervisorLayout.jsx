@@ -1,11 +1,14 @@
+import { useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { useAuth, homePathFor } from "../context/AuthContext";
 import Sidebar from "../components/Sidebar";
 import Navbar from "../components/Navbar";
 
 const SupervisorLayout = () => {
   const { user, loading } = useAuth();
   const location = useLocation();
+  // The sidebar is a drawer below lg; this is what opens it.
+  const [menuOpen, setMenuOpen] = useState(false);
 
   if (loading) {
     return (
@@ -23,11 +26,7 @@ const SupervisorLayout = () => {
   }
 
   if (user.role !== "Supervisor") {
-    return user.role === "Admin" ? (
-      <Navigate to="/admin/dashboard" replace />
-    ) : (
-      <Navigate to="/login" replace />
-    );
+    return <Navigate to={homePathFor(user.role)} replace />;
   }
 
   const getPageTitle = () => {
@@ -41,12 +40,12 @@ const SupervisorLayout = () => {
   return (
     <div className="min-h-screen bg-canvas flex">
       {/* Sidebar Navigation */}
-      <Sidebar />
+      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        <Navbar title={getPageTitle()} />
-        <main className="flex-1 overflow-y-auto p-8 bg-canvas">
+      <div className="flex-1 min-w-0 flex flex-col h-screen max-h-[100dvh] overflow-hidden">
+        <Navbar title={getPageTitle()} onMenuClick={() => setMenuOpen(true)} />
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-canvas">
           <Outlet />
         </main>
       </div>

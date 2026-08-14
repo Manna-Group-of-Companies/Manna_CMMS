@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 import {
   Loader2,
   CheckCircle2,
@@ -13,11 +14,36 @@ import {
   MessageSquare,
   ArrowRight,
   HelpCircle,
+  GitMerge,
+  Building2,
 } from "lucide-react";
+
+const PLACEHOLDER_IMAGE =
+  "https://images.unsplash.com/photo-1595246140707-1e5b22b271d4?w=50&auto=format";
+
+/**
+ * A merge request read as a row of this console.
+ *
+ * Merges live in their own collection and carry their own vocabulary, so they
+ * are mapped onto the shape the table already renders. The original document
+ * rides along on `merge` for the inspector.
+ */
+const asRequestRow = (merge) => ({
+  _id: merge._id,
+  rawType: "merge",
+  requestNumber: merge.requestId,
+  requestType: "Stock Merge",
+  supervisor: merge.requestedBy,
+  createdDate: merge.requestedAt,
+  status: merge.status === "Pending Approval" ? "Pending" : merge.status,
+  adminComments: merge.status === "Rejected" ? merge.rejectionReason : merge.comment,
+  merge,
+});
 
 const RequestManagement = () => {
   const { showToast } = useNotifications();
   const [requests, setRequests] = useState([]);
+  const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("Pending"); // Pending | Approved | Rejected | All
 
@@ -27,23 +53,44 @@ const RequestManagement = () => {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [actionType, setActionType] = useState(""); // approve | reject | keep-pending
   const [adminComments, setAdminComments] = useState("");
+  // Where an approved merge puts the stock. Only merges use this.
+  const [destinationRoom, setDestinationRoom] = useState("");
 
-  const fetchRequests = async () => {
+  /** [silent] is used by the background poll: no spinner, no error toast. */
+  const fetchRequests = async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
-      const { data } = await API.get("/requests/all");
-      setRequests(data);
+      if (!silent) setLoading(true);
+      const [requestsRes, mergesRes, roomsRes] = await Promise.all([
+        API.get("/requests/all"),
+        // Both are newer than the rest of this console; a server that has not
+        // been redeployed should still show the ordinary requests.
+        API.get("/merge-requests").catch(() => ({ data: [] })),
+        API.get("/stock-rooms").catch(() => ({ data: [] })),
+      ]);
+
+      const merged = [...requestsRes.data, ...mergesRes.data.map(asRequestRow)];
+      // One list, newest first, however the two sources happen to be ordered.
+      merged.sort((a, b) => new Date(b.createdDate) - new Date(a.createdDate));
+
+      setRequests(merged);
+      setRooms(roomsRes.data);
     } catch (error) {
       console.error("Error loading requests:", error);
-      showToast("Could not retrieve requests log", "error");
+      if (!silent) showToast("Could not retrieve requests log", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchRequests();
   }, []);
+
+  // Supervisors raise, edit and cancel these from the app. Paused while the
+  // inspector or an action modal is open.
+  useAutoRefresh(() => fetchRequests({ silent: true }), {
+    enabled: !inspectorOpen && !actionModalOpen,
+  });
 
   const handleActionSubmit = async (e) => {
     e.preventDefault();
@@ -52,16 +99,34 @@ const RequestManagement = () => {
       return;
     }
 
-    try {
-      const type = selectedRequest.rawType; // product | stockin | stockout | stockreturn
-      const id = selectedRequest._id;
-      
-      const { data } = await API.put(`/requests/${type}/${id}/${actionType}`, {
-        adminComments,
-      });
+    // A merge is the only decision that moves stock between rooms, so it needs
+    // a destination before it can be approved.
+    if (selectedRequest.rawType === "merge" && actionType === "approve" && !destinationRoom) {
+      showToast("Choose the store room this stock goes into", "error");
+      return;
+    }
 
-      showToast(`Request ${actionType === "approve" ? "Approved" : actionType === "reject" ? "Rejected" : "kept Pending"} successfully!`, "success");
-      
+    try {
+      const id = selectedRequest._id;
+
+      const { data } =
+        selectedRequest.rawType === "merge"
+          ? await API.put(
+              `/merge-requests/${id}/${actionType}`,
+              actionType === "approve"
+                ? { comment: adminComments, destinationRoom }
+                : { rejectionReason: adminComments }
+            )
+          : await API.put(`/requests/${selectedRequest.rawType}/${id}/${actionType}`, {
+              adminComments,
+            });
+
+      showToast(
+        data?.message ||
+          `Request ${actionType === "approve" ? "Approved" : actionType === "reject" ? "Rejected" : "kept Pending"} successfully!`,
+        "success"
+      );
+
       setActionModalOpen(false);
       setInspectorOpen(false);
       setAdminComments("");
@@ -75,6 +140,8 @@ const RequestManagement = () => {
     setSelectedRequest(req);
     setActionType(type);
     setAdminComments("");
+    // Default to the room the whole merge would go to, then the first room.
+    setDestinationRoom(req.merge?.destinationRoom || rooms[0]?.name || "");
     setActionModalOpen(true);
   };
 
@@ -84,6 +151,9 @@ const RequestManagement = () => {
         return "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20";
       case "Rejected":
         return "bg-rose-500/10 text-rose-600 border border-rose-500/20";
+      // Withdrawn by the supervisor rather than decided by an Admin.
+      case "Cancelled":
+        return "bg-slate-500/10 text-slate-600 border border-slate-500/20";
       default:
         return "bg-amber-500/10 text-amber-600 border border-amber-500/20";
     }
@@ -99,6 +169,8 @@ const RequestManagement = () => {
         return "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20";
       case "Stock Out":
         return "bg-rose-500/10 text-rose-600 border border-rose-500/20";
+      case "Stock Merge":
+        return "bg-violet-500/10 text-violet-700 border border-violet-500/20";
       default:
         return "bg-cyan-500/10 text-cyan-700 border border-cyan-500/20";
     }
@@ -117,7 +189,7 @@ const RequestManagement = () => {
   return (
     <div className="space-y-6">
       {/* Header Panel */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 rounded-2xl glass-premium border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl glass-premium border border-slate-200">
         <div className="flex items-center gap-2">
           <ClipboardList className="h-5 w-5 text-brand-700" />
           <h3 className="text-lg font-bold text-slate-900">Office Approvals Console</h3>
@@ -186,17 +258,31 @@ const RequestManagement = () => {
                       </div>
                       <div>
                         <div className="font-semibold text-slate-800">{req.supervisor?.name || "System"}</div>
-                        <div className="text-[10px] text-slate-500">{req.supervisor?.email}</div>
+                        <div className="text-[10px] text-slate-500">
+                          {req.supervisor?.email || req.supervisor?.role}
+                        </div>
                       </div>
                     </td>
                     <td className="py-4 px-6 font-semibold text-slate-900">
-                      {req.rawType === "product"
-                        ? req.details.name
-                        : req.product?.name || "Unknown Product"}
-                      {req.quantity && (
-                        <span className="text-xs text-slate-600 block font-normal">
-                          Qty: <strong>{req.quantity} {req.product?.unit}</strong>
-                        </span>
+                      {req.rawType === "merge" ? (
+                        <>
+                          Red Stock → Store Room
+                          <span className="text-xs text-slate-600 block font-normal">
+                            <strong>{req.merge.totalQuantity} pcs</strong> across{" "}
+                            {req.merge.itemCount} returned item(s)
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          {req.rawType === "product"
+                            ? req.details.name
+                            : req.product?.name || "Unknown Product"}
+                          {req.quantity && (
+                            <span className="text-xs text-slate-600 block font-normal">
+                              Qty: <strong>{req.quantity} {req.product?.unit}</strong>
+                            </span>
+                          )}
+                        </>
                       )}
                     </td>
                     <td className="py-4 px-6 text-xs text-slate-600">
@@ -239,11 +325,13 @@ const RequestManagement = () => {
           
           {/* 1. Request Detail Inspector Overlay */}
           {inspectorOpen && selectedRequest && (
-            <div className="glass-premium w-full max-w-2xl rounded-2xl border border-slate-200 overflow-hidden shadow-2xl animate-fade-in text-left">
+            <div className="glass-premium w-full max-w-2xl rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
                 <div>
                   <h3 className="font-bold text-lg text-slate-900">Inspect Request: {selectedRequest.requestNumber}</h3>
-                  <p className="text-xs text-slate-600">Submitted by {selectedRequest.supervisor?.name}</p>
+                  <p className="text-xs text-slate-600">
+                    Submitted by {selectedRequest.supervisor?.name || "System"}
+                  </p>
                 </div>
                 <button
                   onClick={() => setInspectorOpen(false)}
@@ -255,7 +343,92 @@ const RequestManagement = () => {
 
               <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
                 {/* Specific details based on Request Type */}
-                
+
+                {/* TYPE: STOCK MERGE — the only decision that moves stock out
+                    of the Red Stock Room and into a store room. */}
+                {selectedRequest.rawType === "merge" && (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-xl bg-violet-500/5 border border-violet-500/20 text-[11px] leading-relaxed text-slate-700">
+                      <strong className="text-violet-700 flex items-center gap-1.5 mb-1">
+                        <GitMerge className="h-3.5 w-3.5" />
+                        {selectedRequest.merge.createdVia === "Supervisor"
+                          ? "Raised by a supervisor"
+                          : "Weekly merge"}{" "}
+                        • {selectedRequest.merge.weekKey}
+                      </strong>
+                      Approving moves{" "}
+                      <strong>{selectedRequest.merge.totalQuantity} pcs</strong> out of the
+                      Red Stock Room and into the store room you choose. Rejecting moves
+                      nothing — the stock stays in Red Stock for the next merge.
+                    </div>
+
+                    {selectedRequest.status === "Pending" && (
+                      <div className="p-4 rounded-xl bg-brand-50 border border-brand-500/20 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                        <div className="text-[11px] text-slate-700 leading-relaxed">
+                          <strong className="text-brand-700 flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5" /> Destination Store Room
+                          </strong>
+                          Every line below is credited to this room on approval.
+                        </div>
+                        <select
+                          value={destinationRoom || rooms[0]?.name || ""}
+                          onChange={(e) => setDestinationRoom(e.target.value)}
+                          className="px-4 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer shrink-0"
+                        >
+                          {rooms.length === 0 && <option value="">No stock rooms found</option>}
+                          {rooms.map((room) => (
+                            <option key={room._id} value={room.name}>
+                              {room.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="rounded-xl border border-slate-200 divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                      {selectedRequest.merge.items.map((line) => (
+                        <div
+                          key={String(line.restockItem)}
+                          className="px-4 py-3 flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <img
+                              src={line.product?.image || PLACEHOLDER_IMAGE}
+                              alt={line.productName}
+                              className="w-8 h-8 rounded-lg object-cover border border-slate-200 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-800 truncate">
+                                {line.productName}
+                              </div>
+                              <div className="font-mono text-[10px] text-slate-500">
+                                {line.product?.code || "—"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="font-bold text-emerald-600">
+                              +{line.quantity} {line.unit}
+                            </span>
+                            {line.destinationRoom && (
+                              <span className="block text-[10px] text-slate-500">
+                                → {line.destinationRoom}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {selectedRequest.status === "Approved" && (
+                      <div className="p-3 bg-emerald-50 border border-emerald-500/20 text-emerald-900 text-[11px] rounded-lg">
+                        Moved into <strong>{selectedRequest.merge.destinationRoom}</strong> on{" "}
+                        {formatDate(selectedRequest.merge.reviewedAt)}.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* TYPE: ADD PRODUCT */}
                 {selectedRequest.requestType === "Add Product" && (
                   <div className="space-y-4">
@@ -418,7 +591,7 @@ const RequestManagement = () => {
 
                       <div>
                         <span className="text-xs text-slate-500 block mb-0.5">
-                          {selectedRequest.requestType === "Stock In" ? "Add Quantity" : selectedRequest.requestType === "Stock Out" ? "Deduct Quantity" : "Return Quantity"}
+                          {selectedRequest.requestType === "Stock In" ? "Add Quantity" : selectedRequest.requestType === "Stock Out" ? "Deduct Quantity" : "To Red Stock"}
                         </span>
                         <span className={`font-bold flex items-center gap-1 ${
                           selectedRequest.requestType === "Stock In" || selectedRequest.requestType === "Stock Return"
@@ -437,13 +610,26 @@ const RequestManagement = () => {
                       <div>
                         <span className="text-xs text-slate-500 block mb-0.5">Simulated Stock Output</span>
                         <span className="font-bold text-slate-900 border-b border-dashed border-slate-200 pb-0.5">
-                          {selectedRequest.requestType === "Stock In" || selectedRequest.requestType === "Stock Return"
+                          {selectedRequest.requestType === "Stock Return"
+                            ? selectedRequest.product?.quantity || 0
+                            : selectedRequest.requestType === "Stock In"
                             ? (selectedRequest.product?.quantity || 0) + selectedRequest.quantity
                             : (selectedRequest.product?.quantity || 0) - selectedRequest.quantity}{" "}
                           {selectedRequest.product?.unit}
                         </span>
                       </div>
                     </div>
+
+                    {/* Returned stock is parked, not added: store room balances
+                        only move when the weekly merge is approved. */}
+                    {selectedRequest.requestType === "Stock Return" && (
+                      <div className="p-3 bg-rose-50 border border-rose-500/20 text-rose-900 text-[11px] leading-relaxed rounded-lg">
+                        Approving this puts <strong>{selectedRequest.quantity}{" "}
+                        {selectedRequest.product?.unit}</strong> into the{" "}
+                        <strong>Red Stock Room</strong>, not into a store room. It reaches the
+                        Engineer Room or the Consumables Room only through an approved merge.
+                      </div>
+                    )}
 
                     {/* Stock Out Check */}
                     {selectedRequest.requestType === "Stock Out" && 
@@ -469,12 +655,16 @@ const RequestManagement = () => {
               {/* Action Buttons for Pending request */}
               {selectedRequest.status === "Pending" && (
                 <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-3">
-                  <button
-                    onClick={() => openActionModal(selectedRequest, "keep-pending")}
-                    className="px-4 py-2 text-xs font-bold rounded-xl bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900 cursor-pointer"
-                  >
-                    Keep Pending
-                  </button>
+                  {/* A merge is decided outright — there is no pending state to
+                      return it to without releasing the stock it holds. */}
+                  {selectedRequest.rawType !== "merge" && (
+                    <button
+                      onClick={() => openActionModal(selectedRequest, "keep-pending")}
+                      className="px-4 py-2 text-xs font-bold rounded-xl bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900 cursor-pointer"
+                    >
+                      Keep Pending
+                    </button>
+                  )}
                   <button
                     onClick={() => openActionModal(selectedRequest, "reject")}
                     className="px-4 py-2 text-xs font-bold rounded-xl bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-600 hover:text-white cursor-pointer transition-all"
@@ -495,7 +685,7 @@ const RequestManagement = () => {
 
           {/* 2. Action Confirmation Modal (for commenting) */}
           {actionModalOpen && selectedRequest && (
-            <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 overflow-hidden shadow-2xl animate-fade-in text-left">
+            <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="font-bold text-slate-900 capitalize">
                   {actionType === "approve" ? "Approve" : actionType === "reject" ? "Reject" : "Set Pending"} Request
@@ -512,6 +702,30 @@ const RequestManagement = () => {
                 <p className="text-xs text-slate-600 leading-relaxed">
                   Provide notes, comments, or a reason regarding this decision. This will be sent back to supervisor <strong>{selectedRequest.supervisor?.name}</strong>.
                 </p>
+
+                {/* Confirm where an approved merge lands before committing. */}
+                {selectedRequest.rawType === "merge" && actionType === "approve" && (
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-500/20 space-y-2">
+                    <p className="text-[11px] text-emerald-900 leading-relaxed">
+                      <strong>{selectedRequest.merge.totalQuantity} pcs</strong> across{" "}
+                      {selectedRequest.merge.itemCount} item(s) leave the Red Stock Room and
+                      are added to:
+                    </p>
+                    <select
+                      value={destinationRoom}
+                      onChange={(e) => setDestinationRoom(e.target.value)}
+                      required
+                      className="w-full px-4 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
+                    >
+                      {rooms.length === 0 && <option value="">No stock rooms found</option>}
+                      {rooms.map((room) => (
+                        <option key={room._id} value={room.name}>
+                          {room.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">

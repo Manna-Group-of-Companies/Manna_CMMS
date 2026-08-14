@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 import {
   Loader2,
   Send,
@@ -17,22 +18,26 @@ const AdminIssueHistory = () => {
   const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
-  const fetchIssues = async () => {
+  /** [silent] is used by the background poll: no spinner, no error toast. */
+  const fetchIssues = async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const { data } = await API.get("/issues");
       setIssues(data);
     } catch (error) {
       console.error("Error loading issue history:", error);
-      showToast("Failed to load issue history", "error");
+      if (!silent) showToast("Failed to load issue history", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchIssues();
   }, []);
+
+  // Supervisors issue and return stock from the app.
+  useAutoRefresh(() => fetchIssues({ silent: true }));
 
   const formatDate = (dateString) => {
     const d = new Date(dateString);
@@ -46,7 +51,7 @@ const AdminIssueHistory = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between p-5 rounded-2xl glass-premium border border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-5 rounded-2xl glass-premium border border-slate-200">
         <div className="flex items-center gap-2">
           <Send className="h-5 w-5 text-amber-600" />
           <h3 className="text-lg font-bold text-slate-900">Issue History — All Supervisors</h3>
@@ -131,7 +136,7 @@ const AdminIssueHistory = () => {
                             {issue.supervisor?.name || "System"}
                           </div>
                           <div className="text-[10px] text-slate-500">
-                            {issue.supervisor?.email || ""}
+                            {issue.supervisor?.email || issue.supervisor?.role || ""}
                           </div>
                         </div>
                       </div>
@@ -162,7 +167,7 @@ const AdminIssueHistory = () => {
       {/* Product Details Modal */}
       {selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-          <div className="glass-premium w-full max-w-lg rounded-2xl border border-slate-200 overflow-hidden shadow-2xl animate-fade-in text-left">
+          <div className="glass-premium w-full max-w-lg rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
               <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
                 <Boxes className="h-5 w-5 text-brand-700" />

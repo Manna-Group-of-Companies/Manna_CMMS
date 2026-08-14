@@ -1,23 +1,29 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../../context/AuthContext";
+import { useAuth, homePathFor } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
-import { Lock, Mail, Boxes } from "lucide-react";
+import { KeyRound, User, Boxes } from "lucide-react";
+
+const PIN_LENGTH = 4;
 
 const Login = () => {
   const { login } = useAuth();
   const { showToast } = useNotifications();
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!email || !password) {
+    if (!name || !pin) {
       setError("Please fill in all fields");
+      return;
+    }
+    if (pin.length !== PIN_LENGTH) {
+      setError(`Your PIN is ${PIN_LENGTH} digits`);
       return;
     }
 
@@ -25,32 +31,17 @@ const Login = () => {
     setError("");
 
     try {
-      const data = await login(email, password);
+      const data = await login(name.trim(), pin);
       showToast(`Welcome back, ${data.name}!`, "success");
-      
+
       // Redirect based on role
-      if (data.role === "Admin") {
-        navigate("/admin/dashboard");
-      } else {
-        navigate("/supervisor/dashboard");
-      }
+      navigate(homePathFor(data.role));
     } catch (err) {
       setError(err);
       showToast(err, "error");
     } finally {
       setLoading(false);
     }
-  };
-
-  const handlePrefill = (role) => {
-    if (role === "Admin") {
-      setEmail("admin@stock.com");
-      setPassword("Admin@123");
-    } else {
-      setEmail("supervisor@stock.com");
-      setPassword("Supervisor@123");
-    }
-    setError("");
   };
 
   return (
@@ -80,41 +71,48 @@ const Login = () => {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Email Field */}
+            {/* Name Field */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
-                Email Address
+                Name
               </label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                  <Mail className="h-4.5 w-4.5" />
+                  <User className="h-4.5 w-4.5" />
                 </span>
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  autoComplete="username"
                   className="w-full pl-11 pr-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20 transition-all"
-                  placeholder="name@company.com"
+                  placeholder="Your account name"
                   required
                 />
               </div>
             </div>
 
-            {/* Password Field */}
+            {/* PIN Field */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
-                Password
+                {PIN_LENGTH}-Digit PIN
               </label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                  <Lock className="h-4.5 w-4.5" />
+                  <KeyRound className="h-4.5 w-4.5" />
                 </span>
                 <input
                   type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20 transition-all"
-                  placeholder="••••••••"
+                  inputMode="numeric"
+                  autoComplete="current-password"
+                  value={pin}
+                  // Digits only, so a stray letter never reaches the API.
+                  onChange={(e) =>
+                    setPin(e.target.value.replace(/\D/g, "").slice(0, PIN_LENGTH))
+                  }
+                  maxLength={PIN_LENGTH}
+                  className="w-full pl-11 pr-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 text-sm tracking-[0.5em] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20 transition-all"
+                  placeholder="••••"
                   required
                 />
               </div>
@@ -133,25 +131,6 @@ const Login = () => {
               )}
             </button>
           </form>
-        </div>
-
-        {/* Demo Prefills */}
-        <div className="mt-8 text-center">
-          <p className="text-xs text-slate-500 mb-3">Quick Login (Demo Accounts):</p>
-          <div className="flex justify-center gap-3">
-            <button
-              onClick={() => handlePrefill("Admin")}
-              className="px-3.5 py-2 rounded-lg bg-white border border-slate-200 hover:border-brand-500/50 hover:bg-slate-100 text-xs font-medium text-brand-700 transition-all cursor-pointer"
-            >
-              Office Admin
-            </button>
-            <button
-              onClick={() => handlePrefill("Supervisor")}
-              className="px-3.5 py-2 rounded-lg bg-white border border-slate-200 hover:border-emerald-500/50 hover:bg-slate-100 text-xs font-medium text-emerald-600 transition-all cursor-pointer"
-            >
-              Store Supervisor
-            </button>
-          </div>
         </div>
       </div>
     </div>

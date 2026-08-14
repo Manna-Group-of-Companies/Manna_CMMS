@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 import {
   Search,
   Filter,
@@ -62,14 +63,15 @@ const ProductList = () => {
     unit: "Pcs",
     minStock: 5,
     maxStock: 100,
-    storeRoom: "Store Room 1",
+    storeRoom: "Engineer Room",
     description: "",
     image: "",
   });
 
-  const fetchProducts = async () => {
+  /** [silent] is used by the background poll: no spinner, no error toast. */
+  const fetchProducts = async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const params = {};
       if (searchTerm) params.search = searchTerm;
       if (selectedCategory) params.category = selectedCategory;
@@ -80,9 +82,9 @@ const ProductList = () => {
       setProducts(data);
     } catch (error) {
       console.error("Error loading products:", error);
-      showToast("Could not load product list", "error");
+      if (!silent) showToast("Could not load product list", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -99,6 +101,11 @@ const ProductList = () => {
     fetchProducts();
     fetchCategories();
   }, [searchTerm, selectedCategory, selectedStoreRoom, stockStatus]);
+
+  // The Admin edits products and moves stock between rooms on their console,
+  // so the catalog re-reads the API rather than showing the first fetch.
+  // Paused while a modal is open so a form cannot be reset mid-typing.
+  useAutoRefresh(() => fetchProducts({ silent: true }), { enabled: !activeModal });
 
   // Handle Form Change
   const handleFormChange = (e) => {
@@ -238,7 +245,7 @@ const ProductList = () => {
       unit: "Pcs",
       minStock: 5,
       maxStock: 100,
-      storeRoom: "Store Room 1",
+      storeRoom: "Engineer Room",
       description: "",
       image: "",
     });
@@ -286,8 +293,8 @@ const ProductList = () => {
               className="px-3 py-2 text-xs rounded-xl bg-white border border-slate-200 text-slate-700 focus:outline-none focus:border-brand-500"
             >
               <option value="">All Rooms</option>
-              <option value="Store Room 1">Store Room 1</option>
-              <option value="Store Room 2">Store Room 2</option>
+              <option value="Engineer Room">Engineer Room</option>
+              <option value="Consumables Room">Consumables Room</option>
             </select>
 
             {/* Stock Level Select */}
@@ -447,7 +454,7 @@ const ProductList = () => {
 
           {/* 1. Modal: PRODUCT DETAILS */}
           {activeModal === "details" && selectedProduct && (
-            <div className="glass-premium w-full max-w-lg rounded-2xl border border-slate-200 overflow-hidden shadow-2xl animate-fade-in text-left">
+            <div className="glass-premium w-full max-w-lg rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="font-bold text-lg text-slate-900">Product Specifications</h3>
                 <button
@@ -511,7 +518,7 @@ const ProductList = () => {
 
           {/* 2. Modal: ADD or EDIT PRODUCT FORM */}
           {(activeModal === "add" || activeModal === "edit") && (
-            <div className="glass-premium w-full max-w-2xl rounded-2xl border border-slate-200 overflow-hidden shadow-2xl animate-fade-in text-left">
+            <div className="glass-premium w-full max-w-2xl rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="font-bold text-lg text-slate-900">
                   {activeModal === "add" ? "Request Add New Product" : `Request Edit Product: ${selectedProduct?.name}`}
@@ -639,7 +646,7 @@ const ProductList = () => {
                     />
                   </div>
 
-                  {/* Store Room (Strict choice between 1 & 2) */}
+                  {/* Home store room for the product */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Store Room *</label>
                     <select
@@ -649,8 +656,8 @@ const ProductList = () => {
                       required
                       className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
                     >
-                      <option value="Store Room 1">Store Room 1</option>
-                      <option value="Store Room 2">Store Room 2</option>
+                      <option value="Engineer Room">Engineer Room</option>
+                      <option value="Consumables Room">Consumables Room</option>
                     </select>
                   </div>
 
@@ -715,7 +722,7 @@ const ProductList = () => {
 
           {/* 3. Modal: STOCK MUTATION FORM */}
           {activeModal === "stock" && selectedProduct && (
-            <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 overflow-hidden shadow-2xl animate-fade-in text-left">
+            <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="font-bold text-lg text-slate-900">
                   Request Stock {mutationType === "IN" ? "In" : mutationType === "OUT" ? "Out" : "Return"}
@@ -782,7 +789,7 @@ const ProductList = () => {
 
           {/* 4. Modal: ISSUE PRODUCT FORM */}
           {activeModal === "issue" && selectedProduct && (
-            <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 overflow-hidden shadow-2xl animate-fade-in text-left">
+            <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
                   <Send className="h-5 w-5 text-amber-600" />

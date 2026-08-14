@@ -1,30 +1,49 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
-import { Loader2, ClipboardList, Eye, Calendar, HelpCircle, Check, X, Clock } from "lucide-react";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
+import {
+  Loader2,
+  ClipboardList,
+  Calendar,
+  HelpCircle,
+  Check,
+  X,
+  Clock,
+  UserRound,
+} from "lucide-react";
 
+/**
+ * The whole store's request queue — who asked for what, when they asked, and
+ * when the Admin decided. `Mine` narrows it to the supervisor's own rows.
+ */
 const MyRequests = () => {
   const { showToast } = useNotifications();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("All"); // All | Pending | Approved | Rejected
+  const [scope, setScope] = useState("All"); // All | Mine
 
-  const fetchMyRequests = async () => {
+  /** [silent] is used by the background poll: no spinner, no error toast. */
+  const fetchMyRequests = async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const { data } = await API.get("/requests/myrequests");
       setRequests(data);
     } catch (error) {
       console.error("Error fetching my requests:", error);
-      showToast("Could not load request history", "error");
+      if (!silent) showToast("Could not load request history", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchMyRequests();
   }, []);
+
+  // An Admin decision lands on their console, so re-read on a timer.
+  useAutoRefresh(() => fetchMyRequests({ silent: true }));
 
   const getStatusStyle = (status) => {
     switch (status) {
@@ -61,26 +80,65 @@ const MyRequests = () => {
     }
   };
 
-  const filteredRequests = statusFilter === "All"
-    ? requests
-    : requests.filter((r) => r.status === statusFilter);
+  // Scope narrows who raised it; the status tabs then narrow that.
+  const scopedRequests = scope === "Mine" ? requests.filter((r) => r.isMine) : requests;
 
-  const formatDate = (dateString) => {
+  const filteredRequests =
+    statusFilter === "All"
+      ? scopedRequests
+      : scopedRequests.filter((r) => r.status === statusFilter);
+
+  const countFor = (status) =>
+    status === "All"
+      ? scopedRequests.length
+      : scopedRequests.filter((r) => r.status === status).length;
+
+  /** Date on the first line, clock time on the second. */
+  const formatDateTime = (dateString) => {
+    if (!dateString) return null;
     const date = new Date(dateString);
-    return date.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+    return {
+      date: date.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }),
+      time: date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
   };
 
   return (
     <div className="space-y-6">
       {/* Tab Filter and Status Headers */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 rounded-2xl glass-premium border border-slate-200">
-        <div className="flex items-center gap-2">
-          <ClipboardList className="h-5 w-5 text-brand-700" />
-          <h3 className="text-lg font-bold text-slate-900">Submitted Requests Log</h3>
+      <div className="flex flex-col gap-4 p-5 rounded-2xl glass-premium border border-slate-200">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <ClipboardList className="h-5 w-5 text-brand-700" />
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">Submitted Requests Log</h3>
+              <p className="text-xs text-slate-500">
+                Every supervisor's requests — {requests.filter((r) => r.isMine).length} of{" "}
+                {requests.length} raised by you
+              </p>
+            </div>
+          </div>
+
+          {/* Whose requests */}
+          <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+            {["All", "Mine"].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setScope(tab)}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  scope === tab
+                    ? "bg-brand-600 text-white shadow"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                {tab === "All" ? "All Supervisors" : "Raised by Me"}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Tab Buttons */}
-        <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+        {/* Status tabs, counted against whatever scope is showing */}
+        <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-xl border border-slate-200 self-start">
           {["All", "Pending", "Approved", "Rejected"].map((status) => (
             <button
               key={status}
@@ -92,6 +150,7 @@ const MyRequests = () => {
               }`}
             >
               {status}
+              <span className="ml-1.5 opacity-70">{countFor(status)}</span>
             </button>
           ))}
         </div>
@@ -119,8 +178,10 @@ const MyRequests = () => {
                   <th className="py-4 px-6">Request Number</th>
                   <th className="py-4 px-6">Type</th>
                   <th className="py-4 px-6">Target Product</th>
-                  <th className="py-4 px-6">Submission Date</th>
+                  <th className="py-4 px-6">Requested By</th>
+                  <th className="py-4 px-6">Requested On</th>
                   <th className="py-4 px-6">Approval Status</th>
+                  <th className="py-4 px-6">Decided On</th>
                   <th className="py-4 px-6">Admin Notes / Comments</th>
                 </tr>
               </thead>
@@ -143,16 +204,59 @@ const MyRequests = () => {
                       </td>
                       <td className="py-4 px-6 font-bold text-slate-900">
                         {req.productName}
+                        {req.quantity ? (
+                          <span className="block text-[10px] font-semibold text-slate-500">
+                            {req.quantity} pcs requested
+                          </span>
+                        ) : null}
                       </td>
-                      <td className="py-4 px-6 text-xs text-slate-600 flex items-center gap-1.5">
-                        <Calendar className="h-3.5 w-3.5 opacity-65" />
-                        {formatDate(req.createdDate)}
+                      <td className="py-4 px-6">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${
+                            req.isMine
+                              ? "bg-brand-500/10 text-brand-700 border border-brand-500/20"
+                              : "bg-slate-100 text-slate-700 border border-slate-200"
+                          }`}
+                        >
+                          <UserRound className="h-3.5 w-3.5 opacity-70" />
+                          {req.supervisorName}
+                          {req.isMine && <span className="text-[10px] opacity-70">(you)</span>}
+                        </span>
+                      </td>
+                      <td className="py-4 px-6 text-xs text-slate-600 whitespace-nowrap">
+                        <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+                          <Calendar className="h-3.5 w-3.5 opacity-65" />
+                          {formatDateTime(req.createdDate)?.date}
+                        </span>
+                        <span className="flex items-center gap-1.5 mt-0.5 text-[11px] text-slate-500">
+                          <Clock className="h-3 w-3 opacity-65" />
+                          {formatDateTime(req.createdDate)?.time}
+                        </span>
                       </td>
                       <td className="py-4 px-6">
                         <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${statusStyle.bg}`}>
                           <StatusIcon className="h-3 w-3" />
                           {req.status}
                         </span>
+                      </td>
+                      <td className="py-4 px-6 text-xs text-slate-600 whitespace-nowrap">
+                        {formatDateTime(req.decidedAt) ? (
+                          <>
+                            <span className="block font-semibold text-slate-700">
+                              {formatDateTime(req.decidedAt).date}
+                            </span>
+                            <span className="block mt-0.5 text-[11px] text-slate-500">
+                              {formatDateTime(req.decidedAt).time}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-slate-400">Not decided yet</span>
+                        )}
+                        {req.decidedBy && (
+                          <span className="block mt-0.5 text-[10px] text-slate-500">
+                            by {req.decidedBy}
+                          </span>
+                        )}
                       </td>
                       <td className="py-4 px-6 text-xs italic text-slate-600 max-w-xs truncate">
                         {req.adminComments || (req.status === "Pending" ? "Awaiting review..." : "No comments left.")}
