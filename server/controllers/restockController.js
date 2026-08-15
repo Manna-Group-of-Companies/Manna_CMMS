@@ -14,6 +14,12 @@ const RETURN_CONDITIONS = ["Good", "Damaged", "Repairable", "Expired"];
  *          the stock is in Red Stock the moment this succeeds.
  * @route   POST /api/red-stock/returns
  * @access  Private (Supervisor)
+ *
+ * Any supervisor may return any issue. The supervisors run one store between
+ * them, so whoever the recipient hands the stock back to is the one who books
+ * it in — waiting for the supervisor who issued it to come on shift would
+ * leave the stock unaccounted for. `returnedBy` records who did the booking,
+ * which is not necessarily who issued it.
  */
 export const returnIssuedStock = async (req, res) => {
   const { issueId, quantity, reason, condition, department } = req.body;
@@ -34,11 +40,6 @@ export const returnIssuedStock = async (req, res) => {
     const issue = await IssueHistory.findById(issueId);
     if (!issue) {
       return res.status(404).json({ message: "Issue history not found" });
-    }
-
-    // Only the supervisor who issued the stock can return it.
-    if (issue.supervisor.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: "Not authorized to return this issue" });
     }
 
     const outstanding = issue.quantity - (issue.returnedQuantity || 0);

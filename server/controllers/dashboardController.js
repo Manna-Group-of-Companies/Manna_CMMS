@@ -334,11 +334,14 @@ export const getSupervisorDashboard = async (req, res) => {
     todayActivity.sort((a, b) => new Date(b.time) - new Date(a.time));
 
     // 5. Everything the store has issued — today's count and the last ten,
-    //    each carrying the supervisor who issued it.
+    //    each carrying the supervisor who issued it. Fully returned issues are
+    //    left out, the same way `GET /api/issues` leaves them out for a
+    //    supervisor: the list is what is still out with a recipient. The counts
+    //    are of what went out today, so they stand whether it came back or not.
     const [issuedTodayCount, myIssuedTodayCount, recentIssues] = await Promise.all([
       IssueHistory.countDocuments(todayFilter),
       IssueHistory.countDocuments({ supervisor: supervisorId, ...todayFilter }),
-      IssueHistory.find()
+      IssueHistory.find({ returnStatus: { $ne: "Returned" } })
         .populate("product", "name code unit storeRoom image")
         .populate("supervisor", "name email role")
         .sort({ createdAt: -1 })

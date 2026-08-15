@@ -109,21 +109,28 @@ export const issueProduct = async (req, res) => {
 // @route   GET /api/issues?scope=all|mine
 // @access  Private (Admin and Supervisor)
 //
-// Supervisors share one store, so they read the same history the Admin does:
-// every issue, who made it and when. `?scope=mine` narrows it to the caller.
-// Returning an issue is still owner-only — that check lives in
-// `returnIssuedStock`, not here.
+// Supervisors share one store, so they read the same history: every issue,
+// who made it and when. `?scope=mine` narrows it to the caller. Any supervisor
+// may return any issue — see `returnIssuedStock`.
+//
+// A fully returned issue is closed business, so it drops off the supervisors'
+// list entirely — whoever issued it and whoever returned it alike — leaving
+// only rows with stock still out with a recipient. The Admin keeps the whole
+// record: theirs is the audit view, and nothing is deleted either way.
 export const getIssueHistory = async (req, res) => {
   try {
     const query = req.query.scope === "mine" ? { supervisor: req.user._id } : {};
+    if (req.user.role === "Supervisor") {
+      query.returnStatus = { $ne: "Returned" };
+    }
 
     const issues = await IssueHistory.find(query)
       .populate("product", "name code unit storeRoom image")
       .populate("supervisor", "name email role")
       .sort({ createdAt: -1 });
 
-    // `isMine` is what the UI hides the Return button behind. It is a
-    // convenience for the client, never the authorisation itself.
+    // `isMine` only labels the row as the caller's own — returning is open to
+    // every supervisor, so nothing is gated on it.
     res.json(
       issues.map((issue) => ({
         ...issue.toObject(),
