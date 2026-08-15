@@ -3,7 +3,7 @@ import axios from "axios";
 const API = axios.create({
   // Falls back to the hosted API so a build made without VITE_API_URL set
   // still reaches a real server instead of a dev machine that isn't there.
-  baseURL: import.meta.env.VITE_API_URL || "https://cmms-0qbj.onrender.com/api",
+  baseURL: import.meta.env.VITE_API_URL || "https://manna-cmms.onrender.com/api",
   headers: {
     "Content-Type": "application/json",
   },
