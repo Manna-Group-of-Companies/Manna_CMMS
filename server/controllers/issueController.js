@@ -1,5 +1,6 @@
 import IssueHistory from "../models/IssueHistory.js";
 import Product from "../models/Product.js";
+import RestockItem from "../models/RestockItem.js";
 import Notification from "../models/Notification.js";
 import { recordMovement } from "../utils/stockLedger.js";
 import { debitAcrossRooms } from "../utils/stockRooms.js";
@@ -129,11 +130,44 @@ export const getIssueHistory = async (req, res) => {
       .populate("supervisor", "name email role")
       .sort({ createdAt: -1 });
 
+    // The issue itself only counts how much came back. Who handed each batch
+    // over, when, and in what condition lives on the Red Stock items raised
+    // against it — one per return, since a return may be partial and repeated.
+    const returnsByIssue = new Map();
+    const restockItems = await RestockItem.find({
+      sourceIssue: { $in: issues.map((issue) => issue._id) },
+    })
+      .populate("returnedBy", "name email role")
+      .sort({ returnDate: 1 })
+      .lean();
+
+    for (const item of restockItems) {
+      const key = String(item.sourceIssue);
+      if (!returnsByIssue.has(key)) returnsByIssue.set(key, []);
+      returnsByIssue.get(key).push({
+        _id: item._id,
+        restockNumber: item.restockNumber,
+        quantity: item.quantity,
+        condition: item.condition,
+        department: item.department,
+        returnDate: item.returnDate,
+        // Null once the account is deleted; the UI falls back to "Unknown".
+        returnedBy: item.returnedBy
+          ? { name: item.returnedBy.name, email: item.returnedBy.email, role: item.returnedBy.role }
+          : null,
+        // Where it has got to since: still in Red Stock, or merged into a room.
+        status: item.status,
+        destinationRoom: item.destinationRoom || "",
+        mergedAt: item.mergedAt || null,
+      });
+    }
+
     // `isMine` only labels the row as the caller's own — returning is open to
     // every supervisor, so nothing is gated on it.
     res.json(
       issues.map((issue) => ({
         ...issue.toObject(),
+        returns: returnsByIssue.get(String(issue._id)) || [],
         isMine:
           String(issue.supervisor?._id || issue.supervisor) === String(req.user._id),
       }))
