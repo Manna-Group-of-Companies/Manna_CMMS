@@ -62,6 +62,27 @@ const AdminIssueHistory = () => {
     "Partially Returned": { tone: "badge-amber", label: "Part returned" },
   };
 
+  // Rooms are admin-configurable, so only the two an install ships with get
+  // their own colour; anything added later falls back to slate.
+  const ROOM_TONE = {
+    "Engineer Room": "badge-indigo",
+    "Consumables Room": "badge-cyan",
+  };
+
+  /**
+   * Which room(s) the stock actually left. A single issue can be drawn across
+   * rooms when the home room runs short, in which case `sourceRoom` holds them
+   * comma-separated. Older rows pre-date the field, so the product's home room
+   * stands in — it is where the stock would have come from.
+   */
+  const roomsOf = (issue) => {
+    const rooms = (issue.sourceRoom || issue.product?.storeRoom || "")
+      .split(",")
+      .map((room) => room.trim())
+      .filter(Boolean);
+    return [...new Set(rooms)];
+  };
+
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
@@ -106,6 +127,7 @@ const AdminIssueHistory = () => {
                 <tr>
                   <th>Issue #</th>
                   <th>Product</th>
+                  <th>From Room</th>
                   <th className="text-center">Issued</th>
                   <th className="text-center">Returned</th>
                   <th>Recipient</th>
@@ -121,6 +143,7 @@ const AdminIssueHistory = () => {
                   const returnedQty = issue.returnedQuantity || 0;
                   const outstanding = outstandingOf(issue);
                   const isOpen = expanded === issue._id;
+                  const rooms = roomsOf(issue);
                   const status = RETURN_STATUS[issue.returnStatus] || {
                     tone: "badge-rose",
                     label: "Not returned",
@@ -159,6 +182,24 @@ const AdminIssueHistory = () => {
                               </span>
                             </span>
                           </button>
+                        </td>
+                        {/* Where the stock was drawn from — usually one room,
+                            but a short home room spills into the next. */}
+                        <td>
+                          <div className="flex flex-wrap items-center gap-1 min-w-[120px]">
+                            {rooms.length === 0 ? (
+                              <span className="text-slate-400">—</span>
+                            ) : (
+                              rooms.map((room) => (
+                                <span
+                                  key={room}
+                                  className={`badge badge-soft ${ROOM_TONE[room] || "badge-slate"}`}
+                                >
+                                  {room}
+                                </span>
+                              ))
+                            )}
+                          </div>
                         </td>
                         <td className="text-center">
                           <span className="badge badge-amber">
@@ -247,7 +288,7 @@ const AdminIssueHistory = () => {
                         <tr className="bg-slate-50">
                           {/* `!` beats the `.tbl td` padding, which is more
                               specific than a bare utility. */}
-                          <td colSpan={9} className="py-4!">
+                          <td colSpan={10} className="py-4!">
                             <div className="space-y-3">
                               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                                 <h5 className="eyebrow">
