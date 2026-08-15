@@ -113,8 +113,8 @@ flutter test        # 49 tests
 | `context/AuthContext.jsx`            | `state/auth_provider.dart`                        |
 | `context/NotificationContext.jsx`    | `state/notification_provider.dart`, `core/toast.dart` |
 | `App.jsx` routes + layout guards     | `router.dart` (go_router; supervisor routes only)  |
-| `components/Sidebar.jsx`             | `widgets/app_shell.dart` → `AppDrawer`            |
-| `components/Navbar.jsx`              | `widgets/app_shell.dart` → app bar + bell sheet   |
+| `components/Sidebar.jsx`             | `widgets/app_shell.dart` → `AppBottomNav`         |
+| `components/Navbar.jsx`              | `widgets/app_shell.dart` → app bar, gear + bell    |
 | `pages/auth/Login.jsx`               | `screens/login_screen.dart`                       |
 | `pages/admin/*.jsx`                  | — not ported; web console only                    |
 | `pages/supervisor/*.jsx`             | `screens/supervisor/*.dart`                       |
@@ -129,7 +129,15 @@ Everything the web client does is present. These changes were made because a
 phone is not a desktop browser, or because the web version had a gap:
 
 - **Wide tables → cards.** Every table (products, requests, issues) is a list
-  of cards; modals are bottom sheets, and the sidebar is a drawer.
+  of cards; modals are bottom sheets, and the sidebar is a bottom tab bar.
+- **No Home screen and no drawer.** The bottom bar carries every screen the
+  signed-in role can reach, so nothing is hidden behind a slide-out menu. A
+  supervisor opens on the product catalog; `/supervisor/dashboard` redirects
+  there for anyone holding an old link.
+- **Profile and sign-out sit under Settings.** A gear in the app bar, beside
+  the notification bell, opens the account card, the request tallies, the
+  server address and Sign Out. `/supervisor/profile` and `/branch/profile`
+  redirect to it. The bottom bar is left to the working screens.
 - **Stock In / Out / Return requests are reachable.** The web client has
   complete handlers and a modal for these, but no button opens it — supervisors
   cannot raise the requests the admin console is built to approve. They are in

@@ -69,25 +69,21 @@ void main() {
             },
           ]);
 
-        case '/api/dashboard/supervisor':
-          return ok({
-            'totalProducts': 42,
-            'pendingRequests': 3,
-            'approvedRequests': 17,
-            'rejectedRequests': 2,
-            'lowStockProductsCount': 1,
-            'todayActivity': [
-              {
-                '_id': 'r1',
-                'requestNumber': 'REQ-IN-100001',
-                'productName': 'HDMI Cable',
-                'requestType': 'Stock In',
-                'supervisorName': 'Sam Store',
-                'status': 'Pending',
-                'time': '2026-08-11T09:15:00.000Z',
-              },
-            ],
-          });
+        // The catalog is where a supervisor lands — there is no Home screen.
+        case '/api/products':
+          return ok([
+            {
+              '_id': 'p1',
+              'name': 'HDMI Cable',
+              'category': 'Electrical',
+              'unit': 'pcs',
+              'quantity': 42,
+              'minStockLevel': 5,
+            },
+          ]);
+
+        case '/api/products/categories':
+          return ok(['Electrical']);
       }
 
       return http.Response(jsonEncode({'message': 'Unexpected $path'}), 404);
@@ -114,7 +110,7 @@ void main() {
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('signs a supervisor in and renders the dashboard', (tester) async {
+  testWidgets('signs a supervisor in and renders the catalog', (tester) async {
     await tester.pumpWidget(StockMasterApp(apiClient: buildClient()));
     await tester.pumpAndSettle();
 
@@ -123,27 +119,41 @@ void main() {
 
     await signIn(tester, pin: '4321');
 
-    // Redirected into the portal with metrics parsed from the API.
-    // Scoped to the app bar: "Home" is also a bottom-tab label.
+    // Redirected into the portal, which now opens on the catalog.
     expect(
-      find.descendant(of: find.byType(AppBar), matching: find.text('Home')),
+      find.descendant(
+        of: find.byType(AppBar),
+        matching: find.text('Browse Products Catalog'),
+      ),
       findsOneWidget,
     );
-    expect(find.text('42'), findsOneWidget, reason: 'total products');
-    // Metric tiles pad single digits to two, as in the design.
-    expect(find.text('03'), findsOneWidget, reason: 'pending requests');
-    // The panels below the metric grid are built lazily by the ListView.
-    await tester.drag(find.byType(ListView), const Offset(0, -700));
-    await tester.pumpAndSettle();
-    expect(find.text("Today's Activity Log"), findsOneWidget);
-    expect(find.text('REQ-IN-100001'), findsOneWidget);
     expect(find.text('HDMI Cable'), findsWidgets);
+
+    // Every working screen is a bottom tab; none hide behind a drawer.
+    expect(find.byType(Drawer), findsNothing);
+    for (final tab in ['Catalog', 'Requests', 'Approvals', 'Issues', 'Red Room']) {
+      expect(find.text(tab), findsWidgets, reason: '$tab tab');
+    }
+    expect(find.text('Home'), findsNothing);
+
+    // Settings is the gear in the app bar, holding profile and sign-out.
+    expect(
+      find.descendant(
+        of: find.byType(AppBar),
+        matching: find.byTooltip('Settings'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Profile'), findsOneWidget);
+    expect(find.text('Sign Out'), findsOneWidget);
 
     // The token from /auth/login is attached to subsequent calls.
     expect(requested, contains('POST /api/auth/login'));
-    expect(requested, contains('GET /api/dashboard/supervisor'));
-    final dashboardCall = requested.indexOf('GET /api/dashboard/supervisor');
-    expect(authHeaders[dashboardCall], 'Bearer test-token');
+    expect(requested, contains('GET /api/products'));
+    final catalogCall = requested.indexOf('GET /api/products');
+    expect(authHeaders[catalogCall], 'Bearer test-token');
   });
 
   testWidgets('surfaces a rejected login and stays on the login screen',
@@ -155,7 +165,7 @@ void main() {
 
     expect(find.text('Invalid name or PIN. Please try again.'), findsWidgets);
     expect(find.text('Sign In to Portal'), findsOneWidget);
-    expect(requested, isNot(contains('GET /api/dashboard/supervisor')));
+    expect(requested, isNot(contains('GET /api/products')));
   });
 
   testWidgets('turns an admin away at login', (tester) async {
@@ -168,7 +178,7 @@ void main() {
     expect(find.text(kAdminNotSupported), findsWidgets);
     expect(find.text('Sign In to Portal'), findsOneWidget);
     // No session was established, so nothing behind the login screen loaded.
-    expect(requested, isNot(contains('GET /api/dashboard/supervisor')));
+    expect(requested, isNot(contains('GET /api/products')));
   });
 
   testWidgets('restores a stored session without showing the login screen',
@@ -187,9 +197,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Sign In to Portal'), findsNothing);
-    // Scoped to the app bar: "Home" is also a bottom-tab label.
     expect(
-      find.descendant(of: find.byType(AppBar), matching: find.text('Home')),
+      find.descendant(
+        of: find.byType(AppBar),
+        matching: find.text('Browse Products Catalog'),
+      ),
       findsOneWidget,
     );
     // The stored token is re-validated on start-up.

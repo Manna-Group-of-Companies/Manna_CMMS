@@ -9,30 +9,19 @@ import '../core/toast.dart';
 import '../data/repository.dart';
 import '../models/models.dart';
 import 'common.dart';
-import 'product_details_sheet.dart';
+import 'product_details_sheet.dart' show ProductAction, SheetGrabber;
+import 'product_table.dart';
 
-/// A single entry in a product card's overflow menu.
-class ProductAction {
-  const ProductAction({
-    required this.label,
-    required this.icon,
-    required this.onSelected,
-    this.color = AppColors.textBody,
-  });
-
-  final String label;
-  final IconData icon;
-  final Color color;
-  final VoidCallback onSelected;
-}
+export 'product_details_sheet.dart' show ProductAction;
 
 /// Search + filters + product list, shared by the admin and supervisor
-/// catalog screens (`pages/*/ProductList.jsx`). Callers supply the per-row
-/// actions their role is allowed to perform.
+/// catalog screens (`pages/*/ProductList.jsx`). Callers supply the actions
+/// their role is allowed to perform; rows themselves carry no menu, so the
+/// actions surface as buttons once the details sheet is open.
 class ProductBrowser extends StatefulWidget {
   const ProductBrowser({super.key, this.actionsBuilder});
 
-  /// Builds the overflow-menu actions for [product]. `reload` re-runs the
+  /// Builds the details-sheet actions for [product]. `reload` re-runs the
   /// current query, e.g. after a stock-changing operation.
   final List<ProductAction> Function(
     BuildContext context,
@@ -148,15 +137,15 @@ class _ProductBrowserState extends State<ProductBrowser>
                             ),
                           ],
                         )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
-                          itemCount: _products.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 10),
-                          itemBuilder: (context, index) => _ProductCard(
-                            product: _products[index],
-                            actions: widget.actionsBuilder
-                                ?.call(context, _products[index], _loadProducts),
-                          ),
+                      : ProductTable(
+                          products: _products,
+                          // Clears the "Request Product" button floating over
+                          // the bottom of the list.
+                          bottomInset: 88,
+                          actionsOf: (context, product) =>
+                              widget.actionsBuilder
+                                  ?.call(context, product, _loadProducts) ??
+                              const [],
                         ),
                 ),
         ),
@@ -164,226 +153,331 @@ class _ProductBrowserState extends State<ProductBrowser>
     );
   }
 
+  /// How many of the three filters are set to something other than "all" —
+  /// shown on the filter button so a narrowed list is never a surprise.
+  int get _activeFilters => [
+        _category != _anyCategory,
+        _storeRoom != _anyRoom,
+        _stockStatus != _anyStock,
+      ].where((applied) => applied).length;
+
+  /// Search stays on screen and the three dropdowns live in a sheet, so the
+  /// list gets the room the filter panel used to take.
   Widget _buildFilterBar() {
+    final chips = <_ActiveFilter>[
+      if (_category != _anyCategory)
+        _ActiveFilter(_category, () => _applyFilters(category: _anyCategory)),
+      if (_storeRoom != _anyRoom)
+        _ActiveFilter(_storeRoom, () => _applyFilters(storeRoom: _anyRoom)),
+      if (_stockStatus != _anyStock)
+        _ActiveFilter(_stockStatus, () => _applyFilters(stockStatus: _anyStock)),
+    ];
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: AppCard(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            TextField(
-              controller: _searchController,
-              onChanged: _onSearchChanged,
-              textInputAction: TextInputAction.search,
-              style: const TextStyle(fontSize: 13.5, color: AppColors.textStrong),
-              decoration: InputDecoration(
-                hintText: 'Search code, name, supplier...',
-                prefixIcon: const Icon(Icons.search, size: 18),
-                suffixIcon: _searchController.text.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.close, size: 16),
-                        color: AppColors.textMuted,
-                        onPressed: () {
-                          _searchController.clear();
-                          _onSearchChanged('');
-                          setState(() {});
-                        },
-                      ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownShell(
-                    child: AppDropdown<String>(
-                      value: _category,
-                      items: [_anyCategory, ..._categories],
-                      onChanged: (value) {
-                        if (value == null) return;
-                        setState(() => _category = value);
-                        _loadProducts();
-                      },
-                    ),
+      padding: EdgeInsets.fromLTRB(16, 10, 16, chips.isEmpty ? 6 : 2),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: _onSearchChanged,
+                  textInputAction: TextInputAction.search,
+                  style: const TextStyle(fontSize: 13, color: AppColors.textStrong),
+                  decoration: InputDecoration(
+                    hintText: 'Search code, name, category...',
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    prefixIconConstraints: const BoxConstraints(minWidth: 38),
+                    suffixIcon: _searchController.text.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close, size: 16),
+                            color: AppColors.textMuted,
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () {
+                              _searchController.clear();
+                              _onSearchChanged('');
+                              setState(() {});
+                            },
+                          ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: DropdownShell(
-                    child: AppDropdown<String>(
-                      value: _storeRoom,
-                      items: const [_anyRoom, 'Engineer Room', 'Consumables Room'],
-                      onChanged: (value) {
-                        if (value == null) return;
-                        setState(() => _storeRoom = value);
-                        _loadProducts();
-                      },
-                    ),
+              ),
+              const SizedBox(width: 8),
+              _FilterButton(count: _activeFilters, onTap: _openFilterSheet),
+            ],
+          ),
+          if (chips.isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final chip in chips)
+                      _FilterChip(label: chip.label, onClear: chip.onClear),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// The one place a filter change is committed and the list re-queried.
+  void _applyFilters({String? category, String? storeRoom, String? stockStatus}) {
+    setState(() {
+      _category = category ?? _category;
+      _storeRoom = storeRoom ?? _storeRoom;
+      _stockStatus = stockStatus ?? _stockStatus;
+    });
+    _loadProducts();
+  }
+
+  Future<void> _openFilterSheet() async {
+    // Edited on a copy, so backing out of the sheet leaves the list alone.
+    var category = _category;
+    var storeRoom = _storeRoom;
+    var stockStatus = _stockStatus;
+
+    final applied = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => Container(
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SheetGrabber(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 8, 0),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: PanelHeader(
+                          icon: Icons.tune,
+                          iconColor: AppColors.primaryDeep,
+                          title: 'Filters',
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => setSheetState(() {
+                          category = _anyCategory;
+                          storeRoom = _anyRoom;
+                          stockStatus = _anyStock;
+                        }),
+                        child: const Text(
+                          'Clear all',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
+                  child: Column(
+                    children: [
+                      _SheetField(
+                        label: 'Category',
+                        value: category,
+                        items: [_anyCategory, ..._categories],
+                        onChanged: (value) => setSheetState(() => category = value),
+                      ),
+                      const SizedBox(height: 12),
+                      _SheetField(
+                        label: 'Store room',
+                        value: storeRoom,
+                        items: const [_anyRoom, 'Engineer Room', 'Consumables Room'],
+                        onChanged: (value) => setSheetState(() => storeRoom = value),
+                      ),
+                      const SizedBox(height: 12),
+                      _SheetField(
+                        label: 'Stock level',
+                        value: stockStatus,
+                        items: const [_anyStock, 'Low Stock Alert', 'Out of Stock'],
+                        onChanged: (value) => setSheetState(() => stockStatus = value),
+                      ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: () => Navigator.of(sheetContext).pop(true),
+                          child: const Text('Show products'),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            DropdownShell(
-              child: AppDropdown<String>(
-                value: _stockStatus,
-                items: const [_anyStock, 'Low Stock Alert', 'Out of Stock'],
-                onChanged: (value) {
-                  if (value == null) return;
-                  setState(() => _stockStatus = value);
-                  _loadProducts();
-                },
+          ),
+        ),
+      ),
+    );
+
+    if (applied == true) {
+      _applyFilters(
+        category: category,
+        storeRoom: storeRoom,
+        stockStatus: stockStatus,
+      );
+    }
+  }
+}
+
+/// A filter currently narrowing the list, and how to drop it.
+class _ActiveFilter {
+  const _ActiveFilter(this.label, this.onClear);
+
+  final String label;
+  final VoidCallback onClear;
+}
+
+/// Opens the filter sheet, carrying a count of the filters already applied.
+class _FilterButton extends StatelessWidget {
+  const _FilterButton({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = count > 0;
+
+    return Material(
+      color: active ? AppColors.primary : AppColors.surface,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Ink(
+          height: 42,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: active ? AppColors.primary : AppColors.border),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.tune,
+                size: 17,
+                color: active ? Colors.white : AppColors.textSecondary,
               ),
-            ),
-          ],
+              const SizedBox(width: 6),
+              Text(
+                active ? '$count' : 'Filters',
+                style: TextStyle(
+                  color: active ? Colors.white : AppColors.textSecondary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _ProductCard extends StatelessWidget {
-  const _ProductCard({required this.product, this.actions});
+/// An applied filter, tapped to remove it.
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({required this.label, required this.onClear});
 
-  final Product product;
-  final List<ProductAction>? actions;
+  final String label;
+  final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
-    final stockColor = product.isOutOfStock
-        ? AppColors.danger
-        : product.isLowStock
-            ? AppColors.warning
-            : AppColors.success;
-
-    return AppCard(
-      padding: const EdgeInsets.all(14),
-      onTap: () => showProductDetails(context, product),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Material(
+      color: AppColors.primary.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onClear,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 5, 7, 5),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              ProductThumb(imageUrl: product.image, size: 46),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      product.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.textStrong,
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                        height: 1.25,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    MonoText(product.code, fontSize: 10.5),
-                  ],
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.primaryDeep,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              if (actions != null && actions!.isNotEmpty)
-                PopupMenuButton<ProductAction>(
-                  icon: const Icon(Icons.more_vert, size: 20, color: AppColors.textSecondary),
-                  color: AppColors.surfaceMuted,
-                  position: PopupMenuPosition.under,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: const BorderSide(color: AppColors.border),
-                  ),
-                  onSelected: (action) => action.onSelected(),
-                  itemBuilder: (context) => [
-                    for (final action in actions!)
-                      PopupMenuItem<ProductAction>(
-                        value: action,
-                        height: 44,
-                        child: Row(
-                          children: [
-                            Icon(action.icon, size: 17, color: action.color),
-                            const SizedBox(width: 10),
-                            Text(
-                              action.label,
-                              style: TextStyle(color: action.color, fontSize: 13),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
+              const SizedBox(width: 4),
+              const Icon(Icons.close, size: 13, color: AppColors.primaryDeep),
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: stockColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  '${product.quantity} ${product.unit}',
-                  style: TextStyle(
-                    color: stockColor,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              if (product.isLowStock) ...[
-                const SizedBox(width: 8),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 12,
-                      color: AppColors.warningDeep.withValues(alpha: 0.8),
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      product.isOutOfStock ? 'Out of Stock' : 'Low Stock',
-                      style: TextStyle(
-                        color: AppColors.warningDeep.withValues(alpha: 0.8),
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              const Spacer(),
-              SoftChip(product.storeRoom),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${product.category} • ${product.brand}',
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: AppColors.textBody, fontSize: 12),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  product.supplier,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5),
-                ),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
+    );
+  }
+}
+
+/// A labelled dropdown inside the filter sheet.
+class _SheetField extends StatelessWidget {
+  const _SheetField({
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String value;
+  final List<String> items;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        DropdownShell(
+          child: AppDropdown<String>(
+            value: value,
+            items: items,
+            onChanged: (selected) {
+              if (selected != null) onChanged(selected);
+            },
+          ),
+        ),
+      ],
     );
   }
 }

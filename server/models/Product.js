@@ -18,15 +18,19 @@ const productSchema = new mongoose.Schema(
       required: [true, "Category is required"],
       trim: true,
     },
-    brand: {
+    // Where the item physically sits on the shelving, e.g. "A-1". The store
+    // room says which room; this says where to walk to inside it.
+    //
+    // Optional on purpose: the catalog imported from the transaction ledger
+    // carries no rack for any of its products, and making this required would
+    // block every one of them from being saved until somebody had walked the
+    // store. New products ask for it; old ones can be filled in as they are
+    // handled.
+    rackNumber: {
       type: String,
-      required: [true, "Brand is required"],
+      default: "",
       trim: true,
-    },
-    supplier: {
-      type: String,
-      required: [true, "Supplier is required"],
-      trim: true,
+      uppercase: true,
     },
     // Maintained by utils/stockRooms.js as the sum of this product's room
     // rows. Never assign it directly; call creditRoom/debitRoom instead.

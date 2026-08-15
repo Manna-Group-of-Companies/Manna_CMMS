@@ -453,16 +453,8 @@ const RequestManagement = () => {
                         <span className="font-semibold text-slate-800">{selectedRequest.details.category}</span>
                       </div>
                       <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <span className="text-slate-500 block mb-0.5">Brand</span>
-                        <span className="font-semibold text-slate-800">{selectedRequest.details.brand}</span>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                         <span className="text-slate-500 block mb-0.5">Initial Quantity</span>
                         <span className="font-bold text-emerald-600">{selectedRequest.details.quantity} {selectedRequest.details.unit}</span>
-                      </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <span className="text-slate-500 block mb-0.5">Supplier</span>
-                        <span className="font-semibold text-slate-800">{selectedRequest.details.supplier}</span>
                       </div>
                       <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                         <span className="text-slate-500 block mb-0.5">Min Stock Limit</span>
@@ -494,16 +486,12 @@ const RequestManagement = () => {
                           <span className="font-semibold text-slate-700">{selectedRequest.product?.name}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500 block">Category / Brand</span>
-                          <span className="font-semibold text-slate-700">{selectedRequest.product?.category} / {selectedRequest.product?.brand}</span>
+                          <span className="text-slate-500 block">Category</span>
+                          <span className="font-semibold text-slate-700">{selectedRequest.product?.category}</span>
                         </div>
                         <div>
                           <span className="text-slate-500 block">Store Room</span>
                           <span className="font-semibold text-slate-700">{selectedRequest.product?.storeRoom}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block">Supplier</span>
-                          <span className="font-semibold text-slate-700">{selectedRequest.product?.supplier}</span>
                         </div>
                         <div>
                           <span className="text-slate-500 block">Stock Bounds</span>
@@ -521,26 +509,19 @@ const RequestManagement = () => {
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-500 block">Category / Brand</span>
+                          <span className="text-slate-500 block">Category</span>
                           <span className={`font-bold ${
-                            selectedRequest.product?.category !== selectedRequest.details.category || 
-                            selectedRequest.product?.brand !== selectedRequest.details.brand 
-                              ? "text-brand-700" 
+                            selectedRequest.product?.category !== selectedRequest.details.category
+                              ? "text-brand-700"
                               : "text-slate-700"
                           }`}>
-                            {selectedRequest.details.category} / {selectedRequest.details.brand}
+                            {selectedRequest.details.category}
                           </span>
                         </div>
                         <div>
                           <span className="text-slate-500 block">Store Room</span>
                           <span className={`font-bold ${selectedRequest.product?.storeRoom !== selectedRequest.details.storeRoom ? "text-brand-700" : "text-slate-700"}`}>
                             {selectedRequest.details.storeRoom}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block">Supplier</span>
-                          <span className={`font-bold ${selectedRequest.product?.supplier !== selectedRequest.details.supplier ? "text-brand-700" : "text-slate-700"}`}>
-                            {selectedRequest.details.supplier}
                           </span>
                         </div>
                         <div>

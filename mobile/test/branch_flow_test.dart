@@ -154,6 +154,14 @@ void main() {
             'todayActivity': <Map<String, dynamic>>[],
           });
 
+        // A supervisor lands on the catalog before tapping through to the
+        // approvals tab.
+        case '/api/products':
+          return ok(<Map<String, dynamic>>[]);
+
+        case '/api/products/categories':
+          return ok(<String>[]);
+
         case '/api/branch-requests/mine':
         case '/api/branch-requests':
           if (request.method == 'POST') {
@@ -198,13 +206,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// The stock table sits below the metric grid, and the ListView only builds
-  /// what is on screen.
-  Future<void> scrollToStock(WidgetTester tester) async {
-    await tester.drag(find.byType(ListView), const Offset(0, -700));
-    await tester.pumpAndSettle();
-  }
-
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   testWidgets('signs a branch in and shows only its own room', (tester) async {
@@ -218,12 +219,12 @@ void main() {
       find.descendant(of: find.byType(AppBar), matching: find.text('Engineer Room Stock')),
       findsOneWidget,
     );
-    expect(find.text('57'), findsOneWidget, reason: 'total quantity in the room');
-
-    await scrollToStock(tester);
-    expect(find.text('My Request Status'), findsOneWidget);
+    // The room's stock is the whole page — no summary cards above it, so the
+    // grid and its first row are on screen without scrolling.
+    expect(find.text('ITEM'), findsOneWidget, reason: 'the stock grid header');
+    expect(find.text('STOCK'), findsOneWidget);
+    expect(find.text('CATEGORY'), findsOneWidget);
     expect(find.text('Wireless Mouse'), findsWidgets);
-    expect(find.text('Stock on Hand'), findsOneWidget);
 
     // The room read is the branch endpoint; the supervisor screens are not
     // fetched at all.
@@ -237,8 +238,16 @@ void main() {
     await tester.pumpAndSettle();
     await signIn(tester, 'Engineer Room Branch');
 
-    await scrollToStock(tester);
-    await tester.tap(find.text('Apply').first);
+    // The stock list is the shared grid now: a row unfolds to its actions
+    // rather than carrying a button across from the start.
+    await tester.tap(find.text('Wireless Mouse').first);
+    await tester.pumpAndSettle();
+
+    final apply = find.text('Apply for Stock');
+    expect(apply, findsOneWidget, reason: 'the unfolded row offers the action');
+    await tester.ensureVisible(apply);
+    await tester.pumpAndSettle();
+    await tester.tap(apply);
     await tester.pumpAndSettle();
 
     expect(find.text('Apply for Product'), findsOneWidget);

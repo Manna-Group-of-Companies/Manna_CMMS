@@ -148,8 +148,7 @@ export const getIssueHistory = async (req, res) => {
 // @access  Private (Supervisor)
 //
 // Returns never restore a store room directly — this is a thin alias over
-// POST /api/red-stock/returns kept so the issue-centric URL still works. The
-// body must carry a return reason, same as the canonical endpoint.
+// POST /api/red-stock/returns kept so the issue-centric URL still works.
 export const returnIssueProduct = (req, res) => {
   req.body = { ...req.body, issueId: req.params.id };
   return returnIssuedStock(req, res);

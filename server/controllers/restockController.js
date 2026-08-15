@@ -22,14 +22,11 @@ const RETURN_CONDITIONS = ["Good", "Damaged", "Repairable", "Expired"];
  * which is not necessarily who issued it.
  */
 export const returnIssuedStock = async (req, res) => {
-  const { issueId, quantity, reason, condition, department } = req.body;
+  const { issueId, quantity, condition, department } = req.body;
 
   try {
     if (!issueId) {
       return res.status(400).json({ message: "Issue ID is required" });
-    }
-    if (!reason || !reason.trim()) {
-      return res.status(400).json({ message: "A return reason is required" });
     }
     if (condition && !RETURN_CONDITIONS.includes(condition)) {
       return res.status(400).json({
@@ -70,7 +67,6 @@ export const returnIssuedStock = async (req, res) => {
       productCode: product.code,
       unit: product.unit,
       quantity: returnQty,
-      reason: reason.trim(),
       condition: condition || "Good",
       returnedBy: req.user._id,
       department: (department && department.trim()) || issue.recipient,

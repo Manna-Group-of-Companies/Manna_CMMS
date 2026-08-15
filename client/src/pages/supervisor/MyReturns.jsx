@@ -260,7 +260,6 @@ const MyReturns = () => {
                   <th className="py-4 px-6 text-center">Qty</th>
                   <th className="py-4 px-6 text-center">Condition</th>
                   <th className="py-4 px-6">Returned By</th>
-                  <th className="py-4 px-6">Reason</th>
                   <th className="py-4 px-6">Returned On</th>
                   <th className="py-4 px-6 text-center">Status</th>
                 </tr>
@@ -326,9 +325,6 @@ const MyReturns = () => {
                           from {item.department}
                         </span>
                       )}
-                    </td>
-                    <td className="py-4 px-6 text-xs text-slate-600 italic max-w-[200px] truncate">
-                      {item.reason}
                     </td>
                     <td className="py-4 px-6 text-xs text-slate-600">
                       <span className="flex items-center gap-1.5">

@@ -57,8 +57,7 @@ const ProductList = () => {
   const [productForm, setProductForm] = useState({
     name: "",
     category: "",
-    brand: "",
-    supplier: "",
+    rackNumber: "",
     quantity: 0,
     unit: "Pcs",
     minStock: 5,
@@ -122,8 +121,7 @@ const ProductList = () => {
     setProductForm({
       name: product.name,
       category: product.category,
-      brand: product.brand,
-      supplier: product.supplier,
+      rackNumber: product.rackNumber || "",
       quantity: product.quantity,
       unit: product.unit,
       minStock: product.minStock,
@@ -239,8 +237,7 @@ const ProductList = () => {
     setProductForm({
       name: "",
       category: "",
-      brand: "",
-      supplier: "",
+      rackNumber: "",
       quantity: 0,
       unit: "Pcs",
       minStock: 5,
@@ -263,7 +260,7 @@ const ProductList = () => {
             </span>
             <input
               type="text"
-              placeholder="Search code, name, supplier..."
+              placeholder="Search code, name, category..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-4 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20"
@@ -343,10 +340,10 @@ const ProductList = () => {
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium text-xs uppercase tracking-wider">
                   <th className="py-4 px-6">Product</th>
-                  <th className="py-4 px-6">Category / Brand</th>
+                  <th className="py-4 px-6">Category</th>
+                  <th className="py-4 px-6">Rack</th>
                   <th className="py-4 px-6">Store Room</th>
                   <th className="py-4 px-6 text-center">Stock Quantity</th>
-                  <th className="py-4 px-6">Supplier</th>
                   <th className="py-4 px-6 text-right">Actions</th>
                 </tr>
               </thead>
@@ -371,7 +368,9 @@ const ProductList = () => {
                       </td>
                       <td className="py-4 px-6">
                         <div className="text-slate-800">{product.category}</div>
-                        <div className="text-xs text-slate-500">{product.brand}</div>
+                      </td>
+                      <td className="py-4 px-6">
+                        <span className="font-mono text-xs text-slate-700">{product.rackNumber || "—"}</span>
                       </td>
                       <td className="py-4 px-6">
                         <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 border border-slate-200 text-slate-600">
@@ -396,9 +395,6 @@ const ProductList = () => {
                             </span>
                           )}
                         </div>
-                      </td>
-                      <td className="py-4 px-6 text-xs text-slate-600">
-                        {product.supplier}
                       </td>
                       <td className="py-4 px-6 text-right">
                         <div className="flex items-center justify-end gap-1.5">
@@ -487,16 +483,12 @@ const ProductList = () => {
                     <span className="font-semibold text-slate-800">{selectedProduct.category}</span>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                    <span className="text-slate-500 block mb-0.5">Brand</span>
-                    <span className="font-semibold text-slate-800">{selectedProduct.brand}</span>
+                    <span className="text-slate-500 block mb-0.5">Rack Number</span>
+                    <span className="font-semibold text-slate-800">{selectedProduct.rackNumber || "—"}</span>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                     <span className="text-slate-500 block mb-0.5">Quantity</span>
                     <span className="font-bold text-slate-900">{selectedProduct.quantity} {selectedProduct.unit}</span>
-                  </div>
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                    <span className="text-slate-500 block mb-0.5">Supplier</span>
-                    <span className="font-semibold text-slate-800">{selectedProduct.supplier}</span>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                     <span className="text-slate-500 block mb-0.5">Min Stock Limit</span>
@@ -561,30 +553,15 @@ const ProductList = () => {
                     />
                   </div>
 
-                  {/* Brand */}
+                  {/* Rack Number */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Brand *</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Rack Number</label>
                     <input
                       type="text"
-                      name="brand"
-                      value={productForm.brand}
+                      name="rackNumber"
+                      value={productForm.rackNumber}
                       onChange={handleFormChange}
-                      required
-                      placeholder="e.g. Logitech, Dell"
-                      className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
-                    />
-                  </div>
-
-                  {/* Supplier */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Supplier Name *</label>
-                    <input
-                      type="text"
-                      name="supplier"
-                      value={productForm.supplier}
-                      onChange={handleFormChange}
-                      required
-                      placeholder="e.g. LogiTech Solutions Inc."
+                      placeholder="e.g. A-1"
                       className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
                     />
                   </div>

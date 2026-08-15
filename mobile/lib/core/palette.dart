@@ -7,8 +7,10 @@ import 'package:flutter/material.dart';
 /// which shade of teal or grey is currently in fashion.
 abstract final class AppColors {
   // ── Surfaces ──────────────────────────────────────────────────────────────
-  /// Page background behind the cards.
-  static const canvas = Color(0xFFF4F6F7);
+  /// Page background behind the cards. Faintly teal so it sits with the brand,
+  /// and a step deeper than [surface] so the cards separate from it.
+  /// Kept in step with `--color-canvas` in the web client's index.css.
+  static const canvas = Color(0xFFEEF3F2);
 
   /// Card / sheet / app bar background.
   static const surface = Color(0xFFFFFFFF);

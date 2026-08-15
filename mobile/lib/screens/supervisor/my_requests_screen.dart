@@ -9,6 +9,7 @@ import '../../core/toast.dart';
 import '../../data/repository.dart';
 import '../../models/models.dart';
 import '../../widgets/app_shell.dart';
+import '../../widgets/app_table.dart';
 import '../../widgets/common.dart';
 import '../../widgets/product_details_sheet.dart' show SheetGrabber;
 
@@ -24,12 +25,15 @@ class MyRequestsScreen extends StatefulWidget {
 
 class _MyRequestsScreenState extends State<MyRequestsScreen>
     with WidgetsBindingObserver, AutoRefresh {
-  static const _allScope = 'All Supervisors';
-  static const _mineScope = 'Raised by Me';
+  // Short, because the scope tabs share a row with the status filter.
+  static const _allScope = 'All';
+  static const _mineScope = 'Mine';
+
+  static const _statuses = ['All Statuses', 'Pending', 'Accepted', 'Rejected'];
 
   List<MyRequest> _requests = const [];
   bool _loading = true;
-  String _statusFilter = 'All';
+  String _statusFilter = _statuses.first;
   String _scope = _allScope;
 
   @override
@@ -63,11 +67,11 @@ class _MyRequestsScreenState extends State<MyRequestsScreen>
     }
   }
 
-  /// Scope narrows who raised it; the status tabs then narrow that.
+  /// Scope narrows who raised it; the status filter then narrows that.
   List<MyRequest> get _filtered {
     final scoped =
         _scope == _mineScope ? _requests.where((r) => r.isMine) : _requests;
-    if (_statusFilter == 'All') return scoped.toList();
+    if (_statusFilter == _statuses.first) return scoped.toList();
     return scoped.where((r) => r.displayStatus == _statusFilter).toList();
   }
 
@@ -80,32 +84,48 @@ class _MyRequestsScreenState extends State<MyRequestsScreen>
       title: 'Requests Tracker',
       child: Column(
         children: [
+          // One row of filters over a count line, instead of a panel carrying
+          // two rows of tabs.
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-            child: AppCard(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                children: [
-                  PanelHeader(
-                    icon: Icons.assignment_outlined,
-                    iconColor: AppColors.primaryDeep,
-                    title: 'Submitted Requests Log',
-                    subtitle: '$mine of ${_requests.length} raised by you',
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 5,
+                      child: FilterTabs(
+                        options: const [_allScope, _mineScope],
+                        selected: _scope,
+                        onChanged: (value) => setState(() => _scope = value),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 4,
+                      child: DropdownShell(
+                        child: AppDropdown<String>(
+                          value: _statusFilter,
+                          items: _statuses,
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => _statusFilter = value);
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '${requests.length} shown • $mine of ${_requests.length} raised by you',
+                    style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                   ),
-                  const SizedBox(height: 14),
-                  FilterTabs(
-                    options: const [_allScope, _mineScope],
-                    selected: _scope,
-                    onChanged: (value) => setState(() => _scope = value),
-                  ),
-                  const SizedBox(height: 8),
-                  FilterTabs(
-                    options: const ['All', 'Pending', 'Accepted', 'Rejected'],
-                    selected: _statusFilter,
-                    onChanged: (value) => setState(() => _statusFilter = value),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -126,45 +146,149 @@ class _MyRequestsScreenState extends State<MyRequestsScreen>
                               ),
                             ],
                           )
-                        : ListView.separated(
-                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-                            itemCount: requests.length,
-                            separatorBuilder: (_, _) => const SizedBox(height: 10),
-                            itemBuilder: (context, index) => _MyRequestCard(
-                              request: requests[index],
-                              onChanged: _load,
-                            ),
-                          ),
+                        : _buildTable(requests),
                   ),
           ),
         ],
       ),
     );
   }
-}
 
-class _MyRequestCard extends StatelessWidget {
-  const _MyRequestCard({required this.request, required this.onChanged});
+  /// The queue as rows and columns; the rest of each request — who raised it,
+  /// the Admin's decision and comments, and the edit/cancel actions — unfolds
+  /// under its row.
+  Widget _buildTable(List<MyRequest> requests) {
+    return AppTable<MyRequest>(
+      items: requests,
+      idOf: (request) => request.id,
+      columns: const [
+        AppTableColumn('Request', flex: 6),
+        AppTableColumn('Qty', width: 46, center: true),
+        AppTableColumn('Status', width: 80, center: true),
+      ],
+      cellsOf: (context, request) => [
+        TableTitleCell(
+          title: request.productName,
+          subtitle: '${request.requestNumber} • ${request.requestType}',
+        ),
+        TableNumberCell(
+          value: request.quantity > 0 ? '${request.quantity}' : '—',
+          unit: request.quantity > 0 ? 'Pcs' : '',
+          color: RequestTypeBadge.colorOf(request.requestType),
+        ),
+        TableBadgeCell(
+          request.displayStatus,
+          color: StatusColors.of(request.displayStatus),
+        ),
+      ],
+      detailOf: (context, request) => TableDetail(
+        lines: _detailLines(request),
+        actions: [
+          // A request can only be changed by whoever raised it, and only while
+          // the Admin has not acted.
+          if (_canEdit(request))
+            TableActionButton(
+              label: 'Edit',
+              icon: Icons.edit_outlined,
+              color: AppColors.primaryDeep,
+              onPressed: () => _edit(request),
+            ),
+          if (_canCancel(request))
+            TableActionButton(
+              label: 'Cancel request',
+              icon: Icons.close,
+              color: AppColors.dangerDeep,
+              onPressed: () => _cancel(request),
+            ),
+        ],
+      ),
+    );
+  }
 
-  final MyRequest request;
+  List<Widget> _detailLines(MyRequest request) {
+    final approved = request.isApproved;
+    // Only a Stock In stamps its own decision timestamps; the rest fall back to
+    // the save that closed the request.
+    final decidedOn =
+        (approved ? request.approvedAt : request.rejectedAt) ?? request.decidedAt;
+    final accent = approved ? AppColors.success : AppColors.danger;
 
-  /// Called after an edit or cancellation so the list re-reads the API.
-  final Future<void> Function() onChanged;
+    return [
+      TableDetailLine(
+        label: 'Request #',
+        value: request.requestNumber,
+        mono: true,
+        valueColor: AppColors.primaryDeep,
+      ),
+      TableDetailLine(
+        label: 'Type',
+        value: request.requestType,
+        valueColor: RequestTypeBadge.colorOf(request.requestType),
+      ),
+      TableDetailLine(
+        label: 'Raised by',
+        value: request.isMine
+            ? '${request.supervisorName} (you)'
+            : request.supervisorName,
+        valueColor: request.isMine ? AppColors.primaryDeep : null,
+      ),
+      TableDetailLine(
+        label: 'Status',
+        value: request.displayStatus,
+        valueColor: StatusColors.of(request.displayStatus),
+      ),
+      TableDetailLine(
+        label: 'Raised on',
+        value: formatDateTime(request.createdDate),
+      ),
+      if (request.hasDecisionDetail) ...[
+        if (approved && request.approvedQuantity != null)
+          TableDetailLine(
+            label: 'Approved',
+            value: '${request.approvedQuantity} Pcs',
+            valueColor: accent,
+          ),
+        if (approved && request.stockRoom.isNotEmpty)
+          TableDetailLine(label: 'Stock room', value: request.stockRoom, valueColor: accent),
+        if (request.decidedBy.isNotEmpty)
+          TableDetailLine(
+            label: approved ? 'Approved by' : 'Rejected by',
+            value: request.decidedBy,
+            valueColor: accent,
+          ),
+        if (decidedOn != null)
+          TableDetailLine(
+            label: approved ? 'Approved on' : 'Rejected on',
+            value: formatDateTime(decidedOn),
+            valueColor: accent,
+          ),
+      ],
+      TableDetailLine(
+        label: 'Admin comments',
+        value: request.adminComments.isNotEmpty
+            ? request.adminComments
+            : (request.status == 'Pending'
+                ? 'Awaiting review...'
+                : 'No comments left.'),
+        italic: true,
+      ),
+    ];
+  }
 
   /// Only stock requests carry a quantity that can be revised; a product
   /// ADD/EDIT request can be cancelled but not edited in place. Either way it
   /// has to be the caller's own request — the server enforces that too.
-  bool get _canEdit =>
+  bool _canEdit(MyRequest request) =>
       request.isMine && request.isPending && request.rawType != 'product';
 
-  bool get _canCancel => request.isMine && request.isPending;
+  bool _canCancel(MyRequest request) => request.isMine && request.isPending;
 
-  Future<void> _edit(BuildContext context) async {
+  Future<void> _edit(MyRequest request) async {
     final saved = await showEditRequestForm(context, request: request);
-    if (saved) await onChanged();
+    if (saved) await _load();
   }
 
-  Future<void> _cancel(BuildContext context) async {
+  Future<void> _cancel(MyRequest request) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -187,7 +311,7 @@ class _MyRequestCard extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed != true || !context.mounted) return;
+    if (confirmed != true || !mounted) return;
 
     try {
       final message = await context.read<StockRepository>().cancelStockRequest(
@@ -195,160 +319,12 @@ class _MyRequestCard extends StatelessWidget {
             id: request.id,
           );
       Toast.success(message);
-      await onChanged();
+      await _load();
     } on ApiException catch (error) {
       Toast.error(error.message);
     } catch (_) {
       Toast.error('Failed to cancel the request');
     }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final comments = request.adminComments.isNotEmpty
-        ? request.adminComments
-        : (request.status == 'Pending' ? 'Awaiting review...' : 'No comments left.');
-
-    return AppCard(
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              MonoText(request.requestNumber, fontSize: 11.5),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.person_outline, size: 12, color: AppColors.textMuted),
-                    const SizedBox(width: 3),
-                    Flexible(
-                      child: Text(
-                        request.isMine
-                            ? '${request.supervisorName} (you)'
-                            : request.supervisorName,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: request.isMine
-                              ? AppColors.primaryDeep
-                              : AppColors.textMuted,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Spacer(),
-              StatusBadge(request.displayStatus, withIcon: true),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      request.productName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.textStrong,
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                        height: 1.25,
-                      ),
-                    ),
-                    if (request.quantity > 0) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        'Requested: ${request.quantity} Pcs',
-                        style: const TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              RequestTypeBadge(request.requestType),
-            ],
-          ),
-          if (request.hasDecisionDetail) ...[
-            const SizedBox(height: 12),
-            _DecisionPanel(request: request),
-          ],
-          const SizedBox(height: 12),
-          const Divider(height: 1),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(Icons.chat_bubble_outline, size: 13, color: AppColors.textMuted),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  comments,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 12,
-                    fontStyle: FontStyle.italic,
-                    height: 1.45,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              const Icon(Icons.calendar_today_outlined, size: 12, color: AppColors.textMuted),
-              const SizedBox(width: 5),
-              // Date and clock time, so the queue reads as a timeline.
-              Text(
-                formatDateTime(request.createdDate),
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-              ),
-              const Spacer(),
-              // A request can only be changed by whoever raised it, and only
-              // while the Admin has not acted.
-              if (_canCancel) ...[
-                if (_canEdit)
-                  TextButton.icon(
-                    onPressed: () => _edit(context),
-                    icon: const Icon(Icons.edit_outlined, size: 15),
-                    label: const Text('Edit'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppColors.primaryDeep,
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                    ),
-                  ),
-                TextButton.icon(
-                  onPressed: () => _cancel(context),
-                  icon: const Icon(Icons.close, size: 15),
-                  label: const Text('Cancel'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.dangerDeep,
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -564,122 +540,6 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-/// The outcome of a decided request: for an acceptance, how much landed and
-/// where; for a rejection, who turned it down and when.
-class _DecisionPanel extends StatelessWidget {
-  const _DecisionPanel({required this.request});
-
-  final MyRequest request;
-
-  @override
-  Widget build(BuildContext context) {
-    final approved = request.isApproved;
-    final accent = approved ? AppColors.success : AppColors.danger;
-    // Only a Stock In stamps its own decision timestamps; the rest fall back
-    // to the save that closed the request.
-    final decidedOn = (approved ? request.approvedAt : request.rejectedAt) ??
-        request.decidedAt;
-
-    return Container(
-      padding: const EdgeInsets.all(11),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: accent.withValues(alpha: 0.16)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (approved) ...[
-            if (request.approvedQuantity != null)
-              _DecisionLine(
-                icon: Icons.inventory_2_outlined,
-                label: 'Approved',
-                value: '${request.approvedQuantity} Pcs',
-                accent: accent,
-              ),
-            if (request.stockRoom.isNotEmpty)
-              _DecisionLine(
-                icon: Icons.warehouse_outlined,
-                label: 'Stock room',
-                value: request.stockRoom,
-                accent: accent,
-              ),
-            if (request.decidedBy.isNotEmpty)
-              _DecisionLine(
-                icon: Icons.verified_user_outlined,
-                label: 'Approved by',
-                value: request.decidedBy,
-                accent: accent,
-              ),
-            if (decidedOn != null)
-              _DecisionLine(
-                icon: Icons.event_available_outlined,
-                label: 'Approved on',
-                value: formatDateTime(decidedOn),
-                accent: accent,
-              ),
-          ] else ...[
-            if (request.decidedBy.isNotEmpty)
-              _DecisionLine(
-                icon: Icons.person_off_outlined,
-                label: 'Rejected by',
-                value: request.decidedBy,
-                accent: accent,
-              ),
-            if (decidedOn != null)
-              _DecisionLine(
-                icon: Icons.event_busy_outlined,
-                label: 'Rejected on',
-                value: formatDateTime(decidedOn),
-                accent: accent,
-              ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _DecisionLine extends StatelessWidget {
-  const _DecisionLine({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.accent,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2.5),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 13, color: accent),
-          const SizedBox(width: 7),
-          Text('$label: ', style: TextStyle(color: accent, fontSize: 11.5)),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                color: accent,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

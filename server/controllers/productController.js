@@ -22,9 +22,11 @@ export const getProducts = async (req, res) => {
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: "i" } },
-        { brand: { $regex: search, $options: "i" } },
         { code: { $regex: search, $options: "i" } },
-        { supplier: { $regex: search, $options: "i" } },
+        { category: { $regex: search, $options: "i" } },
+        // Searching the rack answers "what is on A-1?", which is how somebody
+        // standing in front of the shelving looks things up.
+        { rackNumber: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -95,8 +97,7 @@ const generateProductCode = () => `PRD-${Math.floor(100000 + Math.random() * 900
 const EDITABLE_FIELDS = [
   "name",
   "category",
-  "brand",
-  "supplier",
+  "rackNumber",
   "unit",
   "minStock",
   "maxStock",

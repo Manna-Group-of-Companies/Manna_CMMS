@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/auto_refresh.dart';
@@ -8,6 +7,7 @@ import '../../core/toast.dart';
 import '../../data/repository.dart';
 import '../../models/models.dart';
 import '../../widgets/app_shell.dart';
+import '../../widgets/app_table.dart';
 import '../../widgets/common.dart';
 import 'branch_request_form.dart';
 
@@ -86,296 +86,171 @@ class _BranchStockScreenState extends State<BranchStockScreen>
     final stock = _stock;
     final items = _visible;
 
+    // The room's stock is the whole page: the summary cards and the request
+    // strip that used to sit above it pushed the list itself below the fold,
+    // and the counts they showed are all readable from the rows. Request
+    // progress has its own tab.
     return AppShell(
       title: stock == null ? 'Branch Stock' : '${stock.roomName} Stock',
       child: _loading && stock == null
           ? const LoadingView(message: 'Loading stock room...')
-          : RefreshIndicator(
-              onRefresh: _load,
-              color: AppColors.primary,
-              backgroundColor: AppColors.surface,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-                children: [
-                  if (stock == null)
-                    const EmptyState(
-                      title: 'Stock unavailable',
-                      message: 'Pull down to try loading your room again.',
-                      icon: Icons.cloud_off_outlined,
-                    )
-                  else ...[
-                    HeroStatCard(
-                      label: stock.roomName,
-                      value: '${stock.totalQuantity}',
-                      caption: '${stock.itemCount} items held in your room',
-                      icon: Icons.warehouse_outlined,
-                    ),
-                    const SizedBox(height: 12),
-                    GridView.count(
-                      crossAxisCount: 2,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      childAspectRatio: 1.75,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      children: [
-                        MetricCard(
-                          title: 'Categories',
-                          value: stock.categoryCount,
-                          icon: Icons.category_outlined,
-                          accent: AppColors.info,
-                        ),
-                        MetricCard(
-                          title: 'Low Stock',
-                          value: stock.lowStockCount,
-                          icon: Icons.warning_amber_outlined,
-                          accent: stock.lowStockCount > 0
-                              ? AppColors.warning
-                              : AppColors.info,
-                          highlighted: stock.lowStockCount > 0,
-                        ),
-                        MetricCard(
-                          title: 'Out of Stock',
-                          value: stock.outOfStockCount,
-                          icon: Icons.remove_shopping_cart_outlined,
-                          accent: stock.outOfStockCount > 0
-                              ? AppColors.danger
-                              : AppColors.info,
-                        ),
-                        MetricCard(
-                          title: 'Items in Room',
-                          value: stock.itemCount,
-                          icon: Icons.inventory_2_outlined,
-                          accent: AppColors.primaryDeep,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    _RequestStatusStrip(stock: stock),
-                    const SizedBox(height: 18),
-                    _StockPanel(
-                      items: items,
-                      total: stock.items.length,
-                      filter: _filter,
-                      onFilter: (value) => setState(() => _filter = value),
-                      onSearch: (value) => setState(() => _search = value),
-                      onApply: _apply,
-                    ),
-                  ],
-                ],
-              ),
+          : Column(
+              children: [
+                if (stock != null)
+                  _StockFilters(
+                    filter: _filter,
+                    onFilter: (value) => setState(() => _filter = value),
+                    onSearch: (value) => setState(() => _search = value),
+                  ),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _load,
+                    color: AppColors.primary,
+                    backgroundColor: AppColors.surface,
+                    child: stock == null
+                        ? ListView(
+                            padding: const EdgeInsets.all(16),
+                            children: const [
+                              EmptyState(
+                                title: 'Stock unavailable',
+                                message: 'Pull down to try loading your room again.',
+                                icon: Icons.cloud_off_outlined,
+                              ),
+                            ],
+                          )
+                        : items.isEmpty
+                            ? ListView(
+                                padding: const EdgeInsets.all(16),
+                                children: [
+                                  EmptyState(
+                                    title: stock.items.isEmpty
+                                        ? 'No stock in this room yet'
+                                        : 'No items match',
+                                    message: stock.items.isEmpty
+                                        ? 'Items placed in your room will appear here.'
+                                        : 'Try a different search or filter.',
+                                    icon: Icons.inventory_2_outlined,
+                                    dashed: true,
+                                  ),
+                                ],
+                              )
+                            : _BranchStockTable(items: items, onApply: _apply),
+                  ),
+                ),
+              ],
             ),
     );
   }
 }
 
-/// Where this branch's requests stand, so the stage is visible from the stock
-/// screen as well as the requests screen.
-class _RequestStatusStrip extends StatelessWidget {
-  const _RequestStatusStrip({required this.stock});
-
-  final BranchStock stock;
-
-  @override
-  Widget build(BuildContext context) {
-    final entries = [
-      (label: 'Pending Admin', value: stock.pendingAdmin, color: AppColors.warning),
-      (label: 'Supervisor Pending', value: stock.pendingSupervisor, color: AppColors.accent),
-      (label: 'Approved', value: stock.approved, color: AppColors.success),
-      (label: 'Rejected', value: stock.rejected, color: AppColors.danger),
-    ];
-
-    return AppCard(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: PanelHeader(
-                  icon: Icons.assignment_outlined,
-                  iconColor: AppColors.primaryDeep,
-                  title: 'My Request Status',
-                ),
-              ),
-              TextButton(
-                onPressed: () => context.go('/branch/requests'),
-                style: TextButton.styleFrom(foregroundColor: AppColors.primaryDeep),
-                child: const Text('View all'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final entry in entries)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: entry.color.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: entry.color.withValues(alpha: 0.20)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${entry.value}',
-                        style: TextStyle(
-                          color: entry.color,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        entry.label,
-                        style: TextStyle(
-                          color: entry.color,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StockPanel extends StatelessWidget {
-  const _StockPanel({
-    required this.items,
-    required this.total,
+/// Search and the stock filter, kept above the grid the way the catalog keeps
+/// its own search bar above the product table.
+class _StockFilters extends StatelessWidget {
+  const _StockFilters({
     required this.filter,
     required this.onFilter,
     required this.onSearch,
-    required this.onApply,
   });
 
-  final List<RoomStockItem> items;
-  final int total;
   final String filter;
   final ValueChanged<String> onFilter;
   final ValueChanged<String> onSearch;
-  final Future<void> Function(RoomStockItem) onApply;
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
-      padding: const EdgeInsets.all(16),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const PanelHeader(
-            icon: Icons.inventory_2_outlined,
-            iconColor: AppColors.primaryDeep,
-            title: 'Stock on Hand',
-          ),
-          const SizedBox(height: 14),
           TextField(
             onChanged: onSearch,
+            style: const TextStyle(fontSize: 13, color: AppColors.textStrong),
             decoration: const InputDecoration(
               hintText: 'Search name, code or category',
               prefixIcon: Icon(Icons.search, size: 19),
               isDense: true,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           FilterTabs(
             options: const ['All', 'Low Stock', 'Out of Stock'],
             selected: filter,
             onChanged: onFilter,
           ),
-          const SizedBox(height: 14),
-          if (items.isEmpty)
-            EmptyState(
-              title: total == 0 ? 'No stock in this room yet' : 'No items match',
-              message: total == 0
-                  ? 'Items placed in your room will appear here.'
-                  : 'Try a different search or filter.',
-              icon: Icons.inventory_2_outlined,
-              dashed: true,
-            )
-          else
-            for (final item in items) ...[
-              _StockRow(item: item, onApply: () => onApply(item)),
-              if (item != items.last) const Divider(height: 18),
-            ],
         ],
       ),
     );
   }
 }
 
-class _StockRow extends StatelessWidget {
-  const _StockRow({required this.item, required this.onApply});
 
-  final RoomStockItem item;
-  final VoidCallback onApply;
+/// The branch's room as rows and columns, matching `ProductTable`.
+///
+/// Room is not a column here the way it is in the catalog: a Branch account
+/// only ever sees its own room, so the space goes to the category instead.
+class _BranchStockTable extends StatelessWidget {
+  const _BranchStockTable({required this.items, required this.onApply});
+
+  final List<RoomStockItem> items;
+  final Future<void> Function(RoomStockItem) onApply;
+
+  static (String, Color) _status(RoomStockItem item) => item.isOutOfStock
+      ? ('Out of Stock', AppColors.danger)
+      : item.isLowStock
+          ? ('Low Stock', AppColors.warning)
+          : ('In Stock', AppColors.success);
 
   @override
   Widget build(BuildContext context) {
-    final (statusLabel, statusColor) = item.isOutOfStock
-        ? ('Out of Stock', AppColors.danger)
-        : item.isLowStock
-            ? ('Low Stock', AppColors.warning)
-            : ('In Stock', AppColors.success);
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ProductThumb(imageUrl: item.image),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                item.name,
-                style: const TextStyle(
-                  color: AppColors.textStrong,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  MonoText(item.code),
-                  if (item.category.isNotEmpty) SoftChip(item.category),
-                  AppBadge(statusLabel, color: statusColor, fontSize: 9),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '${item.quantity} ${item.unit} in room · min ${item.minStock}',
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 11.5),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        TextButton.icon(
-          onPressed: item.isOutOfStock ? null : onApply,
-          icon: const Icon(Icons.send_outlined, size: 15),
-          label: const Text('Apply'),
-          style: TextButton.styleFrom(
-            foregroundColor: AppColors.primaryDeep,
-            visualDensity: VisualDensity.compact,
-          ),
-        ),
+    return AppTable<RoomStockItem>(
+      items: items,
+      idOf: (item) => item.productId,
+      columns: const [
+        AppTableColumn('Item', flex: 6),
+        AppTableColumn('Stock', width: 62, center: true),
+        AppTableColumn('Category', flex: 3),
       ],
+      cellsOf: (context, item) {
+        final (_, color) = _status(item);
+        return [
+          TableTitleCell(title: item.name, subtitle: item.code, imageUrl: item.image),
+          TableNumberCell(
+            value: '${item.quantity}',
+            unit: item.unit,
+            color: color,
+            note: item.isOutOfStock
+                ? 'Out'
+                : item.isLowStock
+                    ? 'Low'
+                    : '',
+          ),
+          TableTextCell(item.category, color: AppColors.textBody),
+        ];
+      },
+      detailOf: (context, item) {
+        final (label, color) = _status(item);
+        return TableDetail(
+          lines: [
+            TableDetailLine(label: 'Code', value: item.code),
+            TableDetailLine(label: 'Category', value: item.category),
+            TableDetailLine(label: 'In room', value: '${item.quantity} ${item.unit}'),
+            TableDetailLine(label: 'Minimum', value: '${item.minStock} ${item.unit}'),
+            TableDetailLine(label: 'Status', value: label, valueColor: color),
+          ],
+          actions: [
+            // Out-of-stock rows still unfold — the branch can read the figures
+            // — but there is nothing there to apply for.
+            if (!item.isOutOfStock)
+              TableActionButton(
+                label: 'Apply for Stock',
+                icon: Icons.send_outlined,
+                color: AppColors.primaryDeep,
+                filled: true,
+                onPressed: () => onApply(item),
+              ),
+          ],
+        );
+      },
     );
   }
 }

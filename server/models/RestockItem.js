@@ -42,11 +42,6 @@ const restockItemSchema = new mongoose.Schema(
       required: true,
       min: [1, "Returned quantity must be at least 1"],
     },
-    reason: {
-      type: String,
-      required: [true, "Return reason is required"],
-      trim: true,
-    },
     condition: {
       type: String,
       required: true,

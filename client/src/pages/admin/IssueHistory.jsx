@@ -203,16 +203,12 @@ const AdminIssueHistory = () => {
                   <span className="font-semibold text-slate-800">{selectedProduct.category}</span>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                  <span className="text-slate-500 block mb-0.5">Brand</span>
-                  <span className="font-semibold text-slate-800">{selectedProduct.brand}</span>
+                  <span className="text-slate-500 block mb-0.5">Rack Number</span>
+                  <span className="font-semibold text-slate-800">{selectedProduct.rackNumber || "—"}</span>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                   <span className="text-slate-500 block mb-0.5">Current Stock</span>
                   <span className="font-bold text-slate-900">{selectedProduct.quantity} {selectedProduct.unit}</span>
-                </div>
-                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                  <span className="text-slate-500 block mb-0.5">Supplier</span>
-                  <span className="font-semibold text-slate-800">{selectedProduct.supplier}</span>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                   <span className="text-slate-500 block mb-0.5">Min Stock Limit</span>

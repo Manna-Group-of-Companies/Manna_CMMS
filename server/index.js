@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import connectDB from "./config/db.js";
+import { assertJwtSecret } from "./config/jwt.js";
 import seedData from "./utils/seeder.js";
 import {
   migrateRedStockStatuses,
@@ -24,6 +25,12 @@ import branchRequestRoutes from "./routes/branchRequestRoutes.js";
 dotenv.config();
 
 const app = express();
+
+// Render (and any other reverse proxy) puts the real caller in
+// X-Forwarded-For. Without this every request arrives as the balancer's own
+// address, so the login throttle would count the whole site as one client and
+// lock everybody out together.
+app.set("trust proxy", 1);
 
 // Configure CORS - allow the deployed client plus local dev servers.
 // Extra origins can be added at deploy time via CORS_ORIGINS (comma separated).
@@ -87,6 +94,10 @@ const PORT = process.env.PORT || 5000;
 
 const start = async () => {
   try {
+    // Before anything else: a missing signing key would let anyone mint a token
+    // for any account, so refuse to come up rather than serve with a hole.
+    assertJwtSecret();
+
     await connectDB();
 
     // Seed initial data (users & products) if DB is empty

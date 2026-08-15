@@ -1,2 +1,9 @@
 node_modules/
 .env
+
+# Spreadsheet exports and the catalog derived from them. Operational data, not
+# code: the ledger export carries the store's movement history and the names of
+# the supervisors who handled each one, which does not belong in the repository.
+# scripts/extractProductsFromTransactions.js rebuilds everything here from a
+# fresh export.
+data/

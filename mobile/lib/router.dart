@@ -8,14 +8,13 @@ import 'screens/login_screen.dart';
 import 'screens/supervisor/branch_approvals_screen.dart';
 import 'screens/supervisor/my_requests_screen.dart';
 import 'screens/supervisor/my_returns_screen.dart';
-import 'screens/supervisor/profile_screen.dart';
-import 'screens/supervisor/supervisor_dashboard_screen.dart';
+import 'screens/supervisor/settings_screen.dart';
 import 'screens/supervisor/supervisor_issue_history_screen.dart';
 import 'screens/supervisor/supervisor_product_list_screen.dart';
 import 'state/auth_provider.dart';
 import 'widgets/common.dart';
 
-const supervisorHome = '/supervisor/dashboard';
+const supervisorHome = '/supervisor/products';
 const branchHome = '/branch/stock';
 
 /// Where a signed-in account belongs. Admins never reach this — they are
@@ -34,10 +33,6 @@ GoRouter buildRouter(AuthProvider auth) {
       // Supervisor portal — the only section this app serves. Admins work in
       // the web console and are turned away at login (see AuthProvider).
       GoRoute(
-        path: '/supervisor/dashboard',
-        builder: (_, _) => const SupervisorDashboardScreen(),
-      ),
-      GoRoute(
         path: '/supervisor/products',
         builder: (_, _) => const SupervisorProductListScreen(),
       ),
@@ -48,7 +43,8 @@ GoRouter buildRouter(AuthProvider auth) {
       ),
       // Also carries Stock by Room, which no longer has a page of its own.
       GoRoute(path: '/supervisor/returns', builder: (_, _) => const MyReturnsScreen()),
-      GoRoute(path: '/supervisor/profile', builder: (_, _) => const ProfileScreen()),
+      // Profile details and sign-out both live here.
+      GoRoute(path: '/supervisor/settings', builder: (_, _) => const SettingsScreen()),
       // Stage two of the branch workflow is decided here.
       GoRoute(
         path: '/supervisor/branch-approvals',
@@ -58,7 +54,7 @@ GoRouter buildRouter(AuthProvider auth) {
       // Branch portal — one room's stock, and the requests raised on it.
       GoRoute(path: '/branch/stock', builder: (_, _) => const BranchStockScreen()),
       GoRoute(path: '/branch/requests', builder: (_, _) => const BranchRequestsScreen()),
-      GoRoute(path: '/branch/profile', builder: (_, _) => const ProfileScreen()),
+      GoRoute(path: '/branch/settings', builder: (_, _) => const SettingsScreen()),
     ],
     redirect: (context, state) {
       final path = state.matchedLocation;
@@ -83,6 +79,14 @@ GoRouter buildRouter(AuthProvider auth) {
       // Stock by Room folded into the Red Stock Room screen; keep old links
       // (a stored route, a shortcut on someone's phone) working.
       if (path == '/supervisor/stock') return '/supervisor/returns';
+
+      // The Home screen is gone — the bottom bar now carries every screen, so
+      // an old dashboard link lands on the catalog instead.
+      if (path == '/supervisor/dashboard') return home;
+
+      // The profile is a section of Settings now; keep old links working.
+      if (path == '/supervisor/profile') return '/supervisor/settings';
+      if (path == '/branch/profile') return '/branch/settings';
 
       // The admin console lives in the web client; send any leftover deep
       // link (a stored route, an old shortcut) back to the portal.

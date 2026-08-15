@@ -7,8 +7,7 @@ const EMPTY = {
   code: "",
   name: "",
   category: "",
-  brand: "",
-  supplier: "",
+  rackNumber: "",
   quantity: 0,
   unit: "Pcs",
   minStock: 5,
@@ -40,8 +39,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         code: product.code || "",
         name: product.name || "",
         category: product.category || "",
-        brand: product.brand || "",
-        supplier: product.supplier || "",
+        rackNumber: product.rackNumber || "",
         quantity: product.quantity ?? 0,
         unit: product.unit || "Pcs",
         minStock: product.minStock ?? 5,
@@ -148,12 +146,14 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
             <input type="text" value={form.category} onChange={set("category")} required className={field} />
           </div>
           <div>
-            <label className={label}>Brand</label>
-            <input type="text" value={form.brand} onChange={set("brand")} className={field} />
-          </div>
-          <div>
-            <label className={label}>Supplier</label>
-            <input type="text" value={form.supplier} onChange={set("supplier")} className={field} />
+            <label className={label}>Rack Number</label>
+            <input
+              type="text"
+              value={form.rackNumber}
+              onChange={set("rackNumber")}
+              placeholder="e.g. A-1"
+              className={field}
+            />
           </div>
           <div>
             <label className={label}>Unit</label>

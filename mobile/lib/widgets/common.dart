@@ -601,17 +601,25 @@ class SpecTile extends StatelessWidget {
         children: [
           Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
           const SizedBox(height: 3),
-          Text(
-            value.isEmpty ? '—' : value,
-            style: TextStyle(
-              color: valueColor ?? AppColors.textPrimary,
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
+          // Some tiles sit in a fixed-height grid, so a long value (a two-line
+          // category, say) is trimmed rather than spilling past the tile.
+          Flexible(
+            child: Text(
+              value.isEmpty ? '—' : value,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: valueColor ?? AppColors.textPrimary,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
           if (caption.isNotEmpty)
             Text(
               caption,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: AppColors.textMuted, fontSize: 10.5),
             ),
         ],
@@ -772,6 +780,10 @@ class FilterTabs extends StatelessWidget {
                   child: Text(
                     option,
                     textAlign: TextAlign.center,
+                    maxLines: 1,
+                    // Narrow segments (two long labels beside a dropdown, say)
+                    // trim rather than run into each other.
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: selected == option ? Colors.white : AppColors.textSecondary,
                       fontSize: 12,

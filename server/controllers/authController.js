@@ -1,12 +1,10 @@
 import User, { PIN_LENGTH, isValidPin, nameMatcher } from "../models/User.js";
 import jwt from "jsonwebtoken";
+import { jwtSecret } from "../config/jwt.js";
+import { recordLoginFailure, recordLoginSuccess } from "../middleware/loginLimit.js";
 
 // Generate JWT Token
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || "default_jwt_secret_key_12345", {
-    expiresIn: "30d",
-  });
-};
+const generateToken = (id) => jwt.sign({ id }, jwtSecret(), { expiresIn: "30d" });
 
 /**
  * The user as the client keeps it. A Branch account carries its room, because
@@ -93,11 +91,15 @@ export const loginUser = async (req, res) => {
     }
 
     if (user && (await user.matchPin(pin))) {
+      recordLoginSuccess(req);
       res.json({
         ...publicUser(user),
         token: generateToken(user._id),
       });
     } else {
+      // Counted here rather than in the middleware: only the handler knows
+      // whether the PIN actually matched.
+      recordLoginFailure(req);
       res.status(401).json({ message: "Invalid name or PIN" });
     }
   } catch (error) {

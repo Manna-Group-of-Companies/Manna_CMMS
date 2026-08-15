@@ -8,10 +8,13 @@ import {
   deleteUser,
 } from "../controllers/authController.js";
 import { protect, authorizeRoles } from "../middleware/auth.js";
+import { loginRateLimit } from "../middleware/loginLimit.js";
 
 const router = express.Router();
 
-router.post("/login", loginUser);
+// The only route that stays public, so it is the only one that can be
+// hammered. A four-digit PIN is short enough that it has to be throttled.
+router.post("/login", loginRateLimit, loginUser);
 router.get("/me", protect, getMe);
 
 // Accounts and their PINs are an admin's job: there is no self sign-up.

@@ -236,7 +236,6 @@ export const getMergeRequestById = async (req, res) => {
             restockNumber: item.restockNumber,
             quantity: item.quantity,
             condition: item.condition,
-            reason: item.reason,
             department: item.department,
             sourceRoom: item.sourceRoom,
             returnDate: item.returnDate,

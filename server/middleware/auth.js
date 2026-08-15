@@ -1,36 +1,39 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import { jwtSecret } from "../config/jwt.js";
 
 export const protect = async (req, res, next) => {
-  let token;
+  const header = req.headers.authorization;
 
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith("Bearer")
-  ) {
-    try {
-      // Get token from header
-      token = req.headers.authorization.split(" ")[1];
-
-      // Verify token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || "default_jwt_secret_key_12345");
-
-      // Get user from the token. The PIN is select:false, so it stays out.
-      req.user = await User.findById(decoded.id);
-
-      if (!req.user) {
-        return res.status(401).json({ message: "Not authorized, user not found" });
-      }
-
-      next();
-    } catch (error) {
-      console.error("Token verification error:", error);
-      res.status(401).json({ message: "Not authorized, token failed" });
-    }
+  if (!header || !header.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Not authorized, no token" });
   }
 
+  const token = header.slice("Bearer ".length).trim();
   if (!token) {
-    res.status(401).json({ message: "Not authorized, no token" });
+    return res.status(401).json({ message: "Not authorized, no token" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, jwtSecret());
+
+    // Get user from the token. The PIN is select:false, so it stays out.
+    req.user = await User.findById(decoded.id);
+
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authorized, user not found" });
+    }
+
+    return next();
+  } catch (error) {
+    // An unset secret is a server fault, not a bad token — saying "token
+    // failed" would send everyone chasing their login instead of the config.
+    if (error.name !== "JsonWebTokenError" && error.name !== "TokenExpiredError") {
+      console.error("Auth misconfiguration:", error.message);
+      return res.status(500).json({ message: "Authentication is misconfigured on the server" });
+    }
+
+    return res.status(401).json({ message: "Not authorized, token failed" });
   }
 };
 

@@ -342,8 +342,7 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
 
   late final _name = TextEditingController(text: _draft.name);
   late final _category = TextEditingController(text: _draft.category);
-  late final _brand = TextEditingController(text: _draft.brand);
-  late final _supplier = TextEditingController(text: _draft.supplier);
+  late final _rackNumber = TextEditingController(text: _draft.rackNumber);
   late final _quantity = TextEditingController(text: '${_draft.quantity}');
   late final _unit = TextEditingController(text: _draft.unit);
   late final _minStock = TextEditingController(text: '${_draft.minStock}');
@@ -363,8 +362,7 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
     for (final controller in [
       _name,
       _category,
-      _brand,
-      _supplier,
+      _rackNumber,
       _quantity,
       _unit,
       _minStock,
@@ -384,8 +382,7 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
     _draft
       ..name = _name.text.trim()
       ..category = _category.text.trim()
-      ..brand = _brand.text.trim()
-      ..supplier = _supplier.text.trim()
+      ..rackNumber = _rackNumber.text.trim()
       ..quantity = int.tryParse(_quantity.text) ?? 0
       ..unit = _unit.text.trim()
       ..minStock = int.tryParse(_minStock.text) ?? 0
@@ -498,21 +495,11 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
             ),
           ),
           _Field(
-            label: 'Brand',
-            required: true,
+            label: 'Rack Number',
             child: TextFormField(
-              controller: _brand,
-              validator: _requiredValidator,
-              decoration: const InputDecoration(hintText: 'e.g. Logitech, Dell'),
-            ),
-          ),
-          _Field(
-            label: 'Supplier Name',
-            required: true,
-            child: TextFormField(
-              controller: _supplier,
-              validator: _requiredValidator,
-              decoration: const InputDecoration(hintText: 'e.g. LogiTech Solutions Inc.'),
+              controller: _rackNumber,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(hintText: 'e.g. A-1'),
             ),
           ),
           Row(
@@ -1112,7 +1099,6 @@ class _ReturnStockFormState extends State<_ReturnStockForm> {
       TextEditingController(text: '${widget.issue.outstanding}');
   late final TextEditingController _department =
       TextEditingController(text: widget.issue.recipient);
-  final _reason = TextEditingController();
   String _condition = 'Good';
   bool _submitting = false;
 
@@ -1124,7 +1110,6 @@ class _ReturnStockFormState extends State<_ReturnStockForm> {
   void dispose() {
     _quantity.dispose();
     _department.dispose();
-    _reason.dispose();
     super.dispose();
   }
 
@@ -1138,17 +1123,11 @@ class _ReturnStockFormState extends State<_ReturnStockForm> {
       Toast.error('Only $_outstanding still outstanding on this issue');
       return;
     }
-    if (_reason.text.trim().isEmpty) {
-      Toast.error('A return reason is required');
-      return;
-    }
-
     setState(() => _submitting = true);
     try {
       final message = await context.read<StockRepository>().returnIssuedStock(
             issueId: widget.issue.id,
             quantity: _qty,
-            reason: _reason.text.trim(),
             condition: _condition,
             department: _department.text.trim(),
           );
@@ -1266,17 +1245,6 @@ class _ReturnStockFormState extends State<_ReturnStockForm> {
             controller: _department,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(hintText: 'e.g. Maintenance'),
-          ),
-        ),
-        _Field(
-          label: 'Reason for Return',
-          required: true,
-          child: TextField(
-            controller: _reason,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              hintText: 'e.g. Job completed, surplus material returned',
-            ),
           ),
         ),
       ],

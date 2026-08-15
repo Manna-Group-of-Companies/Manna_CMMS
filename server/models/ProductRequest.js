@@ -23,8 +23,9 @@ const productRequestSchema = new mongoose.Schema(
       code: String,
       name: { type: String, required: true },
       category: { type: String, required: true },
-      brand: { type: String, required: true },
-      supplier: { type: String, required: true },
+      // Shelf position, e.g. "A-1". Optional for the same reason it is on the
+      // product itself — see models/Product.js.
+      rackNumber: { type: String, default: "", trim: true, uppercase: true },
       quantity: { type: Number, required: true, default: 0 },
       unit: { type: String, required: true },
       minStock: { type: Number, required: true, default: 5 },

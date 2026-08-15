@@ -8,12 +8,13 @@ import '../../data/repository.dart';
 import '../../models/models.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/common.dart';
-import '../../widgets/issue_card.dart';
+import '../../widgets/issue_table.dart';
 import 'product_forms.dart';
 
-/// `pages/supervisor/IssueHistory.jsx` — every issuance the store has made,
-/// whoever made it. Only the supervisor who made one may return it, so the
-/// Return action is offered on their own rows alone.
+/// `pages/supervisor/IssueHistory.jsx` — everything the store has issued and
+/// not yet had back, whoever issued it. The server drops fully returned rows
+/// from a supervisor's list, so every row here still has stock out with a
+/// recipient, and any supervisor may return any of them.
 class SupervisorIssueHistoryScreen extends StatefulWidget {
   const SupervisorIssueHistoryScreen({super.key});
 
@@ -89,9 +90,9 @@ class _SupervisorIssueHistoryScreenState extends State<SupervisorIssueHistoryScr
                     icon: Icons.send_outlined,
                     iconColor: AppColors.warning,
                     title: 'Issue History',
-                    subtitle: '$mine of ${_issues.length} issued by you',
+                    subtitle: '$mine of ${_issues.length} outstanding are yours',
                     trailing: AppBadge(
-                      '${visible.length} Issues',
+                      '${visible.length} Outstanding',
                       color: AppColors.warning,
                       uppercase: false,
                       fontSize: 11,
@@ -120,26 +121,19 @@ class _SupervisorIssueHistoryScreenState extends State<SupervisorIssueHistoryScr
                             children: [
                               EmptyState(
                                 title: _scope == _mineScope
-                                    ? 'No products have been issued by you yet'
-                                    : 'No products have been issued yet',
+                                    ? 'Nothing you issued is still out'
+                                    : 'Nothing is still out with a recipient',
                                 message:
-                                    'Use the "Issue Product" action on the Products catalog '
-                                    'to issue items.',
+                                    'Fully returned issues drop off this list. Open a '
+                                    'product in the Products catalog and tap '
+                                    '"Issue Product" to issue items.',
                               ),
                             ],
                           )
-                        : ListView.separated(
-                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-                            itemCount: visible.length,
-                            separatorBuilder: (_, _) => const SizedBox(height: 10),
-                            itemBuilder: (context, index) {
-                              final issue = visible[index];
-                              return IssueCard(
-                                issue: issue,
-                                showSupervisor: true,
-                                onReturn: () => _returnStock(issue),
-                              );
-                            },
+                        : IssueTable(
+                            issues: visible,
+                            showSupervisor: true,
+                            onReturn: _returnStock,
                           ),
                   ),
           ),

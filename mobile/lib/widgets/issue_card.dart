@@ -7,7 +7,8 @@ import 'common.dart';
 import 'product_details_sheet.dart';
 
 /// One issuance record, shared by the admin and supervisor issue history
-/// screens. [onReturn] adds the "Return Stock" action (supervisors only).
+/// screens. [onReturn] adds the "Return Stock" action (supervisors only) to the
+/// product details sheet the card opens — the card itself carries no buttons.
 class IssueCard extends StatelessWidget {
   const IssueCard({
     super.key,
@@ -27,7 +28,25 @@ class IssueCard extends StatelessWidget {
 
     return AppCard(
       padding: const EdgeInsets.all(14),
-      onTap: product == null ? null : () => showProductDetails(context, product),
+      // Returning is reached by opening the product, the same way every other
+      // stock operation is. Any supervisor may return any issue, and partial
+      // returns keep the action available until nothing is left outstanding.
+      onTap: product == null
+          ? null
+          : () => showProductDetails(
+                context,
+                product,
+                actions: [
+                  if (onReturn != null && issue.canReturn)
+                    ProductAction(
+                      filled: true,
+                      label: 'Return Stock',
+                      icon: Icons.undo,
+                      color: AppColors.accent,
+                      onSelected: () => onReturn!(),
+                    ),
+                ],
+              ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -148,21 +167,6 @@ class IssueCard extends StatelessWidget {
                 formatDateTime(issue.createdAt),
                 style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
               ),
-              const Spacer(),
-              // Partial returns keep the action available until nothing is
-              // left outstanding. Only the supervisor who made the issue may
-              // return it — the server rejects anyone else.
-              if (onReturn != null && issue.canReturn)
-                TextButton.icon(
-                  onPressed: () => onReturn!(),
-                  icon: const Icon(Icons.undo, size: 15),
-                  label: const Text('Return Stock'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.accent,
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                  ),
-                ),
             ],
           ),
         ],

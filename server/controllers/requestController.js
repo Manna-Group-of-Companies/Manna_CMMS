@@ -627,8 +627,8 @@ export const processRequest = async (req, res) => {
     if (type === "product") {
       if (request.requestType === "ADD") {
         // Create Product in collection
-        const { code, name, category, brand, supplier, quantity, unit, minStock, maxStock, storeRoom, description, image } = request.details;
-        
+        const { code, name, category, rackNumber, quantity, unit, minStock, maxStock, storeRoom, description, image } = request.details;
+
         // Double check uniqueness of code
         const codeExists = await Product.findOne({ code });
         if (codeExists) {
@@ -641,8 +641,7 @@ export const processRequest = async (req, res) => {
           code,
           name,
           category,
-          brand,
-          supplier,
+          rackNumber,
           quantity: 0,
           unit,
           minStock,
@@ -675,14 +674,13 @@ export const processRequest = async (req, res) => {
           return res.status(404).json({ message: "Target product no longer exists" });
         }
 
-        const { name, category, brand, supplier, quantity, unit, minStock, maxStock, storeRoom, description, image } = request.details;
+        const { name, category, rackNumber, quantity, unit, minStock, maxStock, storeRoom, description, image } = request.details;
 
         const quantityBefore = product.quantity;
 
         product.name = name;
         product.category = category;
-        product.brand = brand;
-        product.supplier = supplier;
+        product.rackNumber = rackNumber;
         product.unit = unit;
         product.minStock = minStock;
         product.maxStock = maxStock;

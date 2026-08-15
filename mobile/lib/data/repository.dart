@@ -224,14 +224,12 @@ class StockRepository {
   Future<String> returnIssuedStock({
     required String issueId,
     int? quantity,
-    required String reason,
     required String condition,
     required String department,
   }) async {
     final data = await _redStockPost('/returns', {
       'issueId': issueId,
       'quantity': ?quantity,
-      'reason': reason,
       'condition': condition,
       'department': department,
     });

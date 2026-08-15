@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -18,26 +18,14 @@ class NavLink {
   final IconData icon;
 }
 
-/// The five bottom tabs, in order. Short labels because the bar is tight —
-/// the drawer repeats them with fuller names.
+/// Every supervisor working screen, in order. There is no drawer, so the bar
+/// carries the whole portal; Settings sits in the app bar instead.
 const _bottomTabs = [
-  NavLink('Home', '/supervisor/dashboard', Icons.home_outlined),
   NavLink('Catalog', '/supervisor/products', Icons.inventory_2_outlined),
   NavLink('Requests', '/supervisor/requests', Icons.assignment_outlined),
   NavLink('Approvals', '/supervisor/branch-approvals', Icons.fact_check_outlined),
-  NavLink('Profile', '/supervisor/profile', Icons.person_outline),
-];
-
-/// Everything reachable from the drawer: the five tabs plus the screens that
-/// do not earn a slot in the bar.
-const _drawerLinks = [
-  NavLink('Home', '/supervisor/dashboard', Icons.home_outlined),
-  NavLink('Product Catalog', '/supervisor/products', Icons.inventory_2_outlined),
-  NavLink('My Requests', '/supervisor/requests', Icons.assignment_outlined),
-  NavLink('Branch Approvals', '/supervisor/branch-approvals', Icons.fact_check_outlined),
-  NavLink('Issue History', '/supervisor/issues', Icons.send_outlined),
-  NavLink('Red Stock Room', '/supervisor/returns', Icons.assignment_return_outlined),
-  NavLink('Profile', '/supervisor/profile', Icons.person_outline),
+  NavLink('Issues', '/supervisor/issues', Icons.send_outlined),
+  NavLink('Red Room', '/supervisor/returns', Icons.assignment_return_outlined),
 ];
 
 /// A Branch account has two screens: its room's stock, and the requests it has
@@ -45,7 +33,6 @@ const _drawerLinks = [
 const _branchTabs = [
   NavLink('Stock', '/branch/stock', Icons.warehouse_outlined),
   NavLink('Requests', '/branch/requests', Icons.assignment_outlined),
-  NavLink('Profile', '/branch/profile', Icons.person_outline),
 ];
 
 /// Navigation for the signed-in role. Branch accounts never see the
@@ -53,12 +40,14 @@ const _branchTabs = [
 List<NavLink> _tabsFor(AuthProvider auth) =>
     auth.user?.isBranch == true ? _branchTabs : _bottomTabs;
 
-List<NavLink> _linksFor(AuthProvider auth) =>
-    auth.user?.isBranch == true ? _branchTabs : _drawerLinks;
+/// Where the gear goes — each portal has its own Settings screen.
+String _settingsPathFor(AuthProvider auth) =>
+    auth.user?.isBranch == true ? '/branch/settings' : '/supervisor/settings';
 
-/// Chrome shared by every authenticated screen: the app bar with the
-/// notification bell (Navbar.jsx) and the navigation drawer (Sidebar.jsx).
-class AppShell extends StatelessWidget {
+/// Chrome shared by every authenticated screen: the app bar with the settings
+/// gear and the notification bell (Navbar.jsx), and the bottom tab bar for the
+/// working screens. Profile and sign-out live behind the gear.
+class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
     required this.title,
@@ -73,30 +62,126 @@ class AppShell extends StatelessWidget {
   final List<Widget>? actions;
 
   @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> {
+  /// Handed to the screen below as its primary controller, so the tab bar can
+  /// scroll a list it does not otherwise know anything about. A vertical list
+  /// that names no controller of its own picks this one up.
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// Tapping the tab already showing sends its list back to the top — the way
+  /// out of a long scroll without dragging all the way back.
+  void _scrollToTop() {
+    // A screen can have more than one list attached at once (an empty state
+    // swapped for a grid, say). Which one was meant is then a guess, so do
+    // nothing rather than scroll the wrong one — and never read `offset` with
+    // several attached, which asserts.
+    if (_scrollController.positions.length != 1) return;
+    if (_scrollController.offset <= 0) return;
+
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(title, overflow: TextOverflow.ellipsis),
-        actions: [...?actions, const _NotificationBell(), const SizedBox(width: 4)],
+        title: _TitleWithAccount(title: widget.title),
+        actions: [
+          ...?widget.actions,
+          const _SettingsButton(),
+          const _NotificationBell(),
+          const SizedBox(width: 4),
+        ],
         shape: const Border(bottom: BorderSide(color: AppColors.border)),
       ),
-      drawer: const AppDrawer(),
-      floatingActionButton: floatingActionButton,
-      bottomNavigationBar: const AppBottomNav(),
-      body: Column(
-        children: [
-          const ServerStatusBar(),
-          Expanded(child: child),
-        ],
+      floatingActionButton: widget.floatingActionButton,
+      bottomNavigationBar: AppBottomNav(onReselect: _scrollToTop),
+      body: PrimaryScrollController(
+        controller: _scrollController,
+        child: Column(
+          children: [
+            const ServerStatusBar(),
+            Expanded(child: widget.child),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// Persistent tab bar across the bottom of every authenticated screen. The
-/// last slot opens the drawer, which is where the profile and sign-out live.
+/// The app bar heading: the screen's name over who is signed in. The account
+/// was previously only visible behind the Settings gear, which made a shared
+/// phone easy to use under the wrong login.
+class _TitleWithAccount extends StatelessWidget {
+  const _TitleWithAccount({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = context.watch<AuthProvider>().user;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        if (user != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Row(
+              children: [
+                Icon(
+                  user.isBranch ? Icons.warehouse_outlined : Icons.person_outline,
+                  size: 11.5,
+                  color: AppColors.textMuted,
+                ),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    // A Branch account works one room, so name the room with it.
+                    user.stockRoomName.isEmpty
+                        ? '${user.name} • ${user.role}'
+                        : '${user.name} • ${user.stockRoomName}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Persistent tab bar across the bottom of every authenticated screen, with
+/// one slot per screen the signed-in role can reach.
 class AppBottomNav extends StatelessWidget {
-  const AppBottomNav({super.key});
+  const AppBottomNav({super.key, this.onReselect});
+
+  /// Tapping the tab that is already showing. Navigation has nothing to do at
+  /// that point, so the shell uses it to scroll the screen back to the top.
+  final VoidCallback? onReselect;
 
   @override
   Widget build(BuildContext context) {
@@ -120,7 +205,11 @@ class AppBottomNav extends StatelessWidget {
                   icon: tab.icon,
                   active: location == tab.path,
                   onTap: () {
-                    if (location != tab.path) context.go(tab.path);
+                    if (location == tab.path) {
+                      onReselect?.call();
+                    } else {
+                      context.go(tab.path);
+                    }
                   },
                 ),
             ],
@@ -155,7 +244,7 @@ class _NavTab extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 3),
               decoration: BoxDecoration(
                 color: active
                     ? AppColors.primary.withValues(alpha: 0.12)
@@ -165,12 +254,20 @@ class _NavTab extends StatelessWidget {
               child: Icon(icon, size: 20, color: color),
             ),
             const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 10.5,
-                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            // Clip rather than wrap so the row keeps its height on a narrow
+            // phone.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 10.5,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                ),
               ),
             ),
           ],
@@ -180,246 +277,23 @@ class _NavTab extends StatelessWidget {
   }
 }
 
-class AppDrawer extends StatelessWidget {
-  const AppDrawer({super.key});
+/// The gear in the app bar, on every authenticated screen. Behind it: the
+/// account card, the request tallies, the server address and sign-out.
+class _SettingsButton extends StatelessWidget {
+  const _SettingsButton();
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final user = auth.user;
-    final location = GoRouterState.of(context).uri.path;
+    final path = _settingsPathFor(context.watch<AuthProvider>());
+    final active = GoRouterState.of(context).uri.path == path;
 
-    return Drawer(
-      child: SafeArea(
-        child: Column(
-          children: [
-            // Brand header
-            Container(
-              height: 64,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: AppColors.border)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.20),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.30)),
-                    ),
-                    child: const Icon(Icons.widgets_outlined,
-                        size: 20, color: AppColors.primaryDeep),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'StockMaster',
-                        style: TextStyle(
-                          color: AppColors.textStrong,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          height: 1.1,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${user?.role ?? ''} PORTAL',
-                        style: const TextStyle(
-                          color: AppColors.primaryDeep,
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // Signed-in user card
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 20, 16, 20),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceMuted,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    height: 40,
-                    width: 40,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.22)),
-                    ),
-                    child: Icon(
-                      user?.isBranch == true
-                          ? Icons.warehouse_outlined
-                          : Icons.person_outline,
-                      size: 20,
-                      color: AppColors.primaryDeep,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          user?.name ?? '',
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AppColors.textStrong,
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          user?.email ?? '',
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11.5),
-                        ),
-                        // A branch works one room; naming it here saves asking
-                        // which one this login belongs to.
-                        if (user?.stockRoomName.isNotEmpty == true) ...[
-                          const SizedBox(height: 4),
-                          AppBadge(user!.stockRoomName, color: AppColors.primaryDeep,
-                              fontSize: 9.5),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Navigation
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: [
-                  for (final link in _linksFor(auth))
-                    _DrawerLink(link: link, active: location == link.path),
-                ],
-              ),
-            ),
-
-            // Sign out
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: AppColors.border)),
-              ),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => _confirmSignOut(context),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.logout, size: 19, color: AppColors.textSecondary),
-                      SizedBox(width: 12),
-                      Text(
-                        'Sign Out',
-                        style: TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _confirmSignOut(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Sign out', style: TextStyle(fontSize: 17)),
-        content: const Text(
-          'Are you sure you want to sign out?',
-          style: TextStyle(color: AppColors.textSecondary, fontSize: 13.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.dangerDeep),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Sign Out'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true && context.mounted) {
-      await context.read<AuthProvider>().logout();
-    }
-  }
-}
-
-class _DrawerLink extends StatelessWidget {
-  const _DrawerLink({required this.link, required this.active});
-
-  final NavLink link;
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Material(
-        color: active ? AppColors.primary : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () {
-            Navigator.of(context).pop();
-            if (!active) context.go(link.path);
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              children: [
-                Icon(
-                  link.icon,
-                  size: 19,
-                  color: active ? Colors.white : AppColors.textSecondary,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  link.name,
-                  style: TextStyle(
-                    color: active ? Colors.white : AppColors.textBody,
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return IconButton(
+      icon: const Icon(Icons.settings_outlined, size: 22),
+      color: active ? AppColors.primaryDeep : AppColors.textSecondary,
+      tooltip: 'Settings',
+      onPressed: () {
+        if (!active) context.go(path);
+      },
     );
   }
 }

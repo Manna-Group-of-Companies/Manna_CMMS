@@ -9,6 +9,7 @@ import '../../core/toast.dart';
 import '../../data/repository.dart';
 import '../../models/models.dart';
 import '../../widgets/app_shell.dart';
+import '../../widgets/app_table.dart';
 import '../../widgets/common.dart';
 import '../../widgets/room_inventory_view.dart';
 
@@ -33,10 +34,11 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
   static const _returnsView = 'My Returns';
   static const _roomsView = 'Stock by Room';
 
-  static const _allScope = 'All Supervisors';
-  static const _mineScope = 'Returned by Me';
+  // Short, because the scope tabs share a row with the status filter.
+  static const _allScope = 'All';
+  static const _mineScope = 'Mine';
 
-  static const _filters = ['All', 'In Red Stock', 'In Merge', 'Moved'];
+  static const _filters = ['All Statuses', 'In Red Stock', 'In Merge', 'Moved'];
 
   /// Short filter labels map onto the server's Red Stock statuses.
   static const _statusesFor = {
@@ -49,7 +51,7 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
   List<MergeRequestSummary> _merges = const [];
   bool _loading = true;
   bool _merging = false;
-  String _filter = 'All';
+  String _filter = 'All Statuses';
   String _scope = _allScope;
   String _view = _returnsView;
 
@@ -248,63 +250,73 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
 
     return Column(
       children: [
+        // Everything above the grid is kept to two rows: the merge action with
+        // its status line, and one row of filters.
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
           child: Column(
             children: [
-              AppCard(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                child: Column(
-                  children: [
-                    PanelHeader(
-                      icon: Icons.assignment_return_outlined,
-                      iconColor: AppColors.accent,
-                      title: 'Returned Stock',
-                      subtitle: '${_mine.length} of ${_items.length} returned by you',
-                      trailing: AppBadge(
-                        '$_awaitingMerge of yours awaiting merge',
-                        color: AppColors.accent,
-                        uppercase: false,
-                        fontSize: 11,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _MergeButton(
+              Row(
+                children: [
+                  Expanded(
+                    child: _MergeButton(
                       quantity: _mergeQuantity,
                       count: _selecting ? _selected.length : 0,
                       busy: _merging,
                       onPressed:
                           _mergeable.isEmpty || _merging ? null : _requestMerge,
                     ),
-                    _SelectionBar(
-                      selecting: _selecting,
-                      selected: _selected.length,
-                      selectable: _awaitingMerge,
-                      onSelectAll: () => setState(() => _selected
-                        ..clear()
-                        ..addAll(_mine
-                            .where((item) => item.awaitingMerge)
-                            .map((item) => item.id))),
-                      onClear: () => setState(_selected.clear),
-                    ),
-                    if (_latestMerge case final merge?) ...[
-                      const SizedBox(height: 10),
-                      _MergeStatusLine(merge: merge),
-                    ],
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8),
+                  AppBadge(
+                    '$_awaitingMerge / ${_items.length}',
+                    icon: Icons.assignment_return_outlined,
+                    color: AppColors.accent,
+                    uppercase: false,
+                    fontSize: 11.5,
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              FilterTabs(
-                options: const [_allScope, _mineScope],
-                selected: _scope,
-                onChanged: (value) => setState(() => _scope = value),
+              _SelectionBar(
+                selecting: _selecting,
+                selected: _selected.length,
+                selectable: _awaitingMerge,
+                onSelectAll: () => setState(() => _selected
+                  ..clear()
+                  ..addAll(_mine
+                      .where((item) => item.awaitingMerge)
+                      .map((item) => item.id))),
+                onClear: () => setState(_selected.clear),
               ),
+              if (_latestMerge case final merge?) ...[
+                const SizedBox(height: 8),
+                _MergeStatusLine(merge: merge),
+              ],
               const SizedBox(height: 8),
-              FilterTabs(
-                options: _filters,
-                selected: _filter,
-                onChanged: (value) => setState(() => _filter = value),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 5,
+                    child: FilterTabs(
+                      options: const [_allScope, _mineScope],
+                      selected: _scope,
+                      onChanged: (value) => setState(() => _scope = value),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 4,
+                    child: DropdownShell(
+                      child: AppDropdown<String>(
+                        value: _filter,
+                        items: _filters,
+                        onChanged: (value) {
+                          if (value != null) setState(() => _filter = value);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -331,28 +343,112 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
                             ),
                           ],
                         )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-                          itemCount: visible.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 10),
-                          itemBuilder: (context, index) {
-                            final item = visible[index];
-                            return _RestockCard(
-                              item: item,
-                              selected: _selected.contains(item.id),
-                              selecting: _selecting,
-                              // Holding starts a selection; once one is under
-                              // way a plain tap is enough to add or drop.
-                              onLongPress: () => _toggle(item),
-                              onTap: _selecting ? () => _toggle(item) : null,
-                            );
-                          },
-                        ),
+                      : _buildTable(visible),
                 ),
         ),
       ],
     );
   }
+
+  /// The returns as rows and columns; the rest of each return unfolds under it.
+  Widget _buildTable(List<RestockRecord> visible) {
+    return AppTable<RestockRecord>(
+      items: visible,
+      idOf: (item) => item.id,
+      selectedOf: (item) => _selected.contains(item.id),
+      // Holding starts a selection; once one is under way a plain tap adds or
+      // drops rather than unfolding.
+      onRowLongPress: (_, item) => _toggle(item),
+      onRowTap: _selecting ? (_, item) => _toggle(item) : null,
+      columns: const [
+        AppTableColumn('Product', flex: 6),
+        AppTableColumn('Qty', width: 52, center: true),
+        AppTableColumn('Status', width: 82, center: true),
+      ],
+      cellsOf: (context, item) {
+        final pickable = item.isMine && item.awaitingMerge;
+
+        return [
+          Row(
+            children: [
+              if (_selecting && pickable) ...[
+                Icon(
+                  _selected.contains(item.id)
+                      ? Icons.check_circle
+                      : Icons.circle_outlined,
+                  size: 17,
+                  color: _selected.contains(item.id)
+                      ? AppColors.accent
+                      : AppColors.textFaint,
+                ),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: TableTitleCell(
+                  title: item.productName,
+                  subtitle: item.productCode,
+                  imageUrl: item.product?.image ?? '',
+                ),
+              ),
+            ],
+          ),
+          TableNumberCell(
+            value: '+${item.quantity}',
+            unit: item.unit,
+            color: AppColors.accent,
+          ),
+          TableBadgeCell(
+            _shortStatus(item),
+            color: _statusColor(item.status),
+          ),
+        ];
+      },
+      detailOf: (context, item) => TableDetail(
+        lines: [
+          TableDetailLine(label: 'Return #', value: item.restockNumber, mono: true),
+          TableDetailLine(
+            label: 'Returned by',
+            value: item.isMine ? '${item.returnedByName} (you)' : item.returnedByName,
+            valueColor: item.isMine ? AppColors.primaryDeep : null,
+          ),
+          TableDetailLine(label: 'Condition', value: item.condition),
+          TableDetailLine(label: 'Department', value: item.department),
+          TableDetailLine(
+            label: 'Status',
+            value: item.awaitingMerge ? 'Returned / In Red Stock' : item.status,
+            valueColor: _statusColor(item.status),
+          ),
+          if (item.destinationStoreRoom.isNotEmpty)
+            TableDetailLine(label: 'Moved to', value: item.destinationStoreRoom),
+          if (item.mergeRequestId.isNotEmpty)
+            TableDetailLine(label: 'Merge', value: item.mergeRequestId, mono: true),
+          TableDetailLine(
+            label: 'Returned on',
+            value: formatDateTime(item.returnDate),
+          ),
+          if (item.awaitingMerge && item.rejectionReason.isNotEmpty)
+            TableDetailLine(
+              label: 'Merge rejected',
+              value: item.rejectionReason,
+              valueColor: AppColors.danger,
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// The badge wording, shortened to what a phone column can hold.
+  static String _shortStatus(RestockRecord item) => switch (item.status) {
+        'Moved to Stock Room' => 'Moved',
+        'Weekly Merge Pending' => 'In Merge',
+        _ => 'Red Stock',
+      };
+
+  static Color _statusColor(String status) => switch (status) {
+        'Moved to Stock Room' => AppColors.success,
+        'Weekly Merge Pending' => AppColors.info,
+        _ => AppColors.danger,
+      };
 }
 
 /// Sends Red Stock to the Admin: everything, or only what has been held and
@@ -549,214 +645,6 @@ class _MergeStatusLine extends StatelessWidget {
                 ],
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RestockCard extends StatelessWidget {
-  const _RestockCard({
-    required this.item,
-    required this.selected,
-    required this.selecting,
-    required this.onLongPress,
-    required this.onTap,
-  });
-
-  final RestockRecord item;
-  final bool selected;
-
-  /// True once any return has been held, which is when the checkboxes appear.
-  final bool selecting;
-  final VoidCallback onLongPress;
-  final VoidCallback? onTap;
-
-  static Color _statusColor(String status) => switch (status) {
-        'Moved to Stock Room' => AppColors.success,
-        'Weekly Merge Pending' => AppColors.info,
-        _ => AppColors.danger,
-      };
-
-  static Color _conditionColor(String condition) => switch (condition) {
-        'Good' => AppColors.success,
-        'Repairable' => AppColors.warning,
-        _ => AppColors.danger,
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    // Only the supervisor's own Red Stock can go into a merge, so everything
-    // else stays plain even while a selection is under way.
-    final pickable = item.isMine && item.awaitingMerge;
-
-    return AppCard(
-      padding: const EdgeInsets.all(14),
-      onLongPress: onLongPress,
-      onTap: onTap,
-      color: selected ? AppColors.accent.withValues(alpha: 0.05) : null,
-      borderColor: selected ? AppColors.accent : null,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              if (selecting && pickable) ...[
-                Icon(
-                  selected ? Icons.check_circle : Icons.circle_outlined,
-                  size: 17,
-                  color: selected ? AppColors.accent : AppColors.textFaint,
-                ),
-                const SizedBox(width: 8),
-              ],
-              MonoText(item.restockNumber, color: AppColors.accent, fontSize: 11.5),
-              const Spacer(),
-              AppBadge(
-                item.awaitingMerge ? 'Returned / In Red Stock' : item.status,
-                color: _statusColor(item.status),
-                uppercase: false,
-                fontSize: 10.5,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ProductThumb(imageUrl: item.product?.image ?? '', size: 42),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.productName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.textStrong,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        height: 1.25,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        MonoText(
-                          item.productCode.isEmpty ? '—' : item.productCode,
-                          fontSize: 10.5,
-                        ),
-                        if (item.destinationStoreRoom.isNotEmpty) ...[
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              '• ${item.destinationStoreRoom}',
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: AppColors.textMuted,
-                                fontSize: 10.5,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              AppBadge(
-                '+${item.quantity} ${item.unit}',
-                color: AppColors.accent,
-                uppercase: false,
-                fontSize: 11.5,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          const Divider(height: 1),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Text(
-                'Condition: ',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
-              ),
-              AppBadge(
-                item.condition,
-                color: _conditionColor(item.condition),
-                fontSize: 9.5,
-              ),
-              const Spacer(),
-              SoftChip(item.department),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Icon(Icons.person_outline, size: 13, color: AppColors.textMuted),
-              const SizedBox(width: 6),
-              const Text(
-                'Returned by: ',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
-              ),
-              Expanded(
-                child: Text(
-                  item.isMine ? '${item.returnedByName} (you)' : item.returnedByName,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: item.isMine ? AppColors.primaryDeep : AppColors.textBody,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            item.reason,
-            style: const TextStyle(
-              color: AppColors.textBody,
-              fontSize: 12,
-              fontStyle: FontStyle.italic,
-              height: 1.4,
-            ),
-          ),
-          if (item.awaitingMerge && item.rejectionReason.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppColors.danger.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.danger.withValues(alpha: 0.16)),
-              ),
-              child: Text(
-                'Merge rejected: ${item.rejectionReason}',
-                style: const TextStyle(
-                  color: AppColors.danger,
-                  fontSize: 11.5,
-                  height: 1.4,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              const Icon(Icons.calendar_today_outlined, size: 12, color: AppColors.textMuted),
-              const SizedBox(width: 5),
-              Text(
-                formatDateTime(item.returnDate),
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
-              ),
-              const Spacer(),
-              if (item.mergeRequestId.isNotEmpty)
-                MonoText(item.mergeRequestId, color: AppColors.textMuted, fontSize: 10),
-            ],
           ),
         ],
       ),

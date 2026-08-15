@@ -260,7 +260,6 @@ const RedStockRoom = () => {
                   <th className="py-4 px-6 text-center">Returned Qty</th>
                   <th className="py-4 px-6">Supervisor / Department</th>
                   <th className="py-4 px-6">Return Date</th>
-                  <th className="py-4 px-6">Reason</th>
                   <th className="py-4 px-6">Issued From</th>
                   <th className="py-4 px-6 text-center">Status</th>
                 </tr>
@@ -313,9 +312,6 @@ const RedStockRoom = () => {
                         <Calendar className="h-3.5 w-3.5 opacity-65" />
                         {formatDate(item.returnDate)}
                       </span>
-                    </td>
-                    <td className="py-4 px-6 text-xs text-slate-600 italic max-w-[180px] truncate">
-                      {item.reason}
                     </td>
                     <td className="py-4 px-6 text-xs text-slate-600">
                       <span className="flex items-center gap-1.5">

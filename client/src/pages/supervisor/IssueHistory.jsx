@@ -17,9 +17,12 @@ import {
 const RETURN_CONDITIONS = ["Good", "Damaged", "Repairable", "Expired"];
 
 /**
- * Every issue the store has made, by any supervisor — what went out, to whom,
- * why and when. Returning one stays owner-only: the server rejects a return
- * against someone else's issue, so the button is only offered on `isMine`.
+ * What the store has issued and not yet had back, by any supervisor — what
+ * went out, to whom, why and when. Returning one is open to any supervisor:
+ * `isMine` only labels the row, and the return is booked against whoever is
+ * signed in. The server drops fully returned issues from this list, so a row
+ * disappearing after a return is the expected outcome, not a lost record —
+ * the Admin's own Issue History keeps every one of them.
  */
 const SupervisorIssueHistory = () => {
   const { showToast } = useNotifications();
@@ -33,7 +36,6 @@ const SupervisorIssueHistory = () => {
   const [returnIssue, setReturnIssue] = useState(null);
   const [returnForm, setReturnForm] = useState({
     quantity: 1,
-    reason: "",
     condition: "Good",
     department: "",
   });
@@ -67,7 +69,6 @@ const SupervisorIssueHistory = () => {
     setReturnIssue(issue);
     setReturnForm({
       quantity: outstandingOf(issue),
-      reason: "",
       condition: "Good",
       department: issue.recipient || "",
     });
@@ -87,17 +88,12 @@ const SupervisorIssueHistory = () => {
       showToast(`Only ${outstanding} still outstanding on this issue`, "error");
       return;
     }
-    if (!returnForm.reason.trim()) {
-      showToast("A return reason is required", "error");
-      return;
-    }
 
     try {
       setSubmitting(true);
       const { data } = await API.post("/red-stock/returns", {
         issueId: returnIssue._id,
         quantity,
-        reason: returnForm.reason.trim(),
         condition: returnForm.condition,
         department: returnForm.department.trim(),
       });
@@ -145,14 +141,14 @@ const SupervisorIssueHistory = () => {
           <div>
             <h3 className="text-lg font-bold text-slate-900">Issue History</h3>
             <p className="text-xs text-slate-500">
-              Everything issued from the store — {myIssueCount} of {issues.length} by you
+              Still out with a recipient — {myIssueCount} of {issues.length} issued by you
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
           <span className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 text-xs font-bold">
-            {visibleIssues.length} Issues • {totalIssuedQuantity} pcs
+            {visibleIssues.length} Outstanding • {totalIssuedQuantity} pcs
           </span>
 
           <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-200">
@@ -183,11 +179,12 @@ const SupervisorIssueHistory = () => {
           <HelpCircle className="h-10 w-10 text-slate-400 mb-3" />
           <h3 className="text-base font-bold text-slate-900 mb-1">
             {scope === "Mine"
-              ? "No products have been issued by you yet"
-              : "No products have been issued yet"}
+              ? "Nothing you issued is still out"
+              : "Nothing is still out with a recipient"}
           </h3>
           <p className="text-xs text-slate-500">
-            Use the "Issue Product" button on the Products catalog to issue items.
+            Fully returned issues drop off this list. Use the "Issue Product" button on
+            the Products catalog to issue items.
           </p>
         </div>
       ) : (
@@ -279,9 +276,9 @@ const SupervisorIssueHistory = () => {
                         )}
                       </td>
                       <td className="py-4 px-6 text-center">
-                        {/* Only the supervisor who issued it may return it —
-                            the server enforces the same rule. */}
-                        {outstanding > 0 && issue.isMine && (
+                        {/* Any supervisor may return any issue — whoever the
+                            recipient hands the stock back to books it in. */}
+                        {outstanding > 0 && (
                           <button
                             onClick={() => openReturnModal(issue)}
                             className="p-1.5 hover:bg-slate-100 rounded-lg text-rose-600 hover:text-rose-700 transition-all cursor-pointer"
@@ -289,11 +286,6 @@ const SupervisorIssueHistory = () => {
                           >
                             <RotateCcw className="h-4 w-4" />
                           </button>
-                        )}
-                        {outstanding > 0 && !issue.isMine && (
-                          <span className="text-[10px] text-slate-400" title="Only the issuing supervisor can return this">
-                            —
-                          </span>
                         )}
                       </td>
                     </tr>
@@ -402,20 +394,6 @@ const SupervisorIssueHistory = () => {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                  Reason for Return *
-                </label>
-                <textarea
-                  value={returnForm.reason}
-                  onChange={(e) => setReturnForm({ ...returnForm, reason: e.target.value })}
-                  required
-                  rows="3"
-                  placeholder="e.g. Job completed, surplus material returned"
-                  className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500 resize-none"
-                ></textarea>
-              </div>
-
               <div className="pt-4 border-t border-slate-200 flex justify-end gap-3">
                 <button
                   type="button"
@@ -477,16 +455,12 @@ const SupervisorIssueHistory = () => {
                   <span className="font-semibold text-slate-800">{selectedProduct.category}</span>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                  <span className="text-slate-500 block mb-0.5">Brand</span>
-                  <span className="font-semibold text-slate-800">{selectedProduct.brand}</span>
+                  <span className="text-slate-500 block mb-0.5">Rack Number</span>
+                  <span className="font-semibold text-slate-800">{selectedProduct.rackNumber || "—"}</span>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                   <span className="text-slate-500 block mb-0.5">Current Stock</span>
                   <span className="font-bold text-slate-900">{selectedProduct.quantity} {selectedProduct.unit}</span>
-                </div>
-                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                  <span className="text-slate-500 block mb-0.5">Supplier</span>
-                  <span className="font-semibold text-slate-800">{selectedProduct.supplier}</span>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                   <span className="text-slate-500 block mb-0.5">Min Stock Limit</span>

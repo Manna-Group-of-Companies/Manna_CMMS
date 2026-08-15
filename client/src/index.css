@@ -12,8 +12,11 @@
   --color-brand-700: #0b7a6e;
   --color-brand-900: #0a4f48;
 
-  /* Page background and the navy used by the admin sidebar. */
-  --color-canvas: #f4f6f7;
+  /* Page background and the navy used by the admin sidebar.
+     The canvas carries a faint teal cast so it sits with the brand rather than
+     reading as plain grey, and is a step deeper than the white cards so they
+     separate from it without needing a heavier border. */
+  --color-canvas: #eef3f2;
   --color-navy-800: #16232c;
   --color-navy-900: #101c24;
   --color-navy-950: #0b141a;

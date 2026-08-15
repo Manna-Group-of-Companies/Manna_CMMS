@@ -25,6 +25,37 @@ const CREATED_VIA_LABELS = {
 };
 
 /**
+ * What each line's destination room will hold once the merge is approved.
+ *
+ * Accumulated per product-and-room as the lines are walked, because a merge
+ * usually carries several returns of the same product: reading each of them
+ * against the room's opening balance would promise "5 → 8" on two lines when
+ * the room actually ends at 11.
+ *
+ * Only meaningful while the request is still pending — once it is approved the
+ * quantities are already inside `roomQuantities`, and adding them again would
+ * show the merge landing twice.
+ */
+const projectBalances = (items, destinationOf) => {
+  const running = new Map();
+
+  return items.map((line) => {
+    const room = destinationOf(line);
+    const key = `${String(line.product?._id || line.product)}::${room}`;
+
+    const before =
+      running.get(key) ??
+      (line.roomQuantities || []).find((entry) => entry.stockRoom === room)?.quantity ??
+      0;
+
+    const after = before + line.quantity;
+    running.set(key, after);
+
+    return { room, before, after };
+  });
+};
+
+/**
  * The merge review — the only Admin approval in the return flow. Merges arrive
  * from the weekly run and from supervisors asking for their own returns to be
  * moved early; both are decided here.
@@ -173,6 +204,11 @@ const MergeRequests = () => {
 
   const destinationFor = (line) =>
     lineDestinations[String(line.restockItem?._id || line.restockItem)] || destinationRoom;
+
+  // Recomputed each render rather than memoised, so the projected balances
+  // follow the destination dropdowns the moment the Admin changes one.
+  const isPending = detail?.status === "Pending Approval";
+  const projections = detail?.items ? projectBalances(detail.items, destinationFor) : [];
 
   return (
     <div className="space-y-6">
@@ -497,12 +533,16 @@ const MergeRequests = () => {
                               {room.name}
                             </th>
                           ))}
+                          {isPending && (
+                            <th className="py-3 px-4 text-center">In Stock After Merge</th>
+                          )}
                           <th className="py-3 px-4">Destination</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 text-slate-700">
-                        {detail.items.map((line) => {
+                        {detail.items.map((line, index) => {
                           const lineId = String(line.restockItem?._id || line.restockItem);
+                          const projection = projections[index];
                           return (
                             <tr key={lineId} className="hover:bg-slate-50">
                               <td className="py-3 px-4">
@@ -534,11 +574,27 @@ const MergeRequests = () => {
                               {(line.roomQuantities || []).map((room) => (
                                 <td
                                   key={room.stockRoomId}
-                                  className="py-3 px-4 text-center text-slate-600"
+                                  className={`py-3 px-4 text-center ${
+                                    isPending && room.stockRoom === projection?.room
+                                      ? "font-semibold text-slate-900"
+                                      : "text-slate-600"
+                                  }`}
                                 >
                                   {room.quantity}
                                 </td>
                               ))}
+                              {isPending && (
+                                <td className="py-3 px-4 text-center whitespace-nowrap">
+                                  <span className="text-slate-500">{projection.before}</span>
+                                  <span className="mx-1.5 text-slate-400">&rarr;</span>
+                                  <span className="font-bold text-emerald-600">
+                                    {projection.after}
+                                  </span>
+                                  <span className="block text-[10px] text-slate-400">
+                                    in {projection.room}
+                                  </span>
+                                </td>
+                              )}
                               <td className="py-3 px-4">
                                 {detail.status === "Pending Approval" ? (
                                   <select
@@ -589,7 +645,7 @@ const MergeRequests = () => {
                             </span>
                             <span className="block text-slate-500 truncate">
                               {entry.restockNumber} • {entry.returnedBy} • {entry.department} •{" "}
-                              {entry.sourceRoom || "—"} • {entry.reason}
+                              {entry.sourceRoom || "—"}
                             </span>
                           </div>
                           <div className="text-right shrink-0">

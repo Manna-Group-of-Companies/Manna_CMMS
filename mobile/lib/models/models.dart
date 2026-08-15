@@ -55,8 +55,7 @@ class Product {
     required this.code,
     required this.name,
     required this.category,
-    required this.brand,
-    required this.supplier,
+    required this.rackNumber,
     required this.quantity,
     required this.unit,
     required this.minStock,
@@ -71,8 +70,7 @@ class Product {
   final String code;
   final String name;
   final String category;
-  final String brand;
-  final String supplier;
+  final String rackNumber;
   final int quantity;
   final String unit;
   final int minStock;
@@ -90,8 +88,7 @@ class Product {
         code: asString(json['code']),
         name: asString(json['name']),
         category: asString(json['category']),
-        brand: asString(json['brand']),
-        supplier: asString(json['supplier']),
+        rackNumber: asString(json['rackNumber']),
         quantity: asInt(json['quantity']),
         unit: asString(json['unit']),
         minStock: asInt(json['minStock']),
@@ -111,8 +108,7 @@ class ProductDraft {
   ProductDraft({
     this.name = '',
     this.category = '',
-    this.brand = '',
-    this.supplier = '',
+    this.rackNumber = '',
     this.quantity = 0,
     this.unit = 'Pcs',
     this.minStock = 5,
@@ -124,8 +120,7 @@ class ProductDraft {
 
   String name;
   String category;
-  String brand;
-  String supplier;
+  String rackNumber;
   int quantity;
   String unit;
   int minStock;
@@ -137,8 +132,7 @@ class ProductDraft {
   factory ProductDraft.fromProduct(Product product) => ProductDraft(
         name: product.name,
         category: product.category,
-        brand: product.brand,
-        supplier: product.supplier,
+        rackNumber: product.rackNumber,
         quantity: product.quantity,
         unit: product.unit,
         minStock: product.minStock,
@@ -151,8 +145,7 @@ class ProductDraft {
   factory ProductDraft.fromJson(Map<String, dynamic> json) => ProductDraft(
         name: asString(json['name']),
         category: asString(json['category']),
-        brand: asString(json['brand']),
-        supplier: asString(json['supplier']),
+        rackNumber: asString(json['rackNumber']),
         quantity: asInt(json['quantity']),
         unit: asString(json['unit']),
         minStock: asInt(json['minStock']),
@@ -165,8 +158,7 @@ class ProductDraft {
   Map<String, dynamic> toJson() => {
         'name': name,
         'category': category,
-        'brand': brand,
-        'supplier': supplier,
+        'rackNumber': rackNumber,
         'quantity': quantity,
         'unit': unit,
         'minStock': minStock,
@@ -705,8 +697,8 @@ class IssueRecord {
   final int returnedQuantity;
   final DateTime? createdAt;
 
-  /// Whether this account made the issue. Everyone sees every issue, but only
-  /// the supervisor who made one may return it.
+  /// Whether this account made the issue. Only labels the row — every
+  /// supervisor may return any issue, whoever issued it.
   final bool isMine;
 
   bool get isReturned => returnStatus == 'Returned';
@@ -714,8 +706,9 @@ class IssueRecord {
   /// Still out with the recipient, and so still returnable.
   int get outstanding => quantity - returnedQuantity;
 
-  /// Outstanding stock this account is allowed to hand back.
-  bool get canReturn => isMine && outstanding > 0;
+  /// Whether there is anything left to hand back. Open to any supervisor, not
+  /// just the one who issued it — the server allows it either way.
+  bool get canReturn => outstanding > 0;
 
   factory IssueRecord.fromJson(Map<String, dynamic> json) => IssueRecord(
         id: asString(json['_id']),
@@ -812,7 +805,6 @@ class RestockRecord {
     required this.productCode,
     required this.unit,
     required this.quantity,
-    required this.reason,
     required this.condition,
     required this.department,
     required this.status,
@@ -839,7 +831,6 @@ class RestockRecord {
   final String productCode;
   final String unit;
   final int quantity;
-  final String reason;
   final String condition;
   final String department;
   final String status;
@@ -890,7 +881,6 @@ class RestockRecord {
         productCode: asString(json['productCode']),
         unit: asString(json['unit']),
         quantity: asInt(json['quantity']),
-        reason: asString(json['reason']),
         condition: asString(json['condition'], 'Good'),
         department: asString(json['department']),
         status: _statusOf(asString(json['status'], 'In Red Stock')),

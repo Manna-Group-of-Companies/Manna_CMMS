@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../core/palette.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/product_browser.dart';
-import '../../widgets/product_details_sheet.dart';
 import 'product_forms.dart';
 
 /// `pages/supervisor/ProductList.jsx` — browse the catalog and raise requests.
@@ -38,12 +37,9 @@ class _SupervisorProductListScreenState extends State<SupervisorProductListScree
       ),
       child: ProductBrowser(
         key: ValueKey(_reloadToken),
+        // Rendered as buttons in the details sheet — tapping a catalog card is
+        // the only way to reach them.
         actionsBuilder: (context, product, reload) => [
-          ProductAction(
-            label: 'Product Details',
-            icon: Icons.visibility_outlined,
-            onSelected: () => showProductDetails(context, product),
-          ),
           ProductAction(
             label: 'Request Edit',
             icon: Icons.edit_outlined,
@@ -58,20 +54,7 @@ class _SupervisorProductListScreenState extends State<SupervisorProductListScree
                 showStockRequestForm(context, product: product, kind: 'stockin'),
           ),
           ProductAction(
-            label: 'Request Stock Out',
-            icon: Icons.arrow_downward,
-            color: AppColors.danger,
-            onSelected: () =>
-                showStockRequestForm(context, product: product, kind: 'stockout'),
-          ),
-          ProductAction(
-            label: 'Request Stock Return',
-            icon: Icons.undo,
-            color: AppColors.info,
-            onSelected: () =>
-                showStockRequestForm(context, product: product, kind: 'stockreturn'),
-          ),
-          ProductAction(
+            filled: true,
             label: 'Issue Product',
             icon: Icons.send_outlined,
             color: AppColors.warning,

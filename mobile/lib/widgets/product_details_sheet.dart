@@ -6,20 +6,50 @@ import '../data/repository.dart';
 import '../models/models.dart';
 import 'common.dart';
 
+/// A single action offered in the details sheet's footer (Issue Product,
+/// Request Stock, ...). The catalog card itself carries no action menu — every
+/// operation is reached by opening the product first.
+class ProductAction {
+  const ProductAction({
+    required this.label,
+    required this.icon,
+    required this.onSelected,
+    this.color = AppColors.textBody,
+    this.filled = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onSelected;
+
+  /// Draws the button solid rather than tinted, and gives it a row of its own.
+  /// Reserved for the action that changes stock — everything else only raises
+  /// a request for the Admin to approve.
+  final bool filled;
+}
+
 /// "Product Specifications" modal, shared by every screen that shows a product.
-Future<void> showProductDetails(BuildContext context, Product product) {
+/// Callers pass the [actions] their role is allowed to perform; they render as
+/// buttons in the footer.
+Future<void> showProductDetails(
+  BuildContext context,
+  Product product, {
+  List<ProductAction> actions = const [],
+}) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => _ProductDetailsSheet(product: product),
+    builder: (_) => _ProductDetailsSheet(product: product, actions: actions),
   );
 }
 
 class _ProductDetailsSheet extends StatefulWidget {
-  const _ProductDetailsSheet({required this.product});
+  const _ProductDetailsSheet({required this.product, this.actions = const []});
 
   final Product product;
+  final List<ProductAction> actions;
 
   @override
   State<_ProductDetailsSheet> createState() => _ProductDetailsSheetState();
@@ -125,12 +155,12 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                     crossAxisCount: 2,
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
-                    childAspectRatio: 2.6,
+                    childAspectRatio: 2.35,
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
                     children: [
                       SpecTile(label: 'Category', value: p.category),
-                      SpecTile(label: 'Brand', value: p.brand),
+                      SpecTile(label: 'Rack Number', value: p.rackNumber),
                       SpecTile(
                         label: 'Current Stock',
                         value: '${p.quantity} $unit',
@@ -140,7 +170,6 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                                 ? AppColors.warning
                                 : AppColors.textStrong,
                       ),
-                      SpecTile(label: 'Supplier', value: p.supplier),
                       SpecTile(label: 'Min Stock Limit', value: '${p.minStock} $unit'),
                       SpecTile(label: 'Max Stock Limit', value: '${p.maxStock} $unit'),
                     ],
@@ -176,7 +205,102 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                 ],
               ),
             ),
+            if (widget.actions.isNotEmpty) _buildActionFooter(),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionFooter() {
+    final tinted = widget.actions.where((a) => !a.filled).toList();
+    final filled = widget.actions.where((a) => a.filled).toList();
+
+    // Close the sheet first so the action's own form is not stacked on top.
+    VoidCallback tap(ProductAction action) => () {
+          Navigator.of(context).pop();
+          action.onSelected();
+        };
+
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceMuted,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (tinted.isNotEmpty)
+                Row(
+                  children: [
+                    for (final action in tinted) ...[
+                      Expanded(child: _ActionButton(action: action, onTap: tap(action))),
+                      if (action != tinted.last) const SizedBox(width: 8),
+                    ],
+                  ],
+                ),
+              for (final action in filled) ...[
+                if (tinted.isNotEmpty) const SizedBox(height: 8),
+                _ActionButton(action: action, onTap: tap(action)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({required this.action, required this.onTap});
+
+  final ProductAction action;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final filled = action.filled;
+    final foreground = filled ? Colors.white : action.color;
+
+    return Material(
+      color: filled ? action.color : action.color.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: EdgeInsets.symmetric(vertical: filled ? 13 : 11),
+          decoration: filled
+              ? null
+              : BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: action.color.withValues(alpha: 0.35)),
+                ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(action.icon, size: filled ? 18 : 16, color: foreground),
+              const SizedBox(width: 7),
+              Flexible(
+                child: Text(
+                  action.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: foreground,
+                    fontSize: filled ? 14 : 12.5,
+                    fontWeight: filled ? FontWeight.w700 : FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
