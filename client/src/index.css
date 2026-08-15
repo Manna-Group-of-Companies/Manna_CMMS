@@ -20,12 +20,55 @@
   --color-navy-800: #16232c;
   --color-navy-900: #101c24;
   --color-navy-950: #0b141a;
+
+  /* One motion curve for the whole console, so panels, modals and drawers
+     all decelerate the same way. */
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --animate-fade-in: fade-in 0.15s ease-out;
+  --animate-rise-in: rise-in 0.2s var(--ease-out-soft);
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* Modals: a short lift rather than a bounce, so a dialog that opens over a
+     dense table does not shove the eye around. */
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
 }
 
 @layer base {
   body {
     @apply bg-canvas text-slate-800 antialiased;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Numbers in tables and metric cards line up column-wise, and a stat that
+     ticks from 9 to 10 stops nudging its neighbours. */
+  th,
+  td {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Nothing focusable should be invisible when tabbed to; individual
+     components override the ring colour where they need to. */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
   }
 }
 
@@ -48,12 +91,22 @@
   background: rgba(100, 116, 139, 0.5);
 }
 
-/* Card surfaces. Kept under the original names so every page picks up the
-   new look without touching its markup: a white panel with a hairline
-   border, separated from the canvas by a soft shadow rather than by
-   translucency. Declared as components so a `bg-*` utility on the same
-   element (tinted toasts, for one) still wins. */
+/* ===========================================================================
+   Console UI kit.
+
+   The admin screens are the same handful of shapes over and over — a panel
+   header, a table, a badge, a modal, a form row — so the sizes live here once
+   instead of being re-typed per page. Two rules keep it coherent:
+
+     · type scale   11px label / 13px body / 15px title, and nothing between
+     · control size 40px tall by default, 36px for the compact `-sm` variants
+
+   Declared as components so a `bg-*` utility on the same element (a tinted
+   toast, a coloured badge) still wins over the base look.
+   =========================================================================== */
 @layer components {
+  /* ---------- Surfaces ---------------------------------------------------- */
+
   .glass {
     background: #ffffff;
     border: 1px solid #e6ebee;
@@ -66,10 +119,369 @@
       0 4px 14px rgba(15, 33, 41, 0.04),
       0 1px 2px rgba(15, 33, 41, 0.03);
   }
+
+  /* The base surface. `@apply card` is not available to the other component
+     classes here — Tailwind v4 only applies utilities — so the panel, table
+     and empty-state shells repeat the shadow rather than compose it. */
+  .card,
+  .panel,
+  .table-card,
+  .empty {
+    @apply rounded-2xl border border-slate-200 bg-white;
+    box-shadow:
+      0 4px 14px rgba(15, 33, 41, 0.04),
+      0 1px 2px rgba(15, 33, 41, 0.03);
+  }
+
+  /* ---------- Panel header (the bar at the top of most pages) -------------- */
+
+  .panel {
+    @apply flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5;
+  }
+
+  .panel-icon {
+    @apply grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-brand-500/15 bg-brand-50 text-brand-700;
+  }
+
+  .panel-title {
+    @apply text-[15px] font-semibold leading-tight tracking-tight text-slate-900 sm:text-base;
+  }
+
+  .panel-sub {
+    @apply mt-0.5 text-xs leading-relaxed text-slate-500;
+  }
+
+  /* ---------- Section heading inside a card -------------------------------- */
+
+  .section-title {
+    @apply flex items-center gap-2 text-[15px] font-semibold tracking-tight text-slate-900;
+  }
+
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-wider text-slate-500;
+  }
+
+  /* ---------- Buttons ------------------------------------------------------ */
+
+  .btn {
+    @apply inline-flex h-10 shrink-0 cursor-pointer select-none items-center justify-center gap-2
+           whitespace-nowrap rounded-xl px-4 text-[13px] font-semibold
+           transition-colors duration-150 active:scale-[0.98]
+           disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-sm {
+    @apply h-9 gap-1.5 rounded-lg px-3 text-xs;
+  }
+
+  /* Square icon-only button; pair with `.btn-sm` for the table-row size. */
+  .btn-icon {
+    @apply w-10 px-0;
+  }
+
+  .btn-sm.btn-icon {
+    @apply w-9;
+  }
+
+  .btn-primary {
+    @apply bg-brand-600 text-white shadow-sm hover:bg-brand-500;
+  }
+
+  .btn-neutral {
+    @apply border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900;
+  }
+
+  .btn-subtle {
+    @apply bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900;
+  }
+
+  .btn-success {
+    @apply bg-emerald-600 text-white shadow-sm hover:bg-emerald-500;
+  }
+
+  .btn-danger {
+    @apply bg-rose-600 text-white shadow-sm hover:bg-rose-500;
+  }
+
+  /* Destructive but not yet confirmed — reads quiet until hovered. */
+  .btn-danger-soft {
+    @apply border border-rose-200 bg-rose-50 text-rose-600 hover:border-rose-600 hover:bg-rose-600 hover:text-white;
+  }
+
+  /* Bare icon affordance for row actions. */
+  .icon-btn {
+    @apply grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-500
+           transition-colors hover:bg-slate-100 hover:text-slate-900
+           disabled:pointer-events-none disabled:opacity-30;
+  }
+
+  .icon-btn-brand {
+    @apply text-brand-700 hover:bg-brand-50 hover:text-brand-700;
+  }
+
+  .icon-btn-danger {
+    @apply text-rose-600 hover:bg-rose-50 hover:text-rose-600;
+  }
+
+  /* ---------- Tabs / segmented control ------------------------------------ */
+
+  .tabs {
+    @apply inline-flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1;
+  }
+
+  .tab {
+    @apply cursor-pointer rounded-lg px-3.5 py-1.5 text-xs font-semibold text-slate-600
+           transition-colors hover:text-slate-900;
+  }
+
+  .tab-active {
+    @apply bg-brand-600 text-white shadow-sm hover:text-white;
+  }
+
+  /* ---------- Form controls ------------------------------------------------ */
+
+  .field {
+    @apply h-10 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900
+           placeholder-slate-400 transition-colors
+           focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/15;
+  }
+
+  .field-sm {
+    @apply h-9 rounded-lg px-3 text-[13px];
+  }
+
+  .field-area {
+    @apply h-auto resize-none py-2.5 leading-relaxed;
+  }
+
+  .field-label {
+    @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-500;
+  }
+
+  /* Search box: the icon is absolutely placed, so the input needs the room. */
+  .field-search {
+    @apply pl-10;
+  }
+
+  /* ---------- Tables ------------------------------------------------------- */
+
+  .table-card {
+    @apply overflow-hidden;
+  }
+
+  .table-scroll {
+    @apply w-full overflow-x-auto;
+  }
+
+  .tbl {
+    @apply w-full border-collapse text-left text-[13px] text-slate-700;
+  }
+
+  .tbl thead th {
+    @apply whitespace-nowrap border-b border-slate-200 bg-slate-50 px-4 py-3
+           text-[11px] font-semibold uppercase tracking-wider text-slate-500;
+  }
+
+  .tbl tbody td {
+    @apply border-b border-slate-100 px-4 py-3 align-middle;
+  }
+
+  .tbl thead th:first-child,
+  .tbl tbody td:first-child {
+    @apply pl-5;
+  }
+
+  .tbl thead th:last-child,
+  .tbl tbody td:last-child {
+    @apply pr-5;
+  }
+
+  .tbl tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .tbl tbody tr {
+    @apply transition-colors hover:bg-slate-50;
+  }
+
+  /* Compact density for the dashboard's preview tables. */
+  .tbl-compact tbody td,
+  .tbl-compact thead th {
+    @apply px-3 py-2.5;
+  }
+
+  /* Reference numbers, product codes: quieter than the name they sit under. */
+  .mono {
+    @apply font-mono text-[11px] tracking-tight;
+  }
+
+  .cell-title {
+    @apply font-semibold text-slate-900;
+  }
+
+  /* ---------- Badges ------------------------------------------------------- */
+
+  .badge {
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-0.5
+           text-[10px] font-bold uppercase tracking-wider;
+  }
+
+  .badge-pill {
+    @apply rounded-full px-2.5 py-1;
+  }
+
+  /* Sentence-case count/label chip rather than a status shout. */
+  .badge-soft {
+    @apply text-[11px] font-semibold normal-case tracking-normal;
+  }
+
+  .badge-brand {
+    @apply border-brand-500/20 bg-brand-500/10 text-brand-700;
+  }
+
+  .badge-emerald {
+    @apply border-emerald-500/20 bg-emerald-500/10 text-emerald-600;
+  }
+
+  .badge-rose {
+    @apply border-rose-500/20 bg-rose-500/10 text-rose-600;
+  }
+
+  .badge-amber {
+    @apply border-amber-500/20 bg-amber-500/10 text-amber-600;
+  }
+
+  .badge-orange {
+    @apply border-orange-500/20 bg-orange-500/10 text-orange-600;
+  }
+
+  .badge-indigo {
+    @apply border-indigo-500/20 bg-indigo-500/10 text-indigo-600;
+  }
+
+  .badge-violet {
+    @apply border-violet-500/20 bg-violet-500/10 text-violet-700;
+  }
+
+  .badge-cyan {
+    @apply border-cyan-500/20 bg-cyan-500/10 text-cyan-700;
+  }
+
+  .badge-slate {
+    @apply border-slate-200 bg-slate-100 text-slate-600;
+  }
+
+  /* ---------- Key/value tiles (modal detail grids) ------------------------- */
+
+  .kv {
+    @apply rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5;
+  }
+
+  .kv-label {
+    @apply mb-0.5 block text-[11px] text-slate-500;
+  }
+
+  .kv-value {
+    @apply text-[13px] font-semibold text-slate-800;
+  }
+
+  /* ---------- Inline notes ------------------------------------------------- */
+
+  .note {
+    @apply flex gap-2 rounded-xl border p-3 text-[12px] leading-relaxed;
+  }
+
+  .note-amber {
+    @apply border-amber-500/20 bg-amber-50 text-amber-900;
+  }
+
+  .note-rose {
+    @apply border-rose-500/20 bg-rose-50 text-rose-900;
+  }
+
+  .note-emerald {
+    @apply border-emerald-500/20 bg-emerald-50 text-emerald-900;
+  }
+
+  .note-brand {
+    @apply border-brand-500/20 bg-brand-50 text-slate-700;
+  }
+
+  .note-violet {
+    @apply border-violet-500/20 bg-violet-500/5 text-slate-700;
+  }
+
+  /* ---------- Empty state -------------------------------------------------- */
+
+  .empty {
+    @apply flex flex-col items-center justify-center px-6 py-14 text-center;
+  }
+
+  .empty-title {
+    @apply mb-1 text-[15px] font-semibold text-slate-900;
+  }
+
+  .empty-sub {
+    @apply text-xs text-slate-500;
+  }
+
+  /* Same idea, but nested inside a card that already has a border. */
+  .empty-inline {
+    @apply flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 py-12 text-slate-500;
+  }
+
+  /* ---------- Modals ------------------------------------------------------- */
+
+  .modal-backdrop {
+    @apply fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm;
+    animation: var(--animate-fade-in);
+  }
+
+  /* A column so the header and footer stay put while the body scrolls, rather
+     than the whole dialog scrolling its own title away. */
+  .modal {
+    @apply flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200
+           bg-white text-left shadow-2xl;
+    animation: var(--animate-rise-in);
+  }
+
+  .modal-head {
+    @apply flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6;
+  }
+
+  .modal-title {
+    @apply flex items-center gap-2 text-base font-semibold tracking-tight text-slate-900;
+  }
+
+  .modal-sub {
+    @apply mt-0.5 text-xs text-slate-500;
+  }
+
+  .modal-body {
+    @apply flex-1 overflow-y-auto px-5 py-5 sm:px-6;
+  }
+
+  .modal-foot {
+    @apply flex shrink-0 justify-end gap-2.5 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6;
+  }
+
+  .modal-close {
+    @apply -mr-1.5 grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg
+           text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900;
+  }
 }
 
 .text-gradient {
   background: linear-gradient(135deg, #0d9488 0%, #14a093 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

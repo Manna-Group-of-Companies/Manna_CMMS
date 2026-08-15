@@ -141,19 +141,21 @@ const Users = () => {
   const waiting = users.filter((user) => !user.hasPin).length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl glass-premium border border-slate-200">
-        <div className="flex items-center gap-2">
-          <UsersIcon className="h-5 w-5 text-brand-700" />
-          <div>
-            <h3 className="text-lg font-bold text-slate-900">Users & PINs</h3>
-            <p className="text-xs text-slate-500">
+      <div className="panel">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="panel-icon">
+            <UsersIcon className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="panel-title">Users &amp; PINs</h3>
+            <p className="panel-sub">
               {users.length} account(s)
               {waiting > 0 && (
                 <>
-                  {" "}
-                  • <span className="text-amber-600 font-semibold">
+                  {" • "}
+                  <span className="text-amber-600 font-semibold">
                     {waiting} waiting for a PIN
                   </span>
                 </>
@@ -162,10 +164,7 @@ const Users = () => {
           </div>
         </div>
 
-        <button
-          onClick={() => setEditing("new")}
-          className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl bg-brand-600 hover:bg-brand-500 text-white cursor-pointer active:scale-98 transition-all"
-        >
+        <button onClick={() => setEditing("new")} className="btn btn-primary w-full sm:w-auto">
           <UserPlus className="h-4 w-4" />
           Add User
         </button>
@@ -176,7 +175,7 @@ const Users = () => {
           <Loader2 className="h-7 w-7 text-brand-500 animate-spin" />
         </div>
       ) : (
-        <div className="glass-premium rounded-2xl border border-slate-200 overflow-hidden shadow-sm divide-y divide-slate-200">
+        <div className="card overflow-hidden divide-y divide-slate-100">
           {users.map((user) => {
             const Icon = ROLE_ICON[user.role] || UserIcon;
             return (
@@ -184,59 +183,56 @@ const Users = () => {
                 key={user._id}
                 // Wraps on a phone: identity on the first line, the PIN status
                 // and actions on the second, so neither squeezes the name.
-                className="px-4 sm:px-5 py-4 flex flex-wrap items-center gap-3 sm:gap-4 hover:bg-slate-50 transition-colors"
+                className="px-4 sm:px-5 py-3.5 flex flex-wrap items-center gap-3 hover:bg-slate-50 transition-colors"
               >
                 <div className="bg-brand-500/10 h-10 w-10 rounded-full flex items-center justify-center border border-brand-500/20 shrink-0">
-                  <Icon className="h-5 w-5 text-brand-700" />
+                  <Icon className="h-[18px] w-[18px] text-brand-700" />
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-slate-900 text-sm truncate">
-                    {user.name}
-                  </div>
-                  <div className="text-[11px] text-slate-500 truncate">
+                  <div className="cell-title text-[14px] truncate">{user.name}</div>
+                  <div className="text-[12px] text-slate-500 truncate">
                     {user.role}
                     {user.stockRoom?.name && ` • ${user.stockRoom.name}`}
                     {user.email && ` • ${user.email}`}
                   </div>
                 </div>
 
-                <div className="w-full sm:w-auto flex items-center justify-end gap-2 sm:gap-4">
-                {user.hasPin ? (
-                  <span className="text-[10px] font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-500/20 whitespace-nowrap">
-                    PIN set
+                <div className="w-full sm:w-auto flex items-center justify-end gap-2">
+                  <span
+                    className={`badge badge-pill badge-soft ${
+                      user.hasPin ? "badge-emerald" : "badge-amber"
+                    }`}
+                  >
+                    {user.hasPin ? "PIN set" : "No PIN — cannot sign in"}
                   </span>
-                ) : (
-                  <span className="text-[10px] font-semibold px-2 py-1 rounded-full bg-amber-50 text-amber-600 border border-amber-500/20">
-                    No PIN — cannot sign in
-                  </span>
-                )}
 
-                <button
-                  onClick={() => {
-                    setEditing(user);
-                    setPin("");
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-white border border-slate-200 text-brand-700 hover:bg-brand-50 cursor-pointer transition-all"
-                >
-                  <KeyRound className="h-3.5 w-3.5" />
-                  {user.hasPin ? "Change PIN" : "Set PIN"}
-                </button>
+                  <button
+                    onClick={() => {
+                      setEditing(user);
+                      setPin("");
+                    }}
+                    className="btn btn-sm btn-neutral text-brand-700 hover:text-brand-700 hover:bg-brand-50"
+                  >
+                    <KeyRound className="h-3.5 w-3.5" />
+                    {user.hasPin ? "Change PIN" : "Set PIN"}
+                  </button>
 
-                {/* Deleting your own account would end the session, and the
-                    server refuses it — so it is not offered here either. */}
-                <button
-                  onClick={() => setDeleting(user)}
-                  disabled={user._id === signedIn?._id}
-                  title={
-                    user._id === signedIn?._id
-                      ? "You cannot delete your own account"
-                      : `Delete ${user.name}`
-                  }
-                  className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 cursor-pointer transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                  {/* Deleting your own account would end the session, and the
+                      server refuses it — so it is not offered here either. */}
+                  <button
+                    onClick={() => setDeleting(user)}
+                    disabled={user._id === signedIn?._id}
+                    title={
+                      user._id === signedIn?._id
+                        ? "You cannot delete your own account"
+                        : `Delete ${user.name}`
+                    }
+                    className="icon-btn icon-btn-danger"
+                    aria-label={`Delete ${user.name}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
             );
@@ -246,55 +242,48 @@ const Users = () => {
 
       {/* Delete confirmation */}
       {deleting && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-          <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
-            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-              <div>
-                <h3 className="font-bold text-lg text-slate-900">Delete Account</h3>
-                <p className="text-xs text-slate-600 mt-0.5">
+        <div className="modal-backdrop">
+          <div className="modal max-w-md">
+            <div className="modal-head">
+              <div className="min-w-0">
+                <h3 className="modal-title">Delete Account</h3>
+                <p className="modal-sub truncate">
                   {deleting.name} • {deleting.role}
                   {deleting.stockRoom?.name && ` • ${deleting.stockRoom.name}`}
                 </p>
               </div>
-              <button
-                onClick={() => setDeleting(null)}
-                className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 cursor-pointer transition-colors"
-              >
+              <button onClick={() => setDeleting(null)} className="modal-close" aria-label="Close">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="modal-body space-y-4">
               <p className="text-sm text-slate-700 leading-relaxed">
                 <strong>{deleting.name}</strong> will no longer be able to sign in, on the
                 web console or the phone app.
               </p>
-              <div className="p-3 rounded-xl bg-rose-50 border border-rose-500/20 text-[11px] text-rose-900 leading-relaxed flex gap-2">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <div className="note note-rose">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-px" />
                 <span>
                   This cannot be undone. Requests and issues raised by this account stay in
                   the history, but stop showing their name.
                 </span>
               </div>
+            </div>
 
-              <div className="pt-4 border-t border-slate-200 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setDeleting(null)}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-white border border-slate-200 text-slate-600 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  disabled={submitting}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-rose-600 hover:bg-rose-500 text-white disabled:opacity-50 cursor-pointer active:scale-98 transition-all flex items-center gap-2"
-                >
-                  {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  Delete {deleting.name}
-                </button>
-              </div>
+            <div className="modal-foot">
+              <button type="button" onClick={() => setDeleting(null)} className="btn btn-neutral">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={submitting}
+                className="btn btn-danger"
+              >
+                {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                Delete Account
+              </button>
             </div>
           </div>
         </div>
@@ -302,14 +291,14 @@ const Users = () => {
 
       {/* Set PIN / add user modal */}
       {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-          <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
-            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-              <div>
-                <h3 className="font-bold text-lg text-slate-900">
+        <div className="modal-backdrop">
+          <div className="modal max-w-md">
+            <div className="modal-head">
+              <div className="min-w-0">
+                <h3 className="modal-title truncate">
                   {editing === "new" ? "Add User" : `PIN for ${editing.name}`}
                 </h3>
-                <p className="text-xs text-slate-600 mt-0.5">
+                <p className="modal-sub">
                   {editing === "new"
                     ? "The account signs in with this name and PIN."
                     : `${editing.role}${
@@ -317,23 +306,21 @@ const Users = () => {
                       }`}
                 </p>
               </div>
-              <button
-                onClick={closeModal}
-                className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 cursor-pointer transition-colors"
-              >
+              <button onClick={closeModal} className="modal-close" aria-label="Close">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <form
               onSubmit={editing === "new" ? handleCreate : handleSetPin}
-              className="p-6 space-y-4"
+              className="contents"
             >
+              <div className="modal-body space-y-4">
               {editing === "new" && (
                 <>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                      Name * <span className="font-normal text-slate-500">(used to sign in)</span>
+                    <label className="field-label">
+                      Name * <span className="font-normal normal-case tracking-normal">(used to sign in)</span>
                     </label>
                     <input
                       type="text"
@@ -341,17 +328,15 @@ const Users = () => {
                       onChange={(e) => setForm({ ...form, name: e.target.value })}
                       required
                       placeholder="e.g. Night Shift Supervisor"
-                      className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
+                      className="field"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                      Role *
-                    </label>
+                    <label className="field-label">Role *</label>
                     <select
                       value={form.role}
                       onChange={(e) => setForm({ ...form, role: e.target.value })}
-                      className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
+                      className="field cursor-pointer"
                     >
                       <option value="Supervisor">Supervisor</option>
                       <option value="Branch">Branch</option>
@@ -360,14 +345,12 @@ const Users = () => {
                   </div>
                   {form.role === "Branch" && (
                     <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                        Stock Room *
-                      </label>
+                      <label className="field-label">Stock Room *</label>
                       <select
                         value={form.stockRoom}
                         onChange={(e) => setForm({ ...form, stockRoom: e.target.value })}
                         required
-                        className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
+                        className="field cursor-pointer"
                       >
                         <option value="">Select a room…</option>
                         {rooms.map((room) => (
@@ -379,22 +362,22 @@ const Users = () => {
                     </div>
                   )}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                      Email <span className="font-normal text-slate-500">(optional, contact only)</span>
+                    <label className="field-label">
+                      Email <span className="font-normal normal-case tracking-normal">(optional, contact only)</span>
                     </label>
                     <input
                       type="email"
                       value={form.email}
                       onChange={(e) => setForm({ ...form, email: e.target.value })}
                       placeholder="name@company.com"
-                      className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
+                      className="field"
                     />
                   </div>
                 </>
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                <label className="field-label">
                   {PIN_LENGTH}-Digit PIN {editing === "new" ? "" : "*"}
                 </label>
                 <input
@@ -405,33 +388,27 @@ const Users = () => {
                   maxLength={PIN_LENGTH}
                   required={editing !== "new"}
                   placeholder="0000"
-                  className="w-full px-4 py-2.5 text-lg font-mono tracking-[0.6em] rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-300 focus:outline-none focus:border-brand-500"
+                  // Wider and monospaced: a PIN is read back digit by digit.
+                  className="field h-12 text-center text-lg font-mono tracking-[0.6em] indent-[0.6em] placeholder-slate-300"
                 />
               </div>
 
-              <div className="p-3 rounded-xl bg-amber-50 border border-amber-500/20 text-[11px] text-amber-900 leading-relaxed flex gap-2">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <div className="note note-amber">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-px" />
                 <span>
                   {editing === "new"
                     ? "Leave the PIN blank to add the account now and issue its PIN later — it cannot sign in until then."
                     : "The PIN is stored hashed, so it cannot be read back. Pass it to the account holder directly."}
                 </span>
               </div>
+              </div>
 
-              <div className="pt-4 border-t border-slate-200 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-white border border-slate-200 text-slate-600 cursor-pointer"
-                >
+              <div className="modal-foot">
+                <button type="button" onClick={closeModal} className="btn btn-neutral">
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-50 cursor-pointer active:scale-98 transition-all flex items-center gap-2"
-                >
-                  {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                <button type="submit" disabled={submitting} className="btn btn-primary">
+                  {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                   {editing === "new" ? "Add User" : "Save PIN"}
                 </button>
               </div>

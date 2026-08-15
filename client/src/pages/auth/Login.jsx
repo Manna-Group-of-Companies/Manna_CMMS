@@ -78,7 +78,7 @@ const Login = () => {
               </label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                  <User className="h-4.5 w-4.5" />
+                  <User className="h-[18px] w-[18px]" />
                 </span>
                 <input
                   type="text"
@@ -99,7 +99,7 @@ const Login = () => {
               </label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                  <KeyRound className="h-4.5 w-4.5" />
+                  <KeyRound className="h-[18px] w-[18px]" />
                 </span>
                 <input
                   type="password"

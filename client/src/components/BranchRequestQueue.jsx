@@ -174,37 +174,33 @@ const BranchRequestQueue = ({ stage }) => {
   const visible = buckets[tab] || [];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="glass-premium p-6 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="bg-brand-600/10 border border-brand-500/20 p-3 rounded-xl">
-            <ClipboardList className="h-6 w-6 text-brand-700" />
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-slate-900 tracking-tight">{config.title}</h3>
-            <p className="text-xs text-slate-600 mt-1">{config.blurb}</p>
+      <div className="panel">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="panel-icon">
+            <ClipboardList className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="panel-title">{config.title}</h3>
+            <p className="panel-sub">{config.blurb}</p>
           </div>
         </div>
-        <div className="text-center">
-          <p className="text-3xl font-bold text-amber-600">{buckets.mine.length}</p>
-          <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+        <div className="shrink-0 text-center rounded-xl border border-amber-500/20 bg-amber-50 px-4 py-2">
+          <p className="text-2xl font-bold leading-none text-amber-600">{buckets.mine.length}</p>
+          <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-amber-700/80">
             Waiting on you
           </p>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex flex-wrap gap-1 p-1 rounded-xl bg-slate-100 border border-slate-200 w-fit">
+      <div className="tabs w-full sm:w-fit">
         {tabs.map((option) => (
           <button
             key={option.key}
             onClick={() => setTab(option.key)}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-              tab === option.key
-                ? "bg-white text-brand-700 shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
+            className={`tab ${tab === option.key ? "tab-active" : ""}`}
           >
             {option.label} ({option.count})
           </button>
@@ -213,9 +209,9 @@ const BranchRequestQueue = ({ stage }) => {
 
       {/* Requests */}
       {visible.length === 0 ? (
-        <div className="glass-premium rounded-2xl border border-slate-200 flex flex-col items-center justify-center py-16 text-slate-500">
-          <ClipboardList className="h-10 w-10 mb-3 opacity-50" />
-          <p className="text-sm">Nothing here right now.</p>
+        <div className="empty">
+          <ClipboardList className="h-10 w-10 mb-3 text-slate-300" />
+          <p className="empty-sub text-[13px]">Nothing here right now.</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -235,33 +231,29 @@ const BranchRequestQueue = ({ stage }) => {
             return (
               <div
                 key={request._id}
-                className={`glass-premium rounded-2xl border overflow-hidden ${
-                  actionable ? "border-amber-500/30" : "border-slate-200"
-                }`}
+                className={`card overflow-hidden ${actionable ? "border-amber-500/40" : ""}`}
               >
-                <div className="p-5 flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-center gap-4 min-w-0">
+                <div className="p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3.5 min-w-0">
                     {request.product?.image ? (
                       <img
                         src={request.product.image}
-                        alt={request.productName}
-                        className="h-12 w-12 rounded-xl object-cover border border-slate-200"
+                        alt=""
+                        className="h-11 w-11 shrink-0 rounded-xl object-cover border border-slate-200"
                       />
                     ) : (
-                      <div className="h-12 w-12 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center">
-                        <Boxes className="h-5 w-5 text-slate-500" />
+                      <div className="h-11 w-11 shrink-0 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center">
+                        <Boxes className="h-5 w-5 text-slate-400" />
                       </div>
                     )}
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="text-sm font-bold text-slate-900 truncate">
+                        <h4 className="text-[14px] font-semibold text-slate-900 truncate">
                           {request.productName}
                         </h4>
-                        <span className="text-[11px] text-slate-500">
-                          #{request.requestNumber}
-                        </span>
+                        <span className="mono text-slate-500">#{request.requestNumber}</span>
                       </div>
-                      <p className="text-xs text-slate-600 mt-0.5 flex flex-wrap items-center gap-x-2">
+                      <p className="text-[12px] text-slate-500 mt-0.5 flex flex-wrap items-center gap-x-2">
                         <span className="font-semibold text-slate-800">
                           {request.quantity} {request.unit}
                         </span>
@@ -275,12 +267,13 @@ const BranchRequestQueue = ({ stage }) => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     <RequestStatusBadge status={request.status} />
                     <button
                       onClick={() => setExpanded(isOpen ? null : request._id)}
-                      className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-all cursor-pointer"
+                      className="icon-btn"
                       title={isOpen ? "Hide history" : "Show history"}
+                      aria-expanded={isOpen}
                     >
                       {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                     </button>
@@ -288,45 +281,41 @@ const BranchRequestQueue = ({ stage }) => {
                 </div>
 
                 {/* Stage chain, always visible */}
-                <div className="px-5 pb-4">
+                <div className="px-4 sm:px-5 pb-4">
                   <ApprovalStages request={request} />
                 </div>
 
                 {/* Decision panel — only for the stage this portal owns */}
                 {actionable && (
-                  <div className="px-5 py-4 border-t border-slate-200 bg-amber-500/5">
-                    <p className="text-[11px] text-slate-600 mb-3">{config.approveHint}</p>
+                  <div className="px-4 sm:px-5 py-4 border-t border-slate-200 bg-amber-500/5">
+                    <p className="text-[12px] text-slate-600 mb-3">{config.approveHint}</p>
                     <div className="flex flex-wrap items-end gap-3">
                       <div>
-                        <label className="block text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
-                          Approve quantity (max {ceiling})
-                        </label>
+                        <label className="field-label">Approve qty (max {ceiling})</label>
                         <input
                           type="number"
                           min="1"
                           max={ceiling}
                           value={draft.quantity}
                           onChange={(e) => setDraft(request, { quantity: e.target.value })}
-                          className="w-32 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20 transition-all"
+                          className="field w-32"
                         />
                       </div>
                       <div className="flex-1 min-w-[240px]">
-                        <label className="block text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
-                          Remark (required to reject)
-                        </label>
+                        <label className="field-label">Remark (required to reject)</label>
                         <input
                           type="text"
                           value={draft.comment}
                           onChange={(e) => setDraft(request, { comment: e.target.value })}
                           placeholder="Reason or note for the branch"
-                          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20 transition-all"
+                          className="field"
                         />
                       </div>
                       <div className="flex gap-2">
                         <button
                           onClick={() => decide(request, "approve")}
                           disabled={busyId === request._id}
-                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold shadow transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                          className="btn btn-success"
                         >
                           {busyId === request._id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -338,7 +327,7 @@ const BranchRequestQueue = ({ stage }) => {
                         <button
                           onClick={() => decide(request, "reject")}
                           disabled={busyId === request._id}
-                          className="px-4 py-2 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                          className="btn btn-danger-soft"
                         >
                           <X className="h-4 w-4" />
                           Reject
@@ -350,34 +339,28 @@ const BranchRequestQueue = ({ stage }) => {
 
                 {/* Full trail */}
                 {isOpen && (
-                  <div className="px-5 py-5 border-t border-slate-200 bg-slate-50/60 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="px-4 sm:px-5 py-5 border-t border-slate-200 bg-slate-50/60 grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div>
-                      <h5 className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-3">
-                        Approval History
-                      </h5>
+                      <h5 className="eyebrow mb-3">Approval History</h5>
                       <RequestHistory history={request.history} />
                     </div>
-                    <div className="space-y-3 text-xs">
-                      <h5 className="text-xs font-bold uppercase tracking-wider text-slate-600">
-                        Details
-                      </h5>
+                    <div className="space-y-3">
+                      <h5 className="eyebrow">Details</h5>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <p className="text-slate-500">Product code</p>
-                          <p className="font-semibold text-slate-900">{request.productCode}</p>
+                          <p className="kv-label">Product code</p>
+                          <p className="kv-value">{request.productCode}</p>
                         </div>
                         <div>
-                          <p className="text-slate-500">Requested by</p>
-                          <p className="font-semibold text-slate-900">
+                          <p className="kv-label">Requested by</p>
+                          <p className="kv-value">
                             {request.branch?.name}
                             {request.branch?.email && ` (${request.branch.email})`}
                           </p>
                         </div>
                         <div>
-                          <p className="text-slate-500">Admin decision</p>
-                          <p className="font-semibold text-slate-900">
-                            {decidedBy("Admin", request.admin)}
-                          </p>
+                          <p className="kv-label">Admin decision</p>
+                          <p className="kv-value">{decidedBy("Admin", request.admin)}</p>
                           {request.adminDecidedAt && (
                             <p className="text-[11px] text-slate-500">
                               {formatActorStamp(request.adminDecidedAt)}
@@ -385,8 +368,8 @@ const BranchRequestQueue = ({ stage }) => {
                           )}
                         </div>
                         <div>
-                          <p className="text-slate-500">Supervisor decision</p>
-                          <p className="font-semibold text-slate-900">
+                          <p className="kv-label">Supervisor decision</p>
+                          <p className="kv-value">
                             {decidedBy("Supervisor", request.supervisor)}
                           </p>
                           {request.supervisorDecidedAt && (
@@ -398,20 +381,22 @@ const BranchRequestQueue = ({ stage }) => {
                       </div>
                       {request.purpose && (
                         <div>
-                          <p className="text-slate-500">Purpose</p>
-                          <p className="text-slate-800">{request.purpose}</p>
+                          <p className="kv-label">Purpose</p>
+                          <p className="text-[13px] text-slate-800">{request.purpose}</p>
                         </div>
                       )}
                       {request.adminComments && (
                         <div>
-                          <p className="text-slate-500">Admin remark</p>
-                          <p className="text-slate-800">"{request.adminComments}"</p>
+                          <p className="kv-label">Admin remark</p>
+                          <p className="text-[13px] text-slate-800">"{request.adminComments}"</p>
                         </div>
                       )}
                       {request.supervisorComments && (
                         <div>
-                          <p className="text-slate-500">Supervisor remark</p>
-                          <p className="text-slate-800">"{request.supervisorComments}"</p>
+                          <p className="kv-label">Supervisor remark</p>
+                          <p className="text-[13px] text-slate-800">
+                            "{request.supervisorComments}"
+                          </p>
                         </div>
                       )}
                     </div>

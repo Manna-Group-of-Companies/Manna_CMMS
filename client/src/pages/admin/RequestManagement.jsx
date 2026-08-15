@@ -4,15 +4,13 @@ import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import {
   Loader2,
-  CheckCircle2,
-  XCircle,
-  Clock,
   User,
   ClipboardList,
   Eye,
   X,
   MessageSquare,
   ArrowRight,
+  AlertTriangle,
   HelpCircle,
   GitMerge,
   Building2,
@@ -55,6 +53,9 @@ const RequestManagement = () => {
   const [adminComments, setAdminComments] = useState("");
   // Where an approved merge puts the stock. Only merges use this.
   const [destinationRoom, setDestinationRoom] = useState("");
+  // Set while a decision is in flight, so Approve cannot be double-fired now
+  // that it commits without a confirmation step.
+  const [deciding, setDeciding] = useState(false);
 
   /** [silent] is used by the background poll: no spinner, no error toast. */
   const fetchRequests = async ({ silent = false } = {}) => {
@@ -92,38 +93,44 @@ const RequestManagement = () => {
     enabled: !inspectorOpen && !actionModalOpen,
   });
 
-  const handleActionSubmit = async (e) => {
-    e.preventDefault();
-    if (actionType === "reject" && !adminComments.trim()) {
+  /**
+   * Record a decision on [request]. [comment] is optional except on a
+   * rejection, and [room] only means anything for a merge.
+   */
+  const submitDecision = async (request, type, comment = "", room = "") => {
+    if (deciding) return;
+
+    if (type === "reject" && !comment.trim()) {
       showToast("A reason for rejection must be provided", "error");
       return;
     }
 
     // A merge is the only decision that moves stock between rooms, so it needs
     // a destination before it can be approved.
-    if (selectedRequest.rawType === "merge" && actionType === "approve" && !destinationRoom) {
+    if (request.rawType === "merge" && type === "approve" && !room) {
       showToast("Choose the store room this stock goes into", "error");
       return;
     }
 
     try {
-      const id = selectedRequest._id;
+      setDeciding(true);
+      const id = request._id;
 
       const { data } =
-        selectedRequest.rawType === "merge"
+        request.rawType === "merge"
           ? await API.put(
-              `/merge-requests/${id}/${actionType}`,
-              actionType === "approve"
-                ? { comment: adminComments, destinationRoom }
-                : { rejectionReason: adminComments }
+              `/merge-requests/${id}/${type}`,
+              type === "approve"
+                ? { comment, destinationRoom: room }
+                : { rejectionReason: comment }
             )
-          : await API.put(`/requests/${selectedRequest.rawType}/${id}/${actionType}`, {
-              adminComments,
+          : await API.put(`/requests/${request.rawType}/${id}/${type}`, {
+              adminComments: comment,
             });
 
       showToast(
         data?.message ||
-          `Request ${actionType === "approve" ? "Approved" : actionType === "reject" ? "Rejected" : "kept Pending"} successfully!`,
+          `Request ${type === "approve" ? "Approved" : type === "reject" ? "Rejected" : "kept Pending"} successfully!`,
         "success"
       );
 
@@ -133,46 +140,64 @@ const RequestManagement = () => {
       fetchRequests();
     } catch (error) {
       showToast(error.response?.data?.message || "Failed to process request", "error");
+    } finally {
+      setDeciding(false);
     }
   };
+
+  const handleActionSubmit = (e) => {
+    e.preventDefault();
+    submitDecision(selectedRequest, actionType, adminComments, destinationRoom);
+  };
+
+  // Approving goes straight through — the button was the confirmation. The
+  // other two decisions still open the modal, because a rejection has to carry
+  // a reason and holding one is worth a second look.
+  const approveNow = (req) => submitDecision(req, "approve", "", destinationRoom);
 
   const openActionModal = (req, type) => {
     setSelectedRequest(req);
     setActionType(type);
     setAdminComments("");
-    // Default to the room the whole merge would go to, then the first room.
-    setDestinationRoom(req.merge?.destinationRoom || rooms[0]?.name || "");
     setActionModalOpen(true);
+  };
+
+  const openInspector = (req) => {
+    setSelectedRequest(req);
+    // Seed the destination so a merge can be approved straight from the
+    // inspector, whether or not the select is touched.
+    setDestinationRoom(req.merge?.destinationRoom || rooms[0]?.name || "");
+    setInspectorOpen(true);
   };
 
   const getStatusBadge = (status) => {
     switch (status) {
       case "Approved":
-        return "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20";
+        return "badge-emerald";
       case "Rejected":
-        return "bg-rose-500/10 text-rose-600 border border-rose-500/20";
+        return "badge-rose";
       // Withdrawn by the supervisor rather than decided by an Admin.
       case "Cancelled":
-        return "bg-slate-500/10 text-slate-600 border border-slate-500/20";
+        return "badge-slate";
       default:
-        return "bg-amber-500/10 text-amber-600 border border-amber-500/20";
+        return "badge-amber";
     }
   };
 
   const getRequestTypeColor = (type) => {
     switch (type) {
       case "Add Product":
-        return "bg-brand-500/10 text-brand-700 border border-brand-500/20";
+        return "badge-brand";
       case "Edit Product":
-        return "bg-indigo-500/10 text-indigo-600 border border-indigo-500/20";
+        return "badge-indigo";
       case "Stock In":
-        return "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20";
+        return "badge-emerald";
       case "Stock Out":
-        return "bg-rose-500/10 text-rose-600 border border-rose-500/20";
+        return "badge-rose";
       case "Stock Merge":
-        return "bg-violet-500/10 text-violet-700 border border-violet-500/20";
+        return "badge-violet";
       default:
-        return "bg-cyan-500/10 text-cyan-700 border border-cyan-500/20";
+        return "badge-cyan";
     }
   };
 
@@ -187,25 +212,29 @@ const RequestManagement = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header Panel */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl glass-premium border border-slate-200">
-        <div className="flex items-center gap-2">
-          <ClipboardList className="h-5 w-5 text-brand-700" />
-          <h3 className="text-lg font-bold text-slate-900">Office Approvals Console</h3>
+      <div className="panel">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="panel-icon">
+            <ClipboardList className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="panel-title">Office Approvals Console</h3>
+            <p className="panel-sub">
+              {filteredRequests.length} {statusFilter === "All" ? "total" : statusFilter.toLowerCase()}{" "}
+              request(s)
+            </p>
+          </div>
         </div>
 
         {/* Tab Controls */}
-        <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+        <div className="tabs">
           {["Pending", "Approved", "Rejected", "All"].map((tab) => (
             <button
               key={tab}
               onClick={() => setStatusFilter(tab)}
-              className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                statusFilter === tab
-                  ? "bg-brand-600 text-white shadow"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
+              className={`tab ${statusFilter === tab ? "tab-active" : ""}`}
             >
               {tab}
             </button>
@@ -219,89 +248,96 @@ const RequestManagement = () => {
           <Loader2 className="h-7 w-7 text-brand-500 animate-spin" />
         </div>
       ) : filteredRequests.length === 0 ? (
-        <div className="glass-premium p-12 text-center rounded-2xl border border-slate-200 flex flex-col items-center justify-center">
-          <HelpCircle className="h-10 w-10 text-slate-400 mb-3" />
-          <h3 className="text-base font-bold text-slate-900 mb-1">No requests found</h3>
-          <p className="text-xs text-slate-500">
-            No requests exist with status: <strong className="text-brand-700">{statusFilter}</strong>.
+        <div className="empty">
+          <HelpCircle className="h-10 w-10 text-slate-300 mb-3" />
+          <h3 className="empty-title">No requests found</h3>
+          <p className="empty-sub">
+            No requests exist with status:{" "}
+            <strong className="text-brand-700">{statusFilter}</strong>.
           </p>
         </div>
       ) : (
-        <div className="glass-premium rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm border-collapse">
+        <div className="table-card">
+          <div className="table-scroll">
+            <table className="tbl">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium text-xs uppercase tracking-wider">
-                  <th className="py-4 px-6">Request Number</th>
-                  <th className="py-4 px-6">Type</th>
-                  <th className="py-4 px-6">Supervisor</th>
-                  <th className="py-4 px-6">Product / Scope</th>
-                  <th className="py-4 px-6">Submitted Date</th>
-                  <th className="py-4 px-6">Status</th>
-                  <th className="py-4 px-6 text-right">Actions</th>
+                <tr>
+                  <th>Request #</th>
+                  <th>Type</th>
+                  <th>Supervisor</th>
+                  <th>Product / Scope</th>
+                  <th>Submitted</th>
+                  <th>Status</th>
+                  <th className="text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 text-slate-700">
+              <tbody>
                 {filteredRequests.map((req) => (
-                  <tr key={req._id} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-4 px-6 font-mono text-xs text-brand-700 font-bold">
-                      {req.requestNumber}
-                    </td>
-                    <td className="py-4 px-6">
-                      <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getRequestTypeColor(req.requestType)}`}>
+                  <tr key={req._id}>
+                    <td className="mono font-semibold text-brand-700">{req.requestNumber}</td>
+                    <td>
+                      <span className={`badge ${getRequestTypeColor(req.requestType)}`}>
                         {req.requestType}
                       </span>
                     </td>
-                    <td className="py-4 px-6 flex items-center gap-2">
-                      <div className="h-7 w-7 rounded-full bg-slate-100 flex items-center justify-center text-xs text-slate-600 border border-slate-200">
-                        <User className="h-3.5 w-3.5" />
-                      </div>
-                      <div>
-                        <div className="font-semibold text-slate-800">{req.supervisor?.name || "System"}</div>
-                        <div className="text-[10px] text-slate-500">
-                          {req.supervisor?.email || req.supervisor?.role}
+                    <td>
+                      <div className="flex items-center gap-2.5 min-w-[150px]">
+                        <div className="h-8 w-8 shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 border border-slate-200">
+                          <User className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-800 truncate">
+                            {req.supervisor?.name || "System"}
+                          </div>
+                          <div className="text-[11px] text-slate-500 truncate">
+                            {req.supervisor?.email || req.supervisor?.role}
+                          </div>
                         </div>
                       </div>
                     </td>
-                    <td className="py-4 px-6 font-semibold text-slate-900">
-                      {req.rawType === "merge" ? (
-                        <>
-                          Red Stock → Store Room
-                          <span className="text-xs text-slate-600 block font-normal">
-                            <strong>{req.merge.totalQuantity} pcs</strong> across{" "}
-                            {req.merge.itemCount} returned item(s)
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          {req.rawType === "product"
-                            ? req.details.name
-                            : req.product?.name || "Unknown Product"}
-                          {req.quantity && (
-                            <span className="text-xs text-slate-600 block font-normal">
-                              Qty: <strong>{req.quantity} {req.product?.unit}</strong>
+                    <td>
+                      <div className="min-w-[160px]">
+                        {req.rawType === "merge" ? (
+                          <>
+                            <div className="cell-title">Red Stock → Store Room</div>
+                            <span className="text-[11px] text-slate-500">
+                              <strong>{req.merge.totalQuantity} pcs</strong> across{" "}
+                              {req.merge.itemCount} returned item(s)
                             </span>
-                          )}
-                        </>
-                      )}
+                          </>
+                        ) : (
+                          <>
+                            <div className="cell-title">
+                              {req.rawType === "product"
+                                ? req.details.name
+                                : req.product?.name || "Unknown Product"}
+                            </div>
+                            {req.quantity && (
+                              <span className="text-[11px] text-slate-500">
+                                Qty:{" "}
+                                <strong>
+                                  {req.quantity} {req.product?.unit}
+                                </strong>
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </td>
-                    <td className="py-4 px-6 text-xs text-slate-600">
+                    <td className="text-[12px] text-slate-500 whitespace-nowrap">
                       {formatDate(req.createdDate)}
                     </td>
-                    <td className="py-4 px-6">
-                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${getStatusBadge(req.status)}`}>
+                    <td>
+                      <span className={`badge badge-pill ${getStatusBadge(req.status)}`}>
                         {req.status}
                       </span>
                     </td>
-                    <td className="py-4 px-6 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                    <td>
+                      <div className="flex items-center justify-end">
                         {/* Inspect Details */}
                         <button
-                          onClick={() => {
-                            setSelectedRequest(req);
-                            setInspectorOpen(true);
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-1 cursor-pointer transition-all hover:bg-slate-100"
+                          onClick={() => openInspector(req)}
+                          className="btn btn-sm btn-neutral"
                         >
                           <Eye className="h-3.5 w-3.5" /> Inspect
                         </button>
@@ -321,59 +357,70 @@ const RequestManagement = () => {
 
       {/* Backdrop */}
       {(inspectorOpen || actionModalOpen) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-          
+        <div className="modal-backdrop">
+
           {/* 1. Request Detail Inspector Overlay */}
           {inspectorOpen && selectedRequest && (
-            <div className="glass-premium w-full max-w-2xl rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
-              <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-                <div>
-                  <h3 className="font-bold text-lg text-slate-900">Inspect Request: {selectedRequest.requestNumber}</h3>
-                  <p className="text-xs text-slate-600">
-                    Submitted by {selectedRequest.supervisor?.name || "System"}
+            <div className="modal max-w-2xl">
+              <div className="modal-head">
+                <div className="min-w-0">
+                  <h3 className="modal-title">
+                    <span className="truncate">Request {selectedRequest.requestNumber}</span>
+                    <span className={`badge ${getStatusBadge(selectedRequest.status)}`}>
+                      {selectedRequest.status}
+                    </span>
+                  </h3>
+                  <p className="modal-sub">
+                    {selectedRequest.requestType} · submitted by{" "}
+                    {selectedRequest.supervisor?.name || "System"} ·{" "}
+                    {formatDate(selectedRequest.createdDate)}
                   </p>
                 </div>
                 <button
                   onClick={() => setInspectorOpen(false)}
-                  className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 cursor-pointer"
+                  className="modal-close"
+                  aria-label="Close"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+              <div className="modal-body space-y-5">
                 {/* Specific details based on Request Type */}
 
                 {/* TYPE: STOCK MERGE — the only decision that moves stock out
                     of the Red Stock Room and into a store room. */}
                 {selectedRequest.rawType === "merge" && (
                   <div className="space-y-4">
-                    <div className="p-4 rounded-xl bg-violet-500/5 border border-violet-500/20 text-[11px] leading-relaxed text-slate-700">
-                      <strong className="text-violet-700 flex items-center gap-1.5 mb-1">
-                        <GitMerge className="h-3.5 w-3.5" />
+                    <div className="note note-violet flex-col gap-1">
+                      <strong className="text-violet-700 flex items-center gap-1.5">
+                        <GitMerge className="h-4 w-4" />
                         {selectedRequest.merge.createdVia === "Supervisor"
                           ? "Raised by a supervisor"
                           : "Weekly merge"}{" "}
                         • {selectedRequest.merge.weekKey}
                       </strong>
-                      Approving moves{" "}
-                      <strong>{selectedRequest.merge.totalQuantity} pcs</strong> out of the
-                      Red Stock Room and into the store room you choose. Rejecting moves
-                      nothing — the stock stays in Red Stock for the next merge.
+                      <span>
+                        Approving moves{" "}
+                        <strong>{selectedRequest.merge.totalQuantity} pcs</strong> out of the
+                        Red Stock Room and into the store room you choose. Rejecting moves
+                        nothing — the stock stays in Red Stock for the next merge.
+                      </span>
                     </div>
 
                     {selectedRequest.status === "Pending" && (
-                      <div className="p-4 rounded-xl bg-brand-50 border border-brand-500/20 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
-                        <div className="text-[11px] text-slate-700 leading-relaxed">
+                      <div className="note note-brand flex-col sm:flex-row sm:items-center gap-3 sm:justify-between">
+                        <div>
                           <strong className="text-brand-700 flex items-center gap-1.5">
-                            <Building2 className="h-3.5 w-3.5" /> Destination Store Room
+                            <Building2 className="h-4 w-4" /> Destination Store Room
                           </strong>
                           Every line below is credited to this room on approval.
                         </div>
                         <select
-                          value={destinationRoom || rooms[0]?.name || ""}
+                          value={destinationRoom}
                           onChange={(e) => setDestinationRoom(e.target.value)}
-                          className="px-4 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer shrink-0"
+                          className="field field-sm sm:w-52 shrink-0 cursor-pointer"
+                          aria-label="Destination store room"
                         >
                           {rooms.length === 0 && <option value="">No stock rooms found</option>}
                           {rooms.map((room) => (
@@ -385,7 +432,7 @@ const RequestManagement = () => {
                       </div>
                     )}
 
-                    <div className="rounded-xl border border-slate-200 divide-y divide-slate-200 max-h-64 overflow-y-auto">
+                    <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 max-h-64 overflow-y-auto">
                       {selectedRequest.merge.items.map((line) => (
                         <div
                           key={String(line.restockItem)}
@@ -421,7 +468,7 @@ const RequestManagement = () => {
                     </div>
 
                     {selectedRequest.status === "Approved" && (
-                      <div className="p-3 bg-emerald-50 border border-emerald-500/20 text-emerald-900 text-[11px] rounded-lg">
+                      <div className="note note-emerald">
                         Moved into <strong>{selectedRequest.merge.destinationRoom}</strong> on{" "}
                         {formatDate(selectedRequest.merge.reviewedAt)}.
                       </div>
@@ -432,43 +479,55 @@ const RequestManagement = () => {
                 {/* TYPE: ADD PRODUCT */}
                 {selectedRequest.requestType === "Add Product" && (
                   <div className="space-y-4">
-                    <div className="flex gap-4 p-4 bg-brand-50 rounded-xl border border-brand-500/10">
+                    <div className="flex gap-4 p-4 bg-brand-50 rounded-xl border border-brand-500/15">
                       <img
                         src={selectedRequest.details.image || "https://images.unsplash.com/photo-1595246140707-1e5b22b271d4?w=80&auto=format"}
-                        alt={selectedRequest.details.name}
-                        className="w-20 h-20 rounded-lg object-cover border border-slate-200"
+                        alt=""
+                        className="w-20 h-20 shrink-0 rounded-xl object-cover border border-slate-200"
                       />
-                      <div>
-                        <h4 className="text-base font-bold text-slate-900 leading-tight">{selectedRequest.details.name}</h4>
-                        <span className="text-xs font-mono text-brand-700 mt-1 block">CODE: {selectedRequest.details.code}</span>
-                        <span className="inline-block mt-2 px-2 py-0.5 rounded text-[10px] font-medium bg-white border border-slate-200 text-slate-600">
-                          To be saved in: <strong>{selectedRequest.details.storeRoom}</strong>
+                      <div className="min-w-0">
+                        <h4 className="text-[15px] font-semibold text-slate-900 leading-tight">
+                          {selectedRequest.details.name}
+                        </h4>
+                        <span className="mono text-brand-700 mt-1 block">
+                          CODE: {selectedRequest.details.code}
+                        </span>
+                        <span className="badge badge-slate badge-soft mt-2 bg-white">
+                          To be saved in:&nbsp;<strong>{selectedRequest.details.storeRoom}</strong>
                         </span>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4 text-xs">
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <span className="text-slate-500 block mb-0.5">Category</span>
-                        <span className="font-semibold text-slate-800">{selectedRequest.details.category}</span>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="kv">
+                        <span className="kv-label">Category</span>
+                        <span className="kv-value">{selectedRequest.details.category}</span>
                       </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <span className="text-slate-500 block mb-0.5">Initial Quantity</span>
-                        <span className="font-bold text-emerald-600">{selectedRequest.details.quantity} {selectedRequest.details.unit}</span>
+                      <div className="kv">
+                        <span className="kv-label">Initial Quantity</span>
+                        <span className="kv-value text-emerald-600">
+                          {selectedRequest.details.quantity} {selectedRequest.details.unit}
+                        </span>
                       </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <span className="text-slate-500 block mb-0.5">Min Stock Limit</span>
-                        <span className="font-semibold text-slate-800">{selectedRequest.details.minStock} {selectedRequest.details.unit}</span>
+                      <div className="kv">
+                        <span className="kv-label">Min Stock Limit</span>
+                        <span className="kv-value">
+                          {selectedRequest.details.minStock} {selectedRequest.details.unit}
+                        </span>
                       </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <span className="text-slate-500 block mb-0.5">Max Stock Limit</span>
-                        <span className="font-semibold text-slate-800">{selectedRequest.details.maxStock} {selectedRequest.details.unit}</span>
+                      <div className="kv">
+                        <span className="kv-label">Max Stock Limit</span>
+                        <span className="kv-value">
+                          {selectedRequest.details.maxStock} {selectedRequest.details.unit}
+                        </span>
                       </div>
                     </div>
 
-                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
-                      <span className="text-slate-500 block mb-1">Description</span>
-                      <p className="text-slate-700 leading-relaxed">{selectedRequest.details.description || "No description provided."}</p>
+                    <div className="kv">
+                      <span className="kv-label">Description</span>
+                      <p className="text-[13px] text-slate-700 leading-relaxed">
+                        {selectedRequest.details.description || "No description provided."}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -476,41 +535,48 @@ const RequestManagement = () => {
                 {/* TYPE: EDIT PRODUCT */}
                 {selectedRequest.requestType === "Edit Product" && (
                   <div className="space-y-4">
-                    <h4 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-2">Compare Values (Original vs Request)</h4>
-                    <div className="grid grid-cols-2 gap-4 text-xs">
+                    <h4 className="eyebrow">Compare Values (Original vs Request)</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {/* Current details */}
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-                        <span className="text-xs font-bold text-slate-500 uppercase block border-b border-slate-200 pb-1">Current Catalog Version</span>
+                        <span className="eyebrow block border-b border-slate-200 pb-1.5">
+                          Current Catalog Version
+                        </span>
                         <div>
-                          <span className="text-slate-500 block">Name</span>
-                          <span className="font-semibold text-slate-700">{selectedRequest.product?.name}</span>
+                          <span className="kv-label">Name</span>
+                          <span className="kv-value text-slate-600">{selectedRequest.product?.name}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500 block">Category</span>
-                          <span className="font-semibold text-slate-700">{selectedRequest.product?.category}</span>
+                          <span className="kv-label">Category</span>
+                          <span className="kv-value text-slate-600">{selectedRequest.product?.category}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500 block">Store Room</span>
-                          <span className="font-semibold text-slate-700">{selectedRequest.product?.storeRoom}</span>
+                          <span className="kv-label">Store Room</span>
+                          <span className="kv-value text-slate-600">{selectedRequest.product?.storeRoom}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500 block">Stock Bounds</span>
-                          <span className="font-semibold text-slate-700">Min: {selectedRequest.product?.minStock} | Max: {selectedRequest.product?.maxStock}</span>
+                          <span className="kv-label">Stock Bounds</span>
+                          <span className="kv-value text-slate-600">
+                            Min: {selectedRequest.product?.minStock} | Max:{" "}
+                            {selectedRequest.product?.maxStock}
+                          </span>
                         </div>
                       </div>
 
                       {/* Requested edits */}
-                      <div className="bg-brand-50 p-4 rounded-xl border border-brand-500/10 space-y-3">
-                        <span className="text-xs font-bold text-brand-700 uppercase block border-b border-brand-500/10 pb-1">Proposed Updates</span>
+                      <div className="bg-brand-50 p-4 rounded-xl border border-brand-500/15 space-y-3">
+                        <span className="eyebrow block border-b border-brand-500/15 pb-1.5 text-brand-700">
+                          Proposed Updates
+                        </span>
                         <div>
-                          <span className="text-slate-500 block">Name</span>
-                          <span className={`font-bold ${selectedRequest.product?.name !== selectedRequest.details.name ? "text-brand-700" : "text-slate-700"}`}>
+                          <span className="kv-label">Name</span>
+                          <span className={`kv-value ${selectedRequest.product?.name !== selectedRequest.details.name ? "text-brand-700" : "text-slate-700"}`}>
                             {selectedRequest.details.name}
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-500 block">Category</span>
-                          <span className={`font-bold ${
+                          <span className="kv-label">Category</span>
+                          <span className={`kv-value ${
                             selectedRequest.product?.category !== selectedRequest.details.category
                               ? "text-brand-700"
                               : "text-slate-700"
@@ -519,20 +585,21 @@ const RequestManagement = () => {
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-500 block">Store Room</span>
-                          <span className={`font-bold ${selectedRequest.product?.storeRoom !== selectedRequest.details.storeRoom ? "text-brand-700" : "text-slate-700"}`}>
+                          <span className="kv-label">Store Room</span>
+                          <span className={`kv-value ${selectedRequest.product?.storeRoom !== selectedRequest.details.storeRoom ? "text-brand-700" : "text-slate-700"}`}>
                             {selectedRequest.details.storeRoom}
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-500 block">Stock Bounds</span>
-                          <span className={`font-bold ${
-                            selectedRequest.product?.minStock !== selectedRequest.details.minStock || 
-                            selectedRequest.product?.maxStock !== selectedRequest.details.maxStock 
-                              ? "text-brand-700" 
+                          <span className="kv-label">Stock Bounds</span>
+                          <span className={`kv-value ${
+                            selectedRequest.product?.minStock !== selectedRequest.details.minStock ||
+                            selectedRequest.product?.maxStock !== selectedRequest.details.maxStock
+                              ? "text-brand-700"
                               : "text-slate-700"
                           }`}>
-                            Min: {selectedRequest.details.minStock} | Max: {selectedRequest.details.maxStock}
+                            Min: {selectedRequest.details.minStock} | Max:{" "}
+                            {selectedRequest.details.maxStock}
                           </span>
                         </div>
                       </div>
@@ -545,52 +612,56 @@ const RequestManagement = () => {
                   selectedRequest.requestType === "Stock Out" || 
                   selectedRequest.requestType === "Stock Return") && (
                   <div className="space-y-4">
-                    <div className="flex gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+                    <div className="flex gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
                       <img
                         src={selectedRequest.product?.image || "https://images.unsplash.com/photo-1595246140707-1e5b22b271d4?w=80&auto=format"}
-                        alt={selectedRequest.product?.name}
-                        className="w-16 h-16 rounded-lg object-cover border border-slate-200"
+                        alt=""
+                        className="w-16 h-16 shrink-0 rounded-xl object-cover border border-slate-200"
                       />
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-slate-900">{selectedRequest.product?.name}</h4>
-                        <span className="text-[10px] text-slate-500 font-mono block">Code: {selectedRequest.product?.code}</span>
-                        <span className="text-[10px] text-slate-600 block">Location: <strong>{selectedRequest.product?.storeRoom}</strong></span>
+                      <div className="min-w-0 space-y-0.5">
+                        <h4 className="text-[15px] font-semibold text-slate-900 truncate">
+                          {selectedRequest.product?.name}
+                        </h4>
+                        <span className="mono text-slate-500 block">
+                          Code: {selectedRequest.product?.code}
+                        </span>
+                        <span className="text-[12px] text-slate-600 block">
+                          Location: <strong>{selectedRequest.product?.storeRoom}</strong>
+                        </span>
                       </div>
                     </div>
 
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-sm">
+                    {/* Before → change → after. Wraps to two rows on a phone
+                        rather than squeezing three figures onto one. */}
+                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-wrap items-center gap-x-4 gap-y-3">
                       <div>
-                        <span className="text-xs text-slate-500 block mb-0.5">Current Stock Level</span>
-                        <span className="font-bold text-slate-800">
+                        <span className="kv-label">Current Stock Level</span>
+                        <span className="text-[15px] font-bold text-slate-800">
                           {selectedRequest.product?.quantity} {selectedRequest.product?.unit}
                         </span>
                       </div>
-                      
-                      <div className="flex items-center text-slate-400">
-                        <ArrowRight className="h-5 w-5" />
-                      </div>
+
+                      <ArrowRight className="h-4 w-4 text-slate-300 shrink-0" />
 
                       <div>
-                        <span className="text-xs text-slate-500 block mb-0.5">
+                        <span className="kv-label">
                           {selectedRequest.requestType === "Stock In" ? "Add Quantity" : selectedRequest.requestType === "Stock Out" ? "Deduct Quantity" : "To Red Stock"}
                         </span>
-                        <span className={`font-bold flex items-center gap-1 ${
+                        <span className={`text-[15px] font-bold ${
                           selectedRequest.requestType === "Stock In" || selectedRequest.requestType === "Stock Return"
-                            ? "text-emerald-600 font-bold"
-                            : "text-rose-600 font-bold"
+                            ? "text-emerald-600"
+                            : "text-rose-600"
                         }`}>
-                          {selectedRequest.requestType === "Stock In" || selectedRequest.requestType === "Stock Return" ? "+" : "-"}
+                          {selectedRequest.requestType === "Stock In" || selectedRequest.requestType === "Stock Return" ? "+" : "−"}
                           {selectedRequest.quantity} {selectedRequest.product?.unit}
                         </span>
                       </div>
 
-                      <div className="flex items-center text-slate-400">
-                        <ArrowRight className="h-5 w-5" />
-                      </div>
+                      <ArrowRight className="h-4 w-4 text-slate-300 shrink-0" />
 
                       <div>
-                        <span className="text-xs text-slate-500 block mb-0.5">Simulated Stock Output</span>
-                        <span className="font-bold text-slate-900 border-b border-dashed border-slate-200 pb-0.5">
+                        <span className="kv-label">Resulting Stock</span>
+                        <span className="text-[15px] font-bold text-slate-900">
                           {selectedRequest.requestType === "Stock Return"
                             ? selectedRequest.product?.quantity || 0
                             : selectedRequest.requestType === "Stock In"
@@ -604,19 +675,28 @@ const RequestManagement = () => {
                     {/* Returned stock is parked, not added: store room balances
                         only move when the weekly merge is approved. */}
                     {selectedRequest.requestType === "Stock Return" && (
-                      <div className="p-3 bg-rose-50 border border-rose-500/20 text-rose-900 text-[11px] leading-relaxed rounded-lg">
-                        Approving this puts <strong>{selectedRequest.quantity}{" "}
-                        {selectedRequest.product?.unit}</strong> into the{" "}
-                        <strong>Red Stock Room</strong>, not into a store room. It reaches the
-                        Engineer Room or the Consumables Room only through an approved merge.
+                      <div className="note note-rose">
+                        <span>
+                          Approving this puts{" "}
+                          <strong>
+                            {selectedRequest.quantity} {selectedRequest.product?.unit}
+                          </strong>{" "}
+                          into the <strong>Red Stock Room</strong>, not into a store room. It
+                          reaches the Engineer Room or the Consumables Room only through an
+                          approved merge.
+                        </span>
                       </div>
                     )}
 
                     {/* Stock Out Check */}
-                    {selectedRequest.requestType === "Stock Out" && 
+                    {selectedRequest.requestType === "Stock Out" &&
                      (selectedRequest.product?.quantity || 0) < selectedRequest.quantity && (
-                      <div className="p-3 bg-rose-50 border border-rose-500/20 text-rose-600 text-xs font-semibold rounded-lg">
-                        ⚠️ High Alert: Current quantity is insufficient to fulfill this Stock Out request. Processing this approval will result in negative stock.
+                      <div className="note note-rose font-semibold text-rose-600">
+                        <AlertTriangle className="h-4 w-4 shrink-0 mt-px" />
+                        <span>
+                          Current quantity is insufficient to fulfil this Stock Out request.
+                          Approving it will leave the product on negative stock.
+                        </span>
                       </div>
                     )}
                   </div>
@@ -624,9 +704,9 @@ const RequestManagement = () => {
 
                 {/* If approved/rejected, show administrative notes */}
                 {selectedRequest.status !== "Pending" && (
-                  <div className="p-4 bg-white border border-slate-200 rounded-xl text-xs space-y-1.5">
-                    <span className="text-slate-500 block font-semibold">Administrative Review Notes:</span>
-                    <p className="text-slate-700 italic">
+                  <div className="kv bg-white">
+                    <span className="kv-label font-semibold">Administrative Review Notes</span>
+                    <p className="text-[13px] text-slate-700 italic leading-relaxed">
                       "{selectedRequest.adminComments || "No comment was supplied by administrator."}"
                     </p>
                   </div>
@@ -635,29 +715,36 @@ const RequestManagement = () => {
 
               {/* Action Buttons for Pending request */}
               {selectedRequest.status === "Pending" && (
-                <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-3">
+                <div className="modal-foot flex-wrap">
                   {/* A merge is decided outright — there is no pending state to
                       return it to without releasing the stock it holds. */}
                   {selectedRequest.rawType !== "merge" && (
                     <button
                       onClick={() => openActionModal(selectedRequest, "keep-pending")}
-                      className="px-4 py-2 text-xs font-bold rounded-xl bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900 cursor-pointer"
+                      disabled={deciding}
+                      className="btn btn-subtle mr-auto"
                     >
                       Keep Pending
                     </button>
                   )}
                   <button
                     onClick={() => openActionModal(selectedRequest, "reject")}
-                    className="px-4 py-2 text-xs font-bold rounded-xl bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-600 hover:text-white cursor-pointer transition-all"
+                    disabled={deciding}
+                    className="btn btn-danger-soft"
                   >
-                    Reject Request
+                    Reject
                   </button>
                   <button
-                    onClick={() => openActionModal(selectedRequest, "approve")}
-                    disabled={selectedRequest.requestType === "Stock Out" && (selectedRequest.product?.quantity || 0) < selectedRequest.quantity}
-                    className="px-4 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 cursor-pointer shadow-lg active:scale-98 transition-all"
+                    onClick={() => approveNow(selectedRequest)}
+                    disabled={
+                      deciding ||
+                      (selectedRequest.requestType === "Stock Out" &&
+                        (selectedRequest.product?.quantity || 0) < selectedRequest.quantity)
+                    }
+                    className="btn btn-success"
                   >
-                    Approve Request
+                    {deciding && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Approve
                   </button>
                 </div>
               )}
@@ -666,54 +753,38 @@ const RequestManagement = () => {
 
           {/* 2. Action Confirmation Modal (for commenting) */}
           {actionModalOpen && selectedRequest && (
-            <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
-              <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-                <h3 className="font-bold text-slate-900 capitalize">
-                  {actionType === "approve" ? "Approve" : actionType === "reject" ? "Reject" : "Set Pending"} Request
-                </h3>
+            <div className="modal max-w-md">
+              <div className="modal-head">
+                <div className="min-w-0">
+                  <h3 className="modal-title">
+                    {actionType === "reject" ? "Reject" : "Keep Pending"} Request
+                  </h3>
+                  <p className="modal-sub">{selectedRequest.requestNumber}</p>
+                </div>
                 <button
                   onClick={() => setActionModalOpen(false)}
-                  className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 cursor-pointer"
+                  className="modal-close"
+                  aria-label="Close"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <form onSubmit={handleActionSubmit} className="p-6 space-y-4">
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Provide notes, comments, or a reason regarding this decision. This will be sent back to supervisor <strong>{selectedRequest.supervisor?.name}</strong>.
+              <form onSubmit={handleActionSubmit} className="contents">
+                <div className="modal-body space-y-4">
+                <p className="text-[13px] text-slate-600 leading-relaxed">
+                  {actionType === "reject"
+                    ? "Say why this is being rejected. The reason is sent back to supervisor "
+                    : "Note why this is being held. The note is sent back to supervisor "}
+                  <strong>{selectedRequest.supervisor?.name}</strong>.
                 </p>
 
-                {/* Confirm where an approved merge lands before committing. */}
-                {selectedRequest.rawType === "merge" && actionType === "approve" && (
-                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-500/20 space-y-2">
-                    <p className="text-[11px] text-emerald-900 leading-relaxed">
-                      <strong>{selectedRequest.merge.totalQuantity} pcs</strong> across{" "}
-                      {selectedRequest.merge.itemCount} item(s) leave the Red Stock Room and
-                      are added to:
-                    </p>
-                    <select
-                      value={destinationRoom}
-                      onChange={(e) => setDestinationRoom(e.target.value)}
-                      required
-                      className="w-full px-4 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
-                    >
-                      {rooms.length === 0 && <option value="">No stock rooms found</option>}
-                      {rooms.map((room) => (
-                        <option key={room._id} value={room.name}>
-                          {room.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                  <label className="field-label">
                     Admin Feedback / Comments {actionType === "reject" ? "*" : ""}
                   </label>
                   <div className="relative">
-                    <span className="absolute top-3 left-3 text-slate-500">
+                    <span className="absolute top-3 left-3.5 text-slate-400 pointer-events-none">
                       <MessageSquare className="h-4 w-4" />
                     </span>
                     <textarea
@@ -723,33 +794,30 @@ const RequestManagement = () => {
                       rows="3"
                       placeholder={
                         actionType === "reject"
-                          ? "Explain why the request is rejected (required)..."
-                          : "Leave a comment (optional)..."
+                          ? "Explain why the request is rejected (required)…"
+                          : "Leave a comment (optional)…"
                       }
-                      className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500 resize-none"
+                      className="field field-area field-search"
                     ></textarea>
                   </div>
                 </div>
+                </div>
 
-                <div className="pt-4 border-t border-slate-200 flex justify-end gap-3">
+                <div className="modal-foot">
                   <button
                     type="button"
                     onClick={() => setActionModalOpen(false)}
-                    className="px-4 py-2 text-xs font-semibold rounded-xl bg-white border border-slate-200 text-slate-600 cursor-pointer"
+                    className="btn btn-neutral"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className={`px-4 py-2 text-xs font-semibold rounded-xl cursor-pointer active:scale-98 transition-all ${
-                      actionType === "approve"
-                        ? "bg-emerald-600 hover:bg-emerald-500 text-white"
-                        : actionType === "reject"
-                        ? "bg-rose-600 hover:bg-rose-500 text-white"
-                        : "bg-brand-600 hover:bg-brand-500 text-white"
-                    }`}
+                    disabled={deciding}
+                    className={`btn ${actionType === "reject" ? "btn-danger" : "btn-primary"}`}
                   >
-                    Confirm {actionType === "approve" ? "Approval" : actionType === "reject" ? "Rejection" : "Pending State"}
+                    {deciding && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Confirm {actionType === "reject" ? "Rejection" : "Hold"}
                   </button>
                 </div>
               </form>

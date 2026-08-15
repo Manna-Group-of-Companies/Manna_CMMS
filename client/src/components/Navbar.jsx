@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNotifications } from "../context/NotificationContext";
 import { Bell, Check, CheckSquare, Menu } from "lucide-react";
 
-const Navbar = ({ title, onMenuClick }) => {
+const Navbar = ({ title, subtitle, onMenuClick }) => {
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
@@ -26,57 +26,68 @@ const Navbar = ({ title, onMenuClick }) => {
   const getNotificationColors = (type) => {
     switch (type) {
       case "REQUEST_APPROVED":
-        return "bg-emerald-500/10 border-emerald-500/20 text-emerald-600";
+        return "badge-emerald";
       case "REQUEST_REJECTED":
-        return "bg-rose-500/10 border-rose-500/20 text-rose-600";
+        return "badge-rose";
       case "LOW_STOCK":
-        return "bg-amber-500/10 border-amber-500/20 text-amber-600";
+        return "badge-amber";
       default:
-        return "bg-slate-100 border-slate-200 text-slate-700";
+        return "badge-slate";
     }
   };
 
   return (
-    <header className="h-16 flex items-center justify-between gap-2 px-4 sm:px-6 lg:px-8 border-b border-slate-200 bg-slate-50 backdrop-blur-md sticky top-0 z-30">
-      <div className="flex items-center gap-2 min-w-0">
+    <header className="h-16 shrink-0 flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 border-b border-slate-200 bg-white/85 backdrop-blur-md sticky top-0 z-30">
+      <div className="flex items-center gap-2.5 min-w-0">
         {/* The sidebar is a drawer below lg, so it needs a way in. */}
         <button
           onClick={onMenuClick}
-          className="p-2 -ml-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer lg:hidden"
+          className="icon-btn h-9 w-9 -ml-1 lg:hidden"
           aria-label="Open menu"
         >
           <Menu className="h-5 w-5" />
         </button>
-        <h2 className="text-base sm:text-lg lg:text-xl font-semibold text-slate-900 tracking-tight truncate">
-          {title}
-        </h2>
+        <div className="min-w-0">
+          <h2 className="text-[15px] sm:text-base font-semibold text-slate-900 tracking-tight leading-tight truncate">
+            {title}
+          </h2>
+          {/* Below sm the title alone has to carry it — two lines would push
+              the bar past its 64px. */}
+          {subtitle && (
+            <p className="hidden sm:block text-[11px] text-slate-500 leading-tight truncate">
+              {subtitle}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-4 shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
         {/* Notification Bell */}
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all duration-200 relative cursor-pointer"
+            className="icon-btn h-10 w-10 relative"
+            aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
+            aria-expanded={dropdownOpen}
           >
             <Bell className="h-5 w-5" />
             {unreadCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 h-4 w-4 bg-rose-500 text-[10px] font-bold text-white rounded-full flex items-center justify-center animate-pulse">
-                {unreadCount}
+              <span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-rose-500 text-[10px] font-bold text-white rounded-full flex items-center justify-center ring-2 ring-white">
+                {unreadCount > 9 ? "9+" : unreadCount}
               </span>
             )}
           </button>
 
           {/* Dropdown Card — never wider than the viewport on a phone. */}
           {dropdownOpen && (
-            <div className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-2rem))] glass-premium border border-slate-200 rounded-xl shadow-lg overflow-hidden z-50">
-              <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-900">Notifications</span>
+            <div className="card absolute right-0 mt-2 w-[min(22rem,calc(100vw-2rem))] overflow-hidden shadow-xl z-50 animate-fade-in">
+              <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
+                <span className="text-[13px] font-semibold text-slate-900">Notifications</span>
                 {unreadCount > 0 && (
                   <button
                     onClick={markAllAsRead}
-                    className="text-xs text-brand-700 hover:text-brand-700 font-medium flex items-center gap-1 cursor-pointer"
+                    className="text-[11px] font-semibold text-brand-700 hover:text-brand-600 flex items-center gap-1 cursor-pointer"
                   >
                     <CheckSquare className="h-3.5 w-3.5" />
                     Mark all read
@@ -84,42 +95,40 @@ const Navbar = ({ title, onMenuClick }) => {
                 )}
               </div>
 
-              <div className="max-h-64 overflow-y-auto">
+              <div className="max-h-[22rem] overflow-y-auto divide-y divide-slate-100">
                 {notifications.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-slate-500">
+                  <div className="px-4 py-10 text-center text-xs text-slate-500">
                     No notifications yet.
                   </div>
                 ) : (
                   notifications.map((n) => (
                     <div
                       key={n._id}
-                      className={`p-3 border-b border-slate-200 flex flex-col gap-1.5 transition-colors ${
-                        !n.read ? "bg-brand-50" : ""
+                      className={`px-4 py-3 flex flex-col gap-2 transition-colors ${
+                        !n.read ? "bg-brand-50/70" : ""
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <span className="text-xs font-medium text-slate-800 leading-relaxed">
+                        <span className="text-[12px] text-slate-800 leading-relaxed">
                           {n.message}
                         </span>
                         {!n.read && (
                           <button
                             onClick={() => markAsRead(n._id)}
-                            className="p-1 hover:bg-slate-100 rounded-full text-slate-600 hover:text-slate-900 cursor-pointer"
+                            className="icon-btn h-7 w-7 shrink-0"
                             title="Mark as read"
                           >
                             <Check className="h-3.5 w-3.5" />
                           </button>
                         )}
                       </div>
-                      <div className="flex items-center justify-between text-[10px] text-slate-500">
-                        <span
-                          className={`px-1.5 py-0.5 rounded border text-[9px] font-bold ${getNotificationColors(
-                            n.type
-                          )}`}
-                        >
-                          {n.type.replace("_", " ")}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`badge ${getNotificationColors(n.type)}`}>
+                          {n.type.replace(/_/g, " ")}
                         </span>
-                        <span>{formatTime(n.createdAt)}</span>
+                        <span className="text-[10px] text-slate-500">
+                          {formatTime(n.createdAt)}
+                        </span>
                       </div>
                     </div>
                   ))
