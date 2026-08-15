@@ -3,6 +3,7 @@ import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import ProductFormModal from "./ProductFormModal";
+import { statusTone } from "../../utils/productStatus";
 import {
   Search,
   Plus,
@@ -20,11 +21,13 @@ const ProductList = () => {
   const { showToast } = useNotifications();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [subCategories, setSubCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedSubCategory, setSelectedSubCategory] = useState("");
   const [selectedStoreRoom, setSelectedStoreRoom] = useState("");
   const [stockStatus, setStockStatus] = useState("");
 
@@ -56,6 +59,7 @@ const ProductList = () => {
       const params = {};
       if (searchTerm) params.search = searchTerm;
       if (selectedCategory) params.category = selectedCategory;
+      if (selectedSubCategory) params.subCategory = selectedSubCategory;
       if (selectedStoreRoom) params.storeRoom = selectedStoreRoom;
       if (stockStatus) params.stockStatus = stockStatus;
 
@@ -78,10 +82,33 @@ const ProductList = () => {
     }
   };
 
+  // Scoped to the chosen category: the catalog has far too many sub-categories
+  // for one flat list to be usable.
+  const fetchSubCategories = async () => {
+    try {
+      const { data } = await API.get("/products/subcategories", {
+        params: selectedCategory ? { category: selectedCategory } : {},
+      });
+      setSubCategories(data);
+    } catch (error) {
+      console.error("Error loading sub-categories:", error);
+    }
+  };
+
+  /** Picking a category drops a sub-category that no longer belongs to it. */
+  const handleCategoryChange = (value) => {
+    setSelectedCategory(value);
+    setSelectedSubCategory("");
+  };
+
   useEffect(() => {
     fetchProducts();
     fetchCategories();
-  }, [searchTerm, selectedCategory, selectedStoreRoom, stockStatus]);
+  }, [searchTerm, selectedCategory, selectedSubCategory, selectedStoreRoom, stockStatus]);
+
+  useEffect(() => {
+    fetchSubCategories();
+  }, [selectedCategory]);
 
   // Supervisors issue stock and raise requests that change these quantities.
   // Paused while a modal is open so an edit form cannot be reset mid-typing.
@@ -114,7 +141,7 @@ const ProductList = () => {
             {/* Category Select */}
             <select
               value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
+              onChange={(e) => handleCategoryChange(e.target.value)}
               className="field field-sm w-full sm:w-auto cursor-pointer"
               aria-label="Filter by category"
             >
@@ -122,6 +149,22 @@ const ProductList = () => {
               {categories.map((c) => (
                 <option key={c} value={c}>
                   {c}
+                </option>
+              ))}
+            </select>
+
+            {/* Sub-Category Select */}
+            <select
+              value={selectedSubCategory}
+              onChange={(e) => setSelectedSubCategory(e.target.value)}
+              disabled={subCategories.length === 0}
+              className="field field-sm w-full sm:w-auto cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+              aria-label="Filter by sub-category"
+            >
+              <option value="">All Sub-Categories</option>
+              {subCategories.map((s) => (
+                <option key={s} value={s}>
+                  {s}
                 </option>
               ))}
             </select>
@@ -183,6 +226,7 @@ const ProductList = () => {
                 <tr>
                   <th>Product</th>
                   <th>Category</th>
+                  <th>Condition</th>
                   <th>Rack</th>
                   <th>Store Room</th>
                   <th className="text-center">Stock</th>
@@ -207,7 +251,21 @@ const ProductList = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="text-slate-700">{product.category}</td>
+                      <td className="text-slate-700">
+                        <div>{product.category}</div>
+                        {product.subCategory && (
+                          <div className="text-[11px] text-slate-500">{product.subCategory}</div>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap">
+                        {product.status ? (
+                          <span className={`badge badge-soft ${statusTone(product.status)}`}>
+                            {product.status}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
                       <td className="mono text-slate-600">{product.rackNumber || "—"}</td>
                       <td>
                         <span className="badge badge-slate badge-soft">{product.storeRoom}</span>
@@ -356,9 +414,16 @@ const ProductList = () => {
                     <span className="mono text-brand-700 mt-1 block">
                       CODE: {selectedProduct.code}
                     </span>
-                    <span className="badge badge-slate badge-soft mt-2">
-                      {selectedProduct.storeRoom}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                      <span className="badge badge-slate badge-soft">
+                        {selectedProduct.storeRoom}
+                      </span>
+                      {selectedProduct.status && (
+                        <span className={`badge badge-soft ${statusTone(selectedProduct.status)}`}>
+                          {selectedProduct.status}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -368,8 +433,26 @@ const ProductList = () => {
                     <span className="kv-value">{selectedProduct.category}</span>
                   </div>
                   <div className="kv">
+                    <span className="kv-label">Sub-Category</span>
+                    <span className="kv-value">{selectedProduct.subCategory || "—"}</span>
+                  </div>
+                  <div className="kv">
+                    <span className="kv-label">Condition</span>
+                    <span className="kv-value">{selectedProduct.status || "—"}</span>
+                  </div>
+                  <div className="kv">
+                    <span className="kv-label">Brand</span>
+                    <span className="kv-value">{selectedProduct.brand || "—"}</span>
+                  </div>
+                  <div className="kv">
                     <span className="kv-label">Rack Number</span>
                     <span className="kv-value">{selectedProduct.rackNumber || "—"}</span>
+                  </div>
+                  <div className="kv">
+                    <span className="kv-label">Unit Cost</span>
+                    <span className="kv-value">
+                      {selectedProduct.unitCost ? `₹${selectedProduct.unitCost}` : "—"}
+                    </span>
                   </div>
                   <div className="kv">
                     <span className="kv-label">Quantity</span>

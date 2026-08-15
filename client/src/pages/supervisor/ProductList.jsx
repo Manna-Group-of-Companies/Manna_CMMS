@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
+import { COMMON_STATUSES, statusTone } from "../../utils/productStatus";
 import {
   Search,
   Filter,
@@ -32,11 +33,13 @@ const ProductList = () => {
   const { showToast } = useNotifications();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [subCategories, setSubCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedSubCategory, setSelectedSubCategory] = useState("");
   const [selectedStoreRoom, setSelectedStoreRoom] = useState("");
   const [stockStatus, setStockStatus] = useState("");
 
@@ -57,6 +60,7 @@ const ProductList = () => {
   const [productForm, setProductForm] = useState({
     name: "",
     category: "",
+    status: "Good Condition",
     rackNumber: "",
     quantity: 0,
     unit: "Pcs",
@@ -74,6 +78,7 @@ const ProductList = () => {
       const params = {};
       if (searchTerm) params.search = searchTerm;
       if (selectedCategory) params.category = selectedCategory;
+      if (selectedSubCategory) params.subCategory = selectedSubCategory;
       if (selectedStoreRoom) params.storeRoom = selectedStoreRoom;
       if (stockStatus) params.stockStatus = stockStatus;
 
@@ -96,10 +101,26 @@ const ProductList = () => {
     }
   };
 
+  // Scoped to the chosen category — see the Admin catalog for why.
+  const fetchSubCategories = async () => {
+    try {
+      const { data } = await API.get("/products/subcategories", {
+        params: selectedCategory ? { category: selectedCategory } : {},
+      });
+      setSubCategories(data);
+    } catch (error) {
+      console.error("Error loading sub-categories:", error);
+    }
+  };
+
   useEffect(() => {
     fetchProducts();
     fetchCategories();
-  }, [searchTerm, selectedCategory, selectedStoreRoom, stockStatus]);
+  }, [searchTerm, selectedCategory, selectedSubCategory, selectedStoreRoom, stockStatus]);
+
+  useEffect(() => {
+    fetchSubCategories();
+  }, [selectedCategory]);
 
   // The Admin edits products and moves stock between rooms on their console,
   // so the catalog re-reads the API rather than showing the first fetch.
@@ -121,6 +142,7 @@ const ProductList = () => {
     setProductForm({
       name: product.name,
       category: product.category,
+      status: product.status || "",
       rackNumber: product.rackNumber || "",
       quantity: product.quantity,
       unit: product.unit,
@@ -237,6 +259,7 @@ const ProductList = () => {
     setProductForm({
       name: "",
       category: "",
+      status: "Good Condition",
       rackNumber: "",
       quantity: 0,
       unit: "Pcs",
@@ -272,13 +295,33 @@ const ProductList = () => {
             {/* Category Select */}
             <select
               value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
+              onChange={(e) => {
+                // Picking a category drops a sub-category that no longer
+                // belongs to it.
+                setSelectedCategory(e.target.value);
+                setSelectedSubCategory("");
+              }}
               className="px-3 py-2 text-xs rounded-xl bg-white border border-slate-200 text-slate-700 focus:outline-none focus:border-brand-500"
             >
               <option value="">All Categories</option>
               {categories.map((c) => (
                 <option key={c} value={c}>
                   {c}
+                </option>
+              ))}
+            </select>
+
+            {/* Sub-Category Select */}
+            <select
+              value={selectedSubCategory}
+              onChange={(e) => setSelectedSubCategory(e.target.value)}
+              disabled={subCategories.length === 0}
+              className="px-3 py-2 text-xs rounded-xl bg-white border border-slate-200 text-slate-700 focus:outline-none focus:border-brand-500 disabled:opacity-60"
+            >
+              <option value="">All Sub-Categories</option>
+              {subCategories.map((s) => (
+                <option key={s} value={s}>
+                  {s}
                 </option>
               ))}
             </select>
@@ -341,6 +384,7 @@ const ProductList = () => {
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium text-xs uppercase tracking-wider">
                   <th className="py-4 px-6">Product</th>
                   <th className="py-4 px-6">Category</th>
+                  <th className="py-4 px-6">Condition</th>
                   <th className="py-4 px-6">Rack</th>
                   <th className="py-4 px-6">Store Room</th>
                   <th className="py-4 px-6 text-center">Stock Quantity</th>
@@ -368,6 +412,18 @@ const ProductList = () => {
                       </td>
                       <td className="py-4 px-6">
                         <div className="text-slate-800">{product.category}</div>
+                        {product.subCategory && (
+                          <div className="text-[10px] text-slate-500">{product.subCategory}</div>
+                        )}
+                      </td>
+                      <td className="py-4 px-6 whitespace-nowrap">
+                        {product.status ? (
+                          <span className={`badge badge-soft ${statusTone(product.status)}`}>
+                            {product.status}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
                       </td>
                       <td className="py-4 px-6">
                         <span className="font-mono text-xs text-slate-700">{product.rackNumber || "—"}</span>
@@ -471,9 +527,16 @@ const ProductList = () => {
                   <div>
                     <h4 className="text-xl font-bold text-slate-900 leading-tight">{selectedProduct.name}</h4>
                     <span className="text-xs font-mono text-brand-700 mt-1 block">CODE: {selectedProduct.code}</span>
-                    <span className="inline-block mt-2 px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                      {selectedProduct.storeRoom}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                      <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                        {selectedProduct.storeRoom}
+                      </span>
+                      {selectedProduct.status && (
+                        <span className={`badge badge-soft ${statusTone(selectedProduct.status)}`}>
+                          {selectedProduct.status}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -481,6 +544,18 @@ const ProductList = () => {
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                     <span className="text-slate-500 block mb-0.5">Category</span>
                     <span className="font-semibold text-slate-800">{selectedProduct.category}</span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <span className="text-slate-500 block mb-0.5">Sub-Category</span>
+                    <span className="font-semibold text-slate-800">{selectedProduct.subCategory || "—"}</span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <span className="text-slate-500 block mb-0.5">Condition</span>
+                    <span className="font-semibold text-slate-800">{selectedProduct.status || "—"}</span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <span className="text-slate-500 block mb-0.5">Brand</span>
+                    <span className="font-semibold text-slate-800">{selectedProduct.brand || "—"}</span>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                     <span className="text-slate-500 block mb-0.5">Rack Number</span>
@@ -551,6 +626,27 @@ const ProductList = () => {
                       placeholder="e.g. Electronics, Furniture"
                       className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
                     />
+                  </div>
+
+                  {/* Condition */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Condition</label>
+                    <select
+                      name="status"
+                      value={productForm.status}
+                      onChange={handleFormChange}
+                      className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
+                    >
+                      <option value="">Not recorded</option>
+                      {(productForm.status && !COMMON_STATUSES.includes(productForm.status)
+                        ? [productForm.status, ...COMMON_STATUSES]
+                        : COMMON_STATUSES
+                      ).map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   {/* Rack Number */}

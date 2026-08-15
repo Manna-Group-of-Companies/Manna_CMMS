@@ -2,16 +2,21 @@ import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import { Loader2, X, Boxes, AlertCircle } from "lucide-react";
+import { COMMON_STATUSES } from "../../utils/productStatus";
 
 const EMPTY = {
   code: "",
   name: "",
   category: "",
+  subCategory: "",
+  brand: "",
+  status: "Good Condition",
   rackNumber: "",
   quantity: 0,
   unit: "Pcs",
   minStock: 5,
   maxStock: 100,
+  unitCost: 0,
   storeRoom: "",
   description: "",
   image: "",
@@ -39,11 +44,15 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         code: product.code || "",
         name: product.name || "",
         category: product.category || "",
+        subCategory: product.subCategory || "",
+        brand: product.brand || "",
+        status: product.status || "",
         rackNumber: product.rackNumber || "",
         quantity: product.quantity ?? 0,
         unit: product.unit || "Pcs",
         minStock: product.minStock ?? 5,
         maxStock: product.maxStock ?? 100,
+        unitCost: product.unitCost ?? 0,
         storeRoom: product.storeRoom || "",
         description: product.description || "",
         image: product.image || "",
@@ -69,6 +78,14 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
 
   const set = (field) => (e) => setForm({ ...form, [field]: e.target.value });
 
+  // The standard conditions, plus whatever this product already carries. A few
+  // catalog rows use one-off phrasings ("BreakDown on High loads") that predate
+  // the list; opening one in the form must not quietly rewrite it.
+  const statusOptions =
+    form.status && !COMMON_STATUSES.includes(form.status)
+      ? [form.status, ...COMMON_STATUSES]
+      : COMMON_STATUSES;
+
   const roomChanged = isEdit && form.storeRoom !== product.storeRoom;
   const quantityChanged = isEdit && Number(form.quantity) !== product.quantity;
 
@@ -91,6 +108,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         quantity,
         minStock: Number(form.minStock),
         maxStock: Number(form.maxStock),
+        unitCost: Number(form.unitCost) || 0,
       };
 
       if (isEdit) {
@@ -144,6 +162,41 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
             <input type="text" value={form.category} onChange={set("category")} required className={field} />
           </div>
           <div>
+            <label className={label}>Sub-Category</label>
+            <input
+              type="text"
+              value={form.subCategory}
+              onChange={set("subCategory")}
+              placeholder="e.g. Ring Spanners"
+              className={field}
+            />
+          </div>
+          <div>
+            <label className={label}>Brand</label>
+            <input
+              type="text"
+              value={form.brand}
+              onChange={set("brand")}
+              placeholder="e.g. Taparia"
+              className={field}
+            />
+          </div>
+          <div>
+            <label className={label}>Condition</label>
+            <select
+              value={form.status}
+              onChange={set("status")}
+              className={`${field} cursor-pointer`}
+            >
+              <option value="">Not recorded</option>
+              {statusOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className={label}>Rack Number</label>
             <input
               type="text"
@@ -187,6 +240,17 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
           <div>
             <label className={label}>Max Stock</label>
             <input type="number" min="0" value={form.maxStock} onChange={set("maxStock")} className={field} />
+          </div>
+          <div>
+            <label className={label}>Unit Cost (₹)</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.unitCost}
+              onChange={set("unitCost")}
+              className={field}
+            />
           </div>
         </div>
 
