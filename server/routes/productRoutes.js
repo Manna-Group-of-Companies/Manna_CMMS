@@ -3,6 +3,7 @@ import {
   getProducts,
   getProductById,
   getCategories,
+  getSubCategories,
   createProduct,
   updateProduct,
   deleteProduct,
@@ -18,6 +19,7 @@ router.use(protect, authorizeRoles("Admin", "Supervisor"));
 
 router.get("/", getProducts);
 router.get("/categories", getCategories);
+router.get("/subcategories", getSubCategories);
 
 // Catalog writes are Admin-only; supervisors raise ADD/EDIT requests instead.
 router.post("/", authorizeRoles("Admin"), createProduct);

@@ -14,7 +14,7 @@ import {
 // @access  Private (Both Admin and Supervisor)
 export const getProducts = async (req, res) => {
   try {
-    const { search, category, storeRoom, stockStatus } = req.query;
+    const { search, category, subCategory, storeRoom, stockStatus } = req.query;
 
     let query = {};
 
@@ -33,6 +33,10 @@ export const getProducts = async (req, res) => {
     // Exact filters
     if (category) {
       query.category = category;
+    }
+
+    if (subCategory) {
+      query.subCategory = subCategory;
     }
 
     if (storeRoom) {
@@ -78,6 +82,27 @@ export const getCategories = async (req, res) => {
   try {
     const categories = await Product.distinct("category");
     res.json(categories);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Sub-categories in use, optionally narrowed to one category
+// @route   GET /api/products/subcategories?category=Tools
+// @access  Private
+//
+// Scoped on purpose: the catalog carries well over a hundred sub-categories,
+// and an unfiltered list is unusable in a dropdown. Passing the category the
+// user already picked leaves only the handful that belong to it.
+export const getSubCategories = async (req, res) => {
+  try {
+    const { category } = req.query;
+    const filter = category ? { category } : {};
+
+    const subCategories = await Product.distinct("subCategory", filter);
+    // Products predating the field have "", which is not a choice anyone can
+    // filter on.
+    res.json(subCategories.filter(Boolean).sort((a, b) => a.localeCompare(b)));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -23,6 +23,10 @@ const productRequestSchema = new mongoose.Schema(
       code: String,
       name: { type: String, required: true },
       category: { type: String, required: true },
+      // Condition as picked in the app. Free text for the same reason it is on
+      // the product — the store's phrasings keep changing — and optional so a
+      // request raised by an older client still validates.
+      status: { type: String, default: "", trim: true },
       // Shelf position, e.g. "A-1". Optional for the same reason it is on the
       // product itself — see models/Product.js.
       rackNumber: { type: String, default: "", trim: true, uppercase: true },
