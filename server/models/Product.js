@@ -18,6 +18,34 @@ const productSchema = new mongoose.Schema(
       required: [true, "Category is required"],
       trim: true,
     },
+    // The second level of the store's own classification, e.g. category
+    // "Tools" / sub-category "Ring Spanners". Optional: the older catalog rows
+    // predate it and only the spreadsheet import fills it in.
+    subCategory: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    brand: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Condition as recorded during the physical stock take — "Good Condition",
+    // "Working", "Brand New", "Complaint". Free text on purpose: the store
+    // writes what it sees, and an enum would reject the next phrasing.
+    status: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    // Last known purchase price per unit, in rupees. 0 means "not recorded"
+    // rather than "free" — most of the catalog has never been costed.
+    unitCost: {
+      type: Number,
+      default: 0,
+      min: [0, "Unit cost cannot be negative"],
+    },
     // Where the item physically sits on the shelving, e.g. "A-1". The store
     // room says which room; this says where to walk to inside it.
     //

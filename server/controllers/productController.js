@@ -97,10 +97,14 @@ const generateProductCode = () => `PRD-${Math.floor(100000 + Math.random() * 900
 const EDITABLE_FIELDS = [
   "name",
   "category",
+  "subCategory",
+  "brand",
+  "status",
   "rackNumber",
   "unit",
   "minStock",
   "maxStock",
+  "unitCost",
   "description",
   "image",
 ];

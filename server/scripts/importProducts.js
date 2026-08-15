@@ -11,6 +11,9 @@
  *   --room "<name>"  Room for rows with no store room column (default: Engineer Room)
  *   --update         Overwrite the fields of products whose code already exists
  *   --dry-run        Parse and validate only; write nothing
+ *   --tidy           Repair rows the store take left rough instead of rejecting
+ *                    them: blank unit, blank category, negative quantity. Every
+ *                    repair is listed before anything is written.
  *
  * Opening stock is never written to `Product.quantity` directly — that field is
  * derived. Quantities go in through creditRoom(), which writes the per-room row
@@ -22,16 +25,22 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 
 import Product from "../models/Product.js";
+import StockRoomInventory from "../models/StockRoomInventory.js";
 import {
   creditRoom,
   ensureDefaultRooms,
   migrateProductsIntoRooms,
   resolveRoom,
+  syncProductTotal,
 } from "../utils/stockRooms.js";
 
 dotenv.config();
 
 const DEFAULT_ROOM = "Engineer Room";
+
+/** What a row falls back to under --tidy when the sheet left the cell empty. */
+const TIDY_UNIT = "Units";
+const TIDY_CATEGORY = "Uncategorized";
 
 /**
  * Spreadsheet heading → schema field. Headings are matched after stripping
@@ -40,15 +49,28 @@ const DEFAULT_ROOM = "Engineer Room";
  * its author found readable.
  */
 const COLUMN_ALIASES = {
-  code: ["code", "productcode", "itemcode", "sku", "partno", "partnumber", "id"],
+  code: ["code", "productcode", "itemcode", "sku", "partno", "partnumber", "id", "sapid"],
   name: ["name", "productname", "itemname", "product", "item", "description1"],
-  category: ["category", "type", "group", "productcategory"],
-  rackNumber: ["rack", "racknumber", "rackno", "shelf", "shelfno", "bin", "binlocation", "position"],
-  quantity: ["quantity", "qty", "stock", "openingstock", "currentstock", "instock"],
+  category: ["category", "type", "group", "productcategory", "maincategory"],
+  subCategory: ["subcategory", "subgroup", "secondarycategory"],
+  brand: ["brand", "make", "manufacturer"],
+  status: ["status", "condition"],
+  // "location" belongs here, not on storeRoom: a stock sheet's location column
+  // holds a rack — "C15", "Tool Peg Board" — and reading it as a store room
+  // would create a room per shelf. Rooms come from the store room column or
+  // --room.
+  rackNumber: [
+    "rack", "racknumber", "rackno", "shelf", "shelfno", "bin", "binlocation", "position", "location",
+  ],
+  quantity: [
+    "quantity", "qty", "stock", "openingstock", "currentstock", "instock",
+    "stockavailable", "availablestock",
+  ],
   unit: ["unit", "uom", "units", "measure"],
   minStock: ["minstock", "min", "minimum", "minimumstock", "reorderlevel", "minqty"],
   maxStock: ["maxstock", "max", "maximum", "maximumstock", "maxqty"],
-  storeRoom: ["storeroom", "room", "store", "location", "stockroom", "warehouse"],
+  unitCost: ["unitcost", "cost", "rate", "price", "unitprice"],
+  storeRoom: ["storeroom", "room", "store", "stockroom", "warehouse"],
   description: ["description", "details", "remarks", "notes", "specification"],
   image: ["image", "imageurl", "photo", "picture", "img"],
 };
@@ -173,18 +195,56 @@ const toNumber = (value, fallback) => {
   return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
 };
 
+/**
+ * Same, but keeps the fraction. Stock is counted in whole units nearly
+ * everywhere, and then a row says half a packet of welding rods or 0.9 kg of
+ * stay wire — truncating those to 0 would quietly delete the stock.
+ */
+const toDecimal = (value, fallback) => {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number(String(value).replace(/[,\s]/g, ""));
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 const parseArgs = (argv) => {
-  const options = { file: null, room: DEFAULT_ROOM, update: false, dryRun: false };
+  const options = { file: null, room: DEFAULT_ROOM, update: false, dryRun: false, tidy: false };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--update") options.update = true;
     else if (arg === "--dry-run") options.dryRun = true;
+    else if (arg === "--tidy") options.tidy = true;
     else if (arg === "--room") options.room = argv[++i];
     else if (!arg.startsWith("--")) options.file = arg;
   }
 
   return options;
+};
+
+/**
+ * Places opening stock in one room.
+ *
+ * creditRoom() is the only sanctioned way to move stock and it insists on whole
+ * units, which is right for every later flow — you cannot issue half a packet.
+ * An opening balance is the one moment a fraction has to survive, so those rows
+ * write the room row directly and let syncProductTotal recompute the total the
+ * same way creditRoom would.
+ */
+const placeOpeningStock = async ({ product, room, quantity }) => {
+  if (Number.isInteger(quantity)) {
+    return creditRoom({ product, room, quantity });
+  }
+
+  const target = await resolveRoom(room);
+  if (!target) throw new Error(`Store room "${room}" could not be resolved`);
+
+  await StockRoomInventory.updateOne(
+    { stockRoom: target._id, product: product._id },
+    { $inc: { quantity } },
+    { upsert: true, setDefaultsOnInsert: true }
+  );
+  product.quantity = await syncProductTotal(product._id);
+  return { room: target };
 };
 
 const run = async () => {
@@ -206,6 +266,7 @@ const run = async () => {
   // Validate the whole file before touching the database, so a bad row halfway
   // down is reported alongside the rest instead of after a partial import.
   const invalid = [];
+  const repaired = [];
   const seen = new Map();
   const rows = [];
 
@@ -214,6 +275,9 @@ const run = async () => {
       code: record.code || "",
       name: record.name || "",
       category: record.category || "",
+      subCategory: record.subCategory || "",
+      brand: record.brand || "",
+      status: record.status || "",
       rackNumber: record.rackNumber || "",
       unit: record.unit || "",
       storeRoom: record.storeRoom || options.room,
@@ -221,9 +285,30 @@ const run = async () => {
       image: record.image || "",
       minStock: toNumber(record.minStock, 5),
       maxStock: toNumber(record.maxStock, 100),
-      openingStock: toNumber(record.quantity, 0),
+      unitCost: Math.max(toDecimal(record.unitCost, 0), 0),
+      openingStock: toDecimal(record.quantity, 0),
       line: record.__line,
     };
+
+    // A stock take fills the columns it can and leaves the rest. Under --tidy
+    // the two cells that can be defaulted without inventing anything are, and
+    // both are reported; without it the row is still refused.
+    if (options.tidy) {
+      if (!row.unit) {
+        row.unit = TIDY_UNIT;
+        repaired.push(`Line ${row.line} (${row.code}): blank unit → "${TIDY_UNIT}"`);
+      }
+      if (!row.category) {
+        row.category = TIDY_CATEGORY;
+        repaired.push(`Line ${row.line} (${row.code}): blank category → "${TIDY_CATEGORY}"`);
+      }
+      if (row.openingStock < 0) {
+        repaired.push(
+          `Line ${row.line} (${row.code}): quantity ${row.openingStock} → 0 (stock cannot be negative)`
+        );
+        row.openingStock = 0;
+      }
+    }
 
     const missing = ["code", "name", "category", "unit"].filter((field) => !row[field]);
 
@@ -235,6 +320,10 @@ const run = async () => {
       invalid.push(`Line ${row.line} (${row.code}): quantity cannot be negative`);
       continue;
     }
+    if (row.minStock < 0 || row.maxStock < 0) {
+      invalid.push(`Line ${row.line} (${row.code}): min/max stock cannot be negative`);
+      continue;
+    }
     if (seen.has(row.code)) {
       invalid.push(`Line ${row.line}: code "${row.code}" repeats line ${seen.get(row.code)}`);
       continue;
@@ -242,6 +331,11 @@ const run = async () => {
 
     seen.set(row.code, row.line);
     rows.push(row);
+  }
+
+  if (repaired.length > 0) {
+    console.log(`\n${repaired.length} row(s) repaired by --tidy:`);
+    repaired.forEach((message) => console.log(`  ${message}`));
   }
 
   if (invalid.length > 0) {
@@ -307,7 +401,7 @@ const run = async () => {
       const product = await Product.create(fields);
 
       if (openingStock > 0) {
-        await creditRoom({ product, room: fields.storeRoom, quantity: openingStock });
+        await placeOpeningStock({ product, room: fields.storeRoom, quantity: openingStock });
       }
 
       created += 1;
