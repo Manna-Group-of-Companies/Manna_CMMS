@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
@@ -14,6 +14,7 @@ import {
   ChevronUp,
   Undo2,
   Warehouse,
+  Download,
 } from "lucide-react";
 
 const AdminIssueHistory = () => {
@@ -23,6 +24,12 @@ const AdminIssueHistory = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   // The issue whose return trail is open, if any.
   const [expanded, setExpanded] = useState(null);
+
+  // Filters. Applied here rather than on the API: the page already holds every
+  // issue for the auto-refresh, so narrowing is instant and needs no round trip.
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [supervisorId, setSupervisorId] = useState("");
 
   /** [silent] is used by the background poll: no spinner, no error toast. */
   const fetchIssues = async ({ silent = false } = {}) => {
@@ -56,6 +63,122 @@ const AdminIssueHistory = () => {
 
   /** How much of an issue is still out with the recipient. */
   const outstandingOf = (issue) => issue.quantity - (issue.returnedQuantity || 0);
+
+  /**
+   * Only the supervisors who actually appear in the history, so the dropdown
+   * can never offer a name that would return nothing.
+   */
+  const supervisors = useMemo(() => {
+    const seen = new Map();
+    for (const issue of issues) {
+      const person = issue.supervisor;
+      if (person?._id && !seen.has(person._id)) seen.set(person._id, person.name || "Unnamed");
+    }
+    return [...seen.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [issues]);
+
+  const filteredIssues = useMemo(() => {
+    // The date inputs give a calendar day; an issue at 17:40 has to fall inside
+    // its own "to" day, so the end of the range is the last millisecond of it.
+    const from = fromDate ? new Date(`${fromDate}T00:00:00`) : null;
+    const to = toDate ? new Date(`${toDate}T23:59:59.999`) : null;
+
+    return issues.filter((issue) => {
+      const issuedOn = new Date(issue.createdAt);
+      if (from && issuedOn < from) return false;
+      if (to && issuedOn > to) return false;
+      if (supervisorId && issue.supervisor?._id !== supervisorId) return false;
+      return true;
+    });
+  }, [issues, fromDate, toDate, supervisorId]);
+
+  const filtersApplied = Boolean(fromDate || toDate || supervisorId);
+
+  const clearFilters = () => {
+    setFromDate("");
+    setToDate("");
+    setSupervisorId("");
+  };
+
+  /** A cell Excel will read back as one value, whatever it contains. */
+  const csvCell = (value) => {
+    const text = value === null || value === undefined ? "" : String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+
+  /** `2026-08-15 14:32` — sorts correctly and Excel reads it as a date-time. */
+  const sheetDate = (value) => {
+    if (!value) return "";
+    const d = new Date(value);
+    const pad = (n) => String(n).padStart(2, "0");
+    return (
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+      `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    );
+  };
+
+  /**
+   * Downloads exactly what the filters have left on screen.
+   *
+   * Written as CSV rather than a real .xlsx so the page carries no spreadsheet
+   * library; Excel opens it directly. The leading BOM is what makes Excel read
+   * it as UTF-8 — without it, a product name with a degree sign or a rupee
+   * symbol arrives mangled.
+   */
+  const exportToExcel = () => {
+    if (filteredIssues.length === 0) {
+      showToast("Nothing to export — no issues match these filters", "error");
+      return;
+    }
+
+    const columns = [
+      ["Issue #", (i) => i.issueNumber],
+      ["Product Code", (i) => i.product?.code || ""],
+      ["Product", (i) => i.product?.name || "Deleted Product"],
+      ["From Room", (i) => roomsOf(i).join(", ")],
+      ["Issued Qty", (i) => i.quantity],
+      ["Unit", (i) => i.product?.unit || ""],
+      ["Returned Qty", (i) => i.returnedQuantity || 0],
+      ["Still Out", (i) => outstandingOf(i)],
+      ["Recipient", (i) => i.recipient],
+      ["Purpose", (i) => i.purpose || ""],
+      ["Issued By", (i) => i.supervisor?.name || "System"],
+      ["Issued On", (i) => sheetDate(i.createdAt)],
+      ["Return Status", (i) => (RETURN_STATUS[i.returnStatus] || { label: "Not returned" }).label],
+      ["Last Returned By", (i) => i.returns?.[i.returns.length - 1]?.returnedBy?.name || ""],
+      ["Last Returned On", (i) => sheetDate(i.returns?.[i.returns.length - 1]?.returnDate)],
+    ];
+
+    const rows = [
+      columns.map(([heading]) => heading),
+      ...filteredIssues.map((issue) => columns.map(([, read]) => read(issue))),
+    ];
+
+    // The BOM is written as an escape rather than a literal byte order mark,
+    // which is invisible in an editor and easily lost to a reformat. CRLF
+    // because Excel on Windows treats a lone LF inside a quoted field as the
+    // end of the record.
+    const csv = "\uFEFF" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
+
+    // Named for the range it covers, so two exports never overwrite each other
+    // in the downloads folder.
+    const span = [fromDate || "start", toDate || sheetDate(Date.now()).slice(0, 10)].join("_to_");
+    const who = supervisorId
+      ? `_${(supervisors.find((s) => s.id === supervisorId)?.name || "").replace(/\s+/g, "-")}`
+      : "";
+
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    link.download = `issue-history_${span}${who}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+
+    showToast(`Exported ${filteredIssues.length} issue(s)`, "success");
+  };
 
   const RETURN_STATUS = {
     Returned: { tone: "badge-emerald", label: "Returned" },
@@ -100,12 +223,82 @@ const AdminIssueHistory = () => {
         </div>
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <span className="badge badge-pill badge-amber badge-soft">
-            {issues.length} total issues
+            {filteredIssues.length}
+            {filtersApplied ? ` of ${issues.length}` : ""} issues
           </span>
           <span className="badge badge-pill badge-rose badge-soft">
-            {issues.reduce((sum, issue) => sum + outstandingOf(issue), 0)} pcs still out
+            {filteredIssues.reduce((sum, issue) => sum + outstandingOf(issue), 0)} pcs still out
           </span>
         </div>
+      </div>
+
+      {/* Filters and export */}
+      <div className="panel">
+        <div className="flex-1 w-full flex flex-col sm:flex-row sm:items-end gap-2.5 min-w-0">
+          <div>
+            <label className="field-label" htmlFor="issued-from">
+              Issued from
+            </label>
+            <input
+              id="issued-from"
+              type="date"
+              value={fromDate}
+              // Keeps the range the right way round rather than silently
+              // returning nothing.
+              max={toDate || undefined}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="field field-sm w-full sm:w-auto cursor-pointer"
+            />
+          </div>
+          <div>
+            <label className="field-label" htmlFor="issued-to">
+              Issued to
+            </label>
+            <input
+              id="issued-to"
+              type="date"
+              value={toDate}
+              min={fromDate || undefined}
+              onChange={(e) => setToDate(e.target.value)}
+              className="field field-sm w-full sm:w-auto cursor-pointer"
+            />
+          </div>
+          <div className="min-w-0">
+            <label className="field-label" htmlFor="issued-by">
+              Supervisor
+            </label>
+            <select
+              id="issued-by"
+              value={supervisorId}
+              onChange={(e) => setSupervisorId(e.target.value)}
+              className="field field-sm w-full sm:w-auto cursor-pointer"
+            >
+              <option value="">All supervisors</option>
+              {supervisors.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {filtersApplied && (
+            <button type="button" onClick={clearFilters} className="btn btn-neutral">
+              <X className="h-4 w-4" />
+              Clear
+            </button>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={exportToExcel}
+          disabled={filteredIssues.length === 0}
+          className="btn btn-primary w-full sm:w-auto self-end disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Download these issues as a spreadsheet"
+        >
+          <Download className="h-4 w-4" />
+          Export to Excel
+        </button>
       </div>
 
       {/* Table */}
@@ -113,11 +306,17 @@ const AdminIssueHistory = () => {
         <div className="h-[40vh] flex items-center justify-center">
           <Loader2 className="h-7 w-7 text-brand-500 animate-spin" />
         </div>
-      ) : issues.length === 0 ? (
+      ) : filteredIssues.length === 0 ? (
         <div className="empty">
           <HelpCircle className="h-10 w-10 text-slate-300 mb-3" />
-          <h3 className="empty-title">No products have been issued yet</h3>
-          <p className="empty-sub">When a supervisor issues a product, it will appear here.</p>
+          <h3 className="empty-title">
+            {filtersApplied ? "No issues match these filters" : "No products have been issued yet"}
+          </h3>
+          <p className="empty-sub">
+            {filtersApplied
+              ? "Try a wider date range, or a different supervisor."
+              : "When a supervisor issues a product, it will appear here."}
+          </p>
         </div>
       ) : (
         <div className="table-card">
@@ -138,7 +337,7 @@ const AdminIssueHistory = () => {
                 </tr>
               </thead>
               <tbody>
-                {issues.map((issue) => {
+                {filteredIssues.map((issue) => {
                   const returns = issue.returns || [];
                   const returnedQty = issue.returnedQuantity || 0;
                   const outstanding = outstandingOf(issue);
