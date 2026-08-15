@@ -13,12 +13,14 @@ class StockRepository {
   Future<List<Product>> products({
     String? search,
     String? category,
+    String? subCategory,
     String? storeRoom,
     String? stockStatus,
   }) async {
     final data = await _api.get('/products', query: {
       'search': search,
       'category': category,
+      'subCategory': subCategory,
       'storeRoom': storeRoom,
       'stockStatus': stockStatus,
     });
@@ -27,6 +29,14 @@ class StockRepository {
 
   Future<List<String>> categories() async {
     final data = await _api.get('/products/categories');
+    return (data as List? ?? []).map((e) => asString(e)).where((e) => e.isNotEmpty).toList();
+  }
+
+  /// Sub-categories in use, narrowed to [category] when one is given. The
+  /// catalog holds well over a hundred, so an unscoped list is only useful
+  /// before a category has been picked.
+  Future<List<String>> subCategories({String? category}) async {
+    final data = await _api.get('/products/subcategories', query: {'category': category});
     return (data as List? ?? []).map((e) => asString(e)).where((e) => e.isNotEmpty).toList();
   }
 

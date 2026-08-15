@@ -31,7 +31,7 @@ abstract final class ServerConfig {
 
   /// The deployed StockMaster API. Reachable from anywhere, so it is what the
   /// app settles on unless a server answers on the local network first.
-  static const cloudUrl = 'https://cmms-0qbj.onrender.com/api';
+  static const cloudUrl = 'https://manna-cmms.onrender.com/api';
 
   /// Render puts free instances to sleep after a spell of inactivity, and the
   /// request that wakes one can take the better part of a minute — far longer

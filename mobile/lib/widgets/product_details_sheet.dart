@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/palette.dart';
+import '../core/product_status.dart';
 import '../data/repository.dart';
 import '../models/models.dart';
 import 'common.dart';
@@ -144,7 +145,15 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                             const SizedBox(height: 6),
                             MonoText('CODE: ${p.code}'),
                             const SizedBox(height: 8),
-                            SoftChip(p.storeRoom),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                SoftChip(p.storeRoom),
+                                if (p.status.isNotEmpty)
+                                  SoftChip(p.status, color: statusColor(p.status)),
+                              ],
+                            ),
                           ],
                         ),
                       ),
@@ -159,8 +168,21 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
                     children: [
-                      SpecTile(label: 'Category', value: p.category),
-                      SpecTile(label: 'Rack Number', value: p.rackNumber),
+                      SpecTile(
+                        label: 'Category',
+                        value: p.category,
+                        caption: p.subCategory,
+                      ),
+                      SpecTile(
+                        label: 'Condition',
+                        value: p.status.isEmpty ? '—' : p.status,
+                        valueColor: p.status.isEmpty ? null : statusColor(p.status),
+                      ),
+                      SpecTile(label: 'Brand', value: p.brand.isEmpty ? '—' : p.brand),
+                      SpecTile(
+                        label: 'Rack Number',
+                        value: p.rackNumber.isEmpty ? '—' : p.rackNumber,
+                      ),
                       SpecTile(
                         label: 'Current Stock',
                         value: '${p.quantity} $unit',

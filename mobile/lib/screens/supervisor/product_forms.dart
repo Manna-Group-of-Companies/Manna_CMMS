@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/palette.dart';
+import '../../core/product_status.dart';
 import '../../core/toast.dart';
 import '../../data/repository.dart';
 import '../../models/models.dart';
@@ -357,6 +358,21 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
 
   bool get _isInlinePhoto => _draft.image.startsWith('data:');
 
+  /// The standard conditions, plus whatever this product already carries.
+  ///
+  /// The catalog holds a handful of one-off phrasings ("BreakDown on High
+  /// loads", "Working and not verified") that predate the list, and some rows
+  /// carry no condition at all. Editing either must not quietly rewrite it —
+  /// and a dropdown whose value is absent from its items asserts — so the
+  /// existing value is always offered alongside the standard ones. The empty
+  /// one shows as "Not recorded".
+  late final List<String> _statusOptions = [
+    if (!productStatuses.contains(_draft.status)) _draft.status,
+    ...productStatuses,
+  ];
+
+  static String _statusLabel(String status) => status.isEmpty ? 'Not recorded' : status;
+
   @override
   void dispose() {
     for (final controller in [
@@ -492,6 +508,19 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
               controller: _category,
               validator: _requiredValidator,
               decoration: const InputDecoration(hintText: 'e.g. Electronics, Furniture'),
+            ),
+          ),
+          _Field(
+            label: 'Condition',
+            required: true,
+            child: DropdownShell(
+              child: AppDropdown<String>(
+                value: _draft.status,
+                items: _statusOptions,
+                labelBuilder: _statusLabel,
+                onChanged: (value) =>
+                    setState(() => _draft.status = value ?? _draft.status),
+              ),
             ),
           ),
           _Field(

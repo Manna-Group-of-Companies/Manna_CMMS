@@ -38,7 +38,7 @@ takes the first address that answers `GET /api/health`:
 2. the address saved in the app (from the **Server address** sheet)
 3. `--dart-define=API_HOST=…`, then `10.0.2.2` (Android emulator),
    `localhost`, `127.0.0.1`
-4. the hosted server, <https://cmms-0qbj.onrender.com/api> — reachable from any
+4. the hosted server, <https://manna-cmms.onrender.com/api> — reachable from any
    network, so this is where a phone lands unless a local API answered first
 5. a sweep of the device's own Wi-Fi subnet for port 5000, run automatically
    when everything above fails

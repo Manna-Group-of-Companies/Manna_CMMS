@@ -36,6 +36,7 @@ class ProductBrowser extends StatefulWidget {
 class _ProductBrowserState extends State<ProductBrowser>
     with WidgetsBindingObserver, AutoRefresh {
   static const _anyCategory = 'All Categories';
+  static const _anySubCategory = 'All Sub-Categories';
   static const _anyRoom = 'All Rooms';
   static const _anyStock = 'All Stock Levels';
 
@@ -44,10 +45,12 @@ class _ProductBrowserState extends State<ProductBrowser>
 
   List<Product> _products = const [];
   List<String> _categories = const [];
+  List<String> _subCategories = const [];
   bool _loading = true;
 
   String _search = '';
   String _category = _anyCategory;
+  String _subCategory = _anySubCategory;
   String _storeRoom = _anyRoom;
   String _stockStatus = _anyStock;
 
@@ -56,6 +59,7 @@ class _ProductBrowserState extends State<ProductBrowser>
     super.initState();
     _loadProducts();
     _loadCategories();
+    _loadSubCategories(_anyCategory);
     // The Admin edits products and moves stock on their console, so the
     // catalog re-reads the API rather than showing only the first fetch.
     startAutoRefresh();
@@ -81,6 +85,7 @@ class _ProductBrowserState extends State<ProductBrowser>
       final products = await context.read<StockRepository>().products(
             search: _search,
             category: _category == _anyCategory ? null : _category,
+            subCategory: _subCategory == _anySubCategory ? null : _subCategory,
             storeRoom: _storeRoom == _anyRoom ? null : _storeRoom,
             stockStatus: switch (_stockStatus) {
               'Low Stock Alert' => 'low',
@@ -103,6 +108,22 @@ class _ProductBrowserState extends State<ProductBrowser>
       if (mounted) setState(() => _categories = categories);
     } catch (error) {
       debugPrint('Error loading categories: $error');
+    }
+  }
+
+  /// The sub-categories belonging to [category], or all of them when no
+  /// category is chosen. Returns the list as well as storing it, so the filter
+  /// sheet can repopulate its own dropdown the moment the category changes.
+  Future<List<String>> _loadSubCategories(String category) async {
+    try {
+      final subCategories = await context.read<StockRepository>().subCategories(
+            category: category == _anyCategory ? null : category,
+          );
+      if (mounted) setState(() => _subCategories = subCategories);
+      return subCategories;
+    } catch (error) {
+      debugPrint('Error loading sub-categories: $error');
+      return const [];
     }
   }
 
@@ -153,20 +174,27 @@ class _ProductBrowserState extends State<ProductBrowser>
     );
   }
 
-  /// How many of the three filters are set to something other than "all" —
-  /// shown on the filter button so a narrowed list is never a surprise.
+  /// How many of the filters are set to something other than "all" — shown on
+  /// the filter button so a narrowed list is never a surprise.
   int get _activeFilters => [
         _category != _anyCategory,
+        _subCategory != _anySubCategory,
         _storeRoom != _anyRoom,
         _stockStatus != _anyStock,
       ].where((applied) => applied).length;
 
-  /// Search stays on screen and the three dropdowns live in a sheet, so the
-  /// list gets the room the filter panel used to take.
+  /// Search stays on screen and the dropdowns live in a sheet, so the list gets
+  /// the room the filter panel used to take.
   Widget _buildFilterBar() {
     final chips = <_ActiveFilter>[
       if (_category != _anyCategory)
-        _ActiveFilter(_category, () => _applyFilters(category: _anyCategory)),
+        _ActiveFilter(_category, () {
+          // The sub-category belonged to that category; it goes with it.
+          _applyFilters(category: _anyCategory, subCategory: _anySubCategory);
+          _loadSubCategories(_anyCategory);
+        }),
+      if (_subCategory != _anySubCategory)
+        _ActiveFilter(_subCategory, () => _applyFilters(subCategory: _anySubCategory)),
       if (_storeRoom != _anyRoom)
         _ActiveFilter(_storeRoom, () => _applyFilters(storeRoom: _anyRoom)),
       if (_stockStatus != _anyStock)
@@ -231,9 +259,15 @@ class _ProductBrowserState extends State<ProductBrowser>
   }
 
   /// The one place a filter change is committed and the list re-queried.
-  void _applyFilters({String? category, String? storeRoom, String? stockStatus}) {
+  void _applyFilters({
+    String? category,
+    String? subCategory,
+    String? storeRoom,
+    String? stockStatus,
+  }) {
     setState(() {
       _category = category ?? _category;
+      _subCategory = subCategory ?? _subCategory;
       _storeRoom = storeRoom ?? _storeRoom;
       _stockStatus = stockStatus ?? _stockStatus;
     });
@@ -243,8 +277,12 @@ class _ProductBrowserState extends State<ProductBrowser>
   Future<void> _openFilterSheet() async {
     // Edited on a copy, so backing out of the sheet leaves the list alone.
     var category = _category;
+    var subCategory = _subCategory;
     var storeRoom = _storeRoom;
     var stockStatus = _stockStatus;
+    // The options shown for the sub-category, reloaded whenever the category
+    // above it changes.
+    var subCategoryOptions = _subCategories;
 
     final applied = await showModalBottomSheet<bool>(
       context: context,
@@ -277,11 +315,19 @@ class _ProductBrowserState extends State<ProductBrowser>
                         ),
                       ),
                       TextButton(
-                        onPressed: () => setSheetState(() {
-                          category = _anyCategory;
-                          storeRoom = _anyRoom;
-                          stockStatus = _anyStock;
-                        }),
+                        onPressed: () {
+                          setSheetState(() {
+                            category = _anyCategory;
+                            subCategory = _anySubCategory;
+                            storeRoom = _anyRoom;
+                            stockStatus = _anyStock;
+                          });
+                          _loadSubCategories(_anyCategory).then((options) {
+                            if (sheetContext.mounted) {
+                              setSheetState(() => subCategoryOptions = options);
+                            }
+                          });
+                        },
                         child: const Text(
                           'Clear all',
                           style: TextStyle(
@@ -301,7 +347,28 @@ class _ProductBrowserState extends State<ProductBrowser>
                         label: 'Category',
                         value: category,
                         items: [_anyCategory, ..._categories],
-                        onChanged: (value) => setSheetState(() => category = value),
+                        onChanged: (value) {
+                          // A sub-category only means something inside its own
+                          // category, so it is dropped and the list below is
+                          // refetched for the new one.
+                          setSheetState(() {
+                            category = value;
+                            subCategory = _anySubCategory;
+                            subCategoryOptions = const [];
+                          });
+                          _loadSubCategories(value).then((options) {
+                            if (sheetContext.mounted) {
+                              setSheetState(() => subCategoryOptions = options);
+                            }
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      _SheetField(
+                        label: 'Sub-category',
+                        value: subCategory,
+                        items: [_anySubCategory, ...subCategoryOptions],
+                        onChanged: (value) => setSheetState(() => subCategory = value),
                       ),
                       const SizedBox(height: 12),
                       _SheetField(
@@ -338,6 +405,7 @@ class _ProductBrowserState extends State<ProductBrowser>
     if (applied == true) {
       _applyFilters(
         category: category,
+        subCategory: subCategory,
         storeRoom: storeRoom,
         stockStatus: stockStatus,
       );

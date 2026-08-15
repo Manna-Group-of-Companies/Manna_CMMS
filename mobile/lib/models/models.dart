@@ -64,12 +64,29 @@ class Product {
     required this.description,
     required this.image,
     required this.isPartial,
+    this.subCategory = '',
+    this.brand = '',
+    this.status = '',
+    this.unitCost = 0,
   });
 
   final String id;
   final String code;
   final String name;
   final String category;
+
+  // Recorded by the stock take and optional throughout: products created in the
+  // app carry none of them until somebody fills them in, so each defaults to
+  // empty rather than being required.
+  final String subCategory;
+  final String brand;
+
+  /// Condition as written by the store — free text, see core/product_status.dart.
+  final String status;
+
+  /// Last known purchase price per unit, in rupees. 0 means "not recorded".
+  final num unitCost;
+
   final String rackNumber;
   final int quantity;
   final String unit;
@@ -88,6 +105,10 @@ class Product {
         code: asString(json['code']),
         name: asString(json['name']),
         category: asString(json['category']),
+        subCategory: asString(json['subCategory']),
+        brand: asString(json['brand']),
+        status: asString(json['status']),
+        unitCost: json['unitCost'] is num ? json['unitCost'] as num : 0,
         rackNumber: asString(json['rackNumber']),
         quantity: asInt(json['quantity']),
         unit: asString(json['unit']),
@@ -108,6 +129,7 @@ class ProductDraft {
   ProductDraft({
     this.name = '',
     this.category = '',
+    this.status = 'Good Condition',
     this.rackNumber = '',
     this.quantity = 0,
     this.unit = 'Pcs',
@@ -120,6 +142,12 @@ class ProductDraft {
 
   String name;
   String category;
+
+  /// Condition of the stock, picked from `productStatuses` — see
+  /// core/product_status.dart. A new product is assumed to be in good condition
+  /// until the person adding it says otherwise.
+  String status;
+
   String rackNumber;
   int quantity;
   String unit;
@@ -132,6 +160,7 @@ class ProductDraft {
   factory ProductDraft.fromProduct(Product product) => ProductDraft(
         name: product.name,
         category: product.category,
+        status: product.status,
         rackNumber: product.rackNumber,
         quantity: product.quantity,
         unit: product.unit,
@@ -145,6 +174,7 @@ class ProductDraft {
   factory ProductDraft.fromJson(Map<String, dynamic> json) => ProductDraft(
         name: asString(json['name']),
         category: asString(json['category']),
+        status: asString(json['status']),
         rackNumber: asString(json['rackNumber']),
         quantity: asInt(json['quantity']),
         unit: asString(json['unit']),
@@ -158,6 +188,7 @@ class ProductDraft {
   Map<String, dynamic> toJson() => {
         'name': name,
         'category': category,
+        'status': status,
         'rackNumber': rackNumber,
         'quantity': quantity,
         'unit': unit,
