@@ -35,7 +35,7 @@ app.set("trust proxy", 1);
 // Configure CORS - allow the deployed client plus local dev servers.
 // Extra origins can be added at deploy time via CORS_ORIGINS (comma separated).
 const allowedOrigins = [
-  "https://cmms.odd-wind-70a0.workers.dev", // Cloudflare Worker (production client)
+  "https://mannagroupcmms.pages.dev", // Cloudflare Pages (production client)
   "http://localhost:5173", // vite dev
   "http://localhost:4173", // vite preview
   ...(process.env.CORS_ORIGINS || "")
@@ -44,12 +44,23 @@ const allowedOrigins = [
     .filter(Boolean),
 ];
 
+// Cloudflare Pages publishes every branch and commit to its own generated
+// subdomain of the project (`<commit>.mannagroupcmms.pages.dev`). Those are the
+// same client against the same API, but the hostname is not known ahead of
+// time, so the project's preview subdomains are matched rather than listed.
+// Anchored, and only the label itself is a wildcard — nothing outside the
+// project's own domain can satisfy it.
+const PAGES_PREVIEW = /^https:\/\/[a-z0-9-]+\.mannagroupcmms\.pages\.dev$/;
+
+const isAllowedOrigin = (origin) =>
+  allowedOrigins.includes(origin) || PAGES_PREVIEW.test(origin);
+
 app.use(
   cors({
     origin: (origin, callback) => {
       // Requests without an Origin header (mobile app, curl, server-to-server)
       // aren't subject to CORS, so let them through.
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || isAllowedOrigin(origin)) {
         return callback(null, true);
       }
       return callback(new Error(`Origin not allowed by CORS: ${origin}`));
