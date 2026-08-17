@@ -1,0 +1,17 @@
+# Copy this file to `key.properties` (same folder) and fill it in. The real
+# file is git-ignored — it holds keystore passwords.
+#
+# Create the keystore once, and never lose it: an update can only install over
+# an existing app when both APKs are signed with the same key.
+#
+#   keytool -genkey -v -keystore stockmaster-release.jks \
+#     -keyalg RSA -keysize 2048 -validity 10000 -alias stockmaster
+#
+# `storeFile` is resolved relative to the `android/` folder, so the line below
+# expects the keystore to sit next to key.properties. An absolute path works
+# too, and is the better choice if you keep the keystore outside the repo.
+
+storeFile=stockmaster-release.jks
+storePassword=CHANGE-ME
+keyAlias=stockmaster
+keyPassword=CHANGE-ME

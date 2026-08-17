@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Folders the update FileProvider is allowed to share.
+
+  `cache-path` is Context.getCacheDir(), which is what path_provider's
+  getTemporaryDirectory() returns on Android. The `updates/` sub-folder must
+  match UpdateConfig.cacheFolder in lib/core/update_config.dart — if the two
+  drift apart, FileProvider refuses the file and the installer never opens.
+-->
+<paths>
+    <cache-path name="update_cache" path="updates/" />
+    <external-cache-path name="external_update_cache" path="updates/" />
+</paths>

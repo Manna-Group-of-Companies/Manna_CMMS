@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- The app talks to the StockMaster REST API over the network. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- The in-app updater downloads an APK from Firebase Hosting and opens
+         the system package installer for it. This permission only allows the
+         app to *ask*; the user still confirms every install, and on Android 8+
+         they must also switch on "Allow from this source" once per device. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <!-- usesCleartextTraffic: the dev/LAN API is served over plain http.
          Remove it once the API is reachable over https. -->
     <application
@@ -30,6 +35,20 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Shares the downloaded APK (which lives in the app's private cache)
+             with the package installer. Handing over a raw file:// URI has
+             thrown FileUriExposedException since Android 7, so it goes through
+             a content:// URI instead. The authority is derived from the
+             applicationId and must match MainActivity.installApk(). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updateprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_file_paths" />
+        </provider>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
@@ -45,6 +64,12 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Lets the updater see the system package installer under the
+             package-visibility rules introduced in Android 11. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:mimeType="application/vnd.android.package-archive"/>
         </intent>
     </queries>
 </manifest>

@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/palette.dart';
+import '../../core/update_service.dart';
 import '../../data/repository.dart';
 import '../../models/models.dart';
 import '../../state/auth_provider.dart';
 import '../../state/server_provider.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/common.dart';
+import '../../widgets/update_dialog.dart';
 
 /// Settings: the signed-in account, its request tallies, the server it talks
 /// to, and sign-out. Reached from the last slot of the bottom bar.
@@ -20,11 +22,38 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   SupervisorDashboard? _summary;
+  String _installedVersion = '';
+  bool _checkingForUpdate = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final check = await UpdateService.installedOnly();
+      if (mounted) {
+        setState(() =>
+            _installedVersion = '${check.installedVersion} (${check.installedBuild})');
+      }
+    } catch (error) {
+      // Widget tests run without the platform channel; the rest of the screen
+      // is unaffected.
+      debugPrint('Could not read the installed version: $error');
+    }
+  }
+
+  Future<void> _checkForUpdate() async {
+    if (_checkingForUpdate) return;
+    setState(() => _checkingForUpdate = true);
+    try {
+      await checkForUpdateFromSettings(context);
+    } finally {
+      if (mounted) setState(() => _checkingForUpdate = false);
+    }
   }
 
   Future<void> _load() async {
@@ -252,6 +281,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 foregroundColor: AppColors.dangerDeep,
                 side: const BorderSide(color: AppColors.border),
                 padding: const EdgeInsets.symmetric(vertical: 15),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // App version, last on the screen the way an About footer usually
+            // is. The app checks on its own at every launch; the button is for
+            // a tablet that has been left running for days.
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const PanelHeader(
+                    icon: Icons.system_update_outlined,
+                    iconColor: AppColors.primaryDeep,
+                    title: 'App Version',
+                  ),
+                  const SizedBox(height: 12),
+                  SpecTile(
+                    label: 'Installed version',
+                    value: _installedVersion,
+                    caption: 'Checked automatically each time the app starts',
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _checkingForUpdate ? null : _checkForUpdate,
+                    icon: _checkingForUpdate
+                        ? const SizedBox(
+                            height: 15,
+                            width: 15,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.primaryDeep,
+                            ),
+                          )
+                        : const Icon(Icons.refresh, size: 18),
+                    label: Text(
+                      _checkingForUpdate ? 'Checking…' : 'Check for Updates',
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primaryDeep,
+                      side: const BorderSide(color: AppColors.border),
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      minimumSize: const Size.fromHeight(0),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

@@ -1,0 +1,17 @@
+# Built APKs staged for upload to GitHub Releases. Release assets live on the
+# release itself, never in git history — a 54 MB binary per version would make
+# the repo unusable.
+/release/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local environment
+.env
+
+# Claude Code tooling — local agent config and vendored skill packs. Machine
+# specific and not part of the application, so it stays out of the repo.
+.claude/
+.agents/
+skills-lock.json

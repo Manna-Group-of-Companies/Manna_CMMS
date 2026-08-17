@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Release signing. Every update must be signed with the same key as the copy
+# already on the tablets, so this keystore is the one thing that must not be
+# lost — back it up somewhere other than this repo.
+/android/key.properties
+*.jks
+*.keystore

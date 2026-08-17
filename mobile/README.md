@@ -98,6 +98,20 @@ issues each one from **Users & PINs** in the web console before it can be used.
 The name is matched case-insensitively. `System Admin` is rejected with "Admin
 accounts use the web console."
 
+## Updating the tablets
+
+The app checks a `version.json` at every launch and offers an in-place update
+when a newer release is published. Setup, the publishing commands, and where
+each file goes are in [../README-UPDATES.md](../README-UPDATES.md).
+
+Both halves live on GitHub — the manifest is `update/version.json` on `main`,
+read through raw.githubusercontent, and each APK is an asset on the release
+tagged `v<version>`. No hosting service is involved.
+
+One thing is still outstanding before the first real release: signing falls
+back to the debug key, which will break updates the moment a build is made on
+a second machine.
+
 ## Checks
 
 ```bash

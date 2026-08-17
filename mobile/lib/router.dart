@@ -17,6 +17,11 @@ import 'widgets/common.dart';
 const supervisorHome = '/supervisor/products';
 const branchHome = '/branch/stock';
 
+/// The root navigator, so a dialog that belongs to the app rather than to any
+/// one screen — the update prompt raised at startup — can be shown from
+/// outside the widget tree.
+final rootNavigatorKey = GlobalKey<NavigatorState>();
+
 /// Where a signed-in account belongs. Admins never reach this — they are
 /// turned away at login (see AuthProvider).
 String homePathFor(String role) => role == 'Branch' ? branchHome : supervisorHome;
@@ -25,6 +30,7 @@ String homePathFor(String role) => role == 'Branch' ? branchHome : supervisorHom
 GoRouter buildRouter(AuthProvider auth) {
   return GoRouter(
     initialLocation: '/',
+    navigatorKey: rootNavigatorKey,
     refreshListenable: auth,
     routes: [
       GoRoute(path: '/', builder: (_, _) => const _SessionSplash()),

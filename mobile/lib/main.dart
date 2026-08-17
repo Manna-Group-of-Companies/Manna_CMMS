@@ -10,6 +10,7 @@ import 'router.dart';
 import 'state/auth_provider.dart';
 import 'state/notification_provider.dart';
 import 'state/server_provider.dart';
+import 'widgets/update_dialog.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,7 +40,26 @@ class _StockMasterAppState extends State<StockMasterApp> {
     super.initState();
     // Settle on a reachable API address *before* restoring the session,
     // otherwise `/auth/me` would fire at an address that cannot answer.
-    _server.start().whenComplete(_auth.initialize);
+    // The update prompt comes last, once the router has left the splash.
+    _server.start().whenComplete(_auth.initialize).whenComplete(_checkForUpdate);
+  }
+
+  /// The once-per-launch check against the hosted `version.json`.
+  ///
+  /// Failure is silent by design — a tablet with no signal, or a build with no
+  /// update URL configured, simply carries on with the app it has.
+  Future<void> _checkForUpdate() async {
+    // Tests inject a client and must not reach the network or the platform
+    // channels, the same rule ServerProvider follows.
+    if (widget.apiClient != null) return;
+
+    // A dialog raised over the splash is torn down with it when the redirect
+    // swaps in the login or home screen, so wait for that to have happened.
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    final context = rootNavigatorKey.currentContext;
+    if (context == null || !context.mounted) return;
+
+    await checkForUpdateOnStartup(context);
   }
 
   @override
