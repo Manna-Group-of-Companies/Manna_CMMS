@@ -7,7 +7,6 @@ import ItemNameBuilder, {
   NameComplianceNotice,
   EMPTY_NAMING,
   isNamingBlank,
-  namingFromProduct,
 } from "../../components/ItemNameBuilder";
 import DuplicateWarning, { useDuplicateCheck } from "../../components/DuplicateWarning";
 import TaxonomySelect, {
@@ -40,8 +39,12 @@ const EMPTY = {
  *
  * **Adding** asks for everything. **Editing** is deliberately narrow: only the
  * classification and the descriptive fields — category, sub-category, rack,
- * condition, image, description — plus the name, and that only through the
- * SOI1/SOP1 builder.
+ * condition, image, description.
+ *
+ * The name is not among them. It is settled at intake and is what the catalog,
+ * every issue record and the SAP hand-off refer to the item by, so it is shown
+ * on an edit but never typed over. The SOI1/SOP1 builder is the intake tool for
+ * arriving at it and is likewise not offered here.
  *
  * Everything else is read-only here because it has a proper home elsewhere:
  * quantity and company move real stock (Companies page), and code, unit,
@@ -79,19 +82,16 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
   const categoryOptions = useCategoryOptions();
   const subCategoryOptions = useSubCategoryOptions(form.category);
 
-  /** True once the builder has produced a name different from the saved one. */
-  const renamed = isEdit && form.name !== product.name;
-
-  // Live duplicate check while the name is typed (ST-14). Suppressed on edit
-  // until the name actually changes — reopening a product should not accuse it
-  // of duplicating itself.
+  // Live duplicate check while the name is typed (ST-14). Intake only: an edit
+  // cannot change the name, so there is nothing here that could newly collide —
+  // and reopening a product must not accuse it of duplicating itself.
   const { matches, checking: checkingDuplicates } = useDuplicateCheck({
     name: form.name,
     code: form.code,
     brand: form.brand,
     category: form.category,
     excludeId: product?._id || "",
-    enabled: !isEdit || form.name !== product?.name,
+    enabled: !isEdit,
   });
 
   useEffect(() => {
@@ -112,16 +112,13 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         description: product.description || "",
         image: product.image || "",
       });
-      setNaming(namingFromProduct(product));
     } else {
       setForm(EMPTY);
-      setNaming(EMPTY_NAMING);
     }
 
-    // Open on edit as well as on create. Gating this on `product.naming` hid
-    // the builder for every item entered before SOI1/SOP1 existed — which is
-    // precisely the set of items that needs it, since bringing a legacy name
-    // up to standard is the main reason to open the builder while editing.
+    // Nothing on an edit is built from these: the builder is not shown and the
+    // name is not sent, so the sub-document is only ever assembled at intake.
+    setNaming(EMPTY_NAMING);
     setShowBuilder(true);
 
     setNameIssues(null);
@@ -214,10 +211,9 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       // rest back would be harmless today — the API no-ops a zero delta — but
       // it invites a future field to be written by a form that never offered it.
       //
-      // The name and its parts go only when the builder actually renamed the
-      // item. Sending an unchanged legacy name would put it back through the
-      // convention and refuse the save, so a rack-number fix would first need
-      // somebody to tick "save anyway" about a name they had not touched.
+      // The name is deliberately absent: the form does not let it be changed, and
+      // echoing it back would put a legacy name through the convention on a save
+      // that only meant to fix a shelf label.
       const payload = isEdit
         ? {
             category: form.category,
@@ -226,10 +222,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
             status: form.status,
             image: form.image,
             description: form.description,
-            ...(renamed && {
-              name: form.name,
-              ...(isNamingBlank(naming) ? {} : { naming }),
-            }),
             acknowledgeNaming,
             allowDuplicate,
           }
@@ -296,49 +288,66 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
 
       <form onSubmit={handleSubmit} className="contents">
         <div className="modal-body space-y-4">
-        {/* The naming convention comes first: the name it produces is what
-            every other field on this form hangs off. */}
-        <div>
-          <button
-            type="button"
-            onClick={() => setShowBuilder((open) => !open)}
-            className="btn btn-sm btn-subtle"
-          >
-            {showBuilder ? "Hide" : "Show"} standard name builder (SOI1/SOP1)
-          </button>
-        </div>
+        {/* Intake only. The naming convention comes first there, because the
+            name it produces is what every other field on the form hangs off —
+            but on an edit the name is already settled and not up for changing,
+            so a builder would only offer something this form cannot apply. */}
+        {!isEdit && (
+          <>
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowBuilder((open) => !open)}
+                className="btn btn-sm btn-subtle"
+              >
+                {showBuilder ? "Hide" : "Show"} standard name builder (SOI1/SOP1)
+              </button>
+            </div>
 
-        {showBuilder && (
-          <ItemNameBuilder
-            value={naming}
-            onChange={setNaming}
-            onApply={applyBuiltName}
-            disabled={submitting}
-          />
+            {showBuilder && (
+              <ItemNameBuilder
+                value={naming}
+                onChange={setNaming}
+                onApply={applyBuiltName}
+                disabled={submitting}
+              />
+            )}
+          </>
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2">
             <label className={label}>Product Name *</label>
-            {/* Typed by hand or adopted from the builder above — both work, on
-                an edit as much as on a create. The builder is the guided way to
-                a compliant name, not a gate in front of the field. */}
-            <input
-              type="text"
-              value={form.name}
-              onChange={set("name")}
-              required
-              className={field}
-            />
-            {isEdit && renamed && (
-              <p className="mt-1.5 text-[11px] font-semibold text-brand-700">
-                Renamed from "{product.name}" — saving applies it.
-              </p>
+            {isEdit ? (
+              <>
+                {/* Shown, never typed over. The name is how the catalog, the
+                    issue history and SAP all refer to this item, so it is fixed
+                    at intake rather than left open to a form somebody opened to
+                    correct a rack number. */}
+                <input
+                  type="text"
+                  value={form.name}
+                  readOnly
+                  className={`${field} bg-slate-50 text-slate-600 cursor-not-allowed`}
+                />
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  Set when the item was taken in and not changed here.
+                </p>
+              </>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={set("name")}
+                  required
+                  className={field}
+                />
+                {/* Only worth showing where it can be acted on — which, now that
+                    the name is fixed once saved, is intake and nowhere else. */}
+                <NameComplianceNotice name={form.name} />
+              </>
             )}
-            {/* Only worth showing where it can be acted on: on edit an unchanged
-                legacy name is not held to the rules, so flagging it would be
-                telling the user off for something this form will not touch. */}
-            {(!isEdit || renamed) && <NameComplianceNotice name={form.name} />}
           </div>
 
           {/* --- the editable classification, on both add and edit --- */}

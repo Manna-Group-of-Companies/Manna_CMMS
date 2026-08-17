@@ -96,8 +96,7 @@ class StockRepository {
   /// request; changing one takes effect as soon as this returns.
   ///
   /// Only the fields the edit sheet actually offers are sent — the
-  /// classification and the descriptive ones, plus the name when the SOI1/SOP1
-  /// builder has renamed the item. See [_editableOnUpdate].
+  /// classification and the descriptive ones. See [_editableOnUpdate].
   ///
   /// The rest is dropped rather than echoed back. Posting it unchanged would be
   /// harmless today (the API no-ops a zero delta) but it leaves a request shaped
@@ -105,10 +104,9 @@ class StockRepository {
   /// moving stock by accident. Quantity and store room move real stock; unit and
   /// minimum stock are identity and purchasing figures.
   ///
-  /// The two intake checks apply exactly as they do on a request — 422 (the name
-  /// breaks SOI1/SOP1) and 409 (an item like this already exists) — and are
-  /// answered the same way, by re-sending with [acknowledgeNaming] or
-  /// [allowDuplicate].
+  /// [acknowledgeNaming] and [allowDuplicate] are carried for symmetry with the
+  /// request path. Neither can fire here in practice: the API only re-checks a
+  /// name when the payload sets one, and an edit never does.
   Future<Product> updateProduct({
     required String productId,
     required ProductDraft details,
@@ -128,9 +126,12 @@ class StockRepository {
 
   /// The only product fields an edit from the app may set. Kept next to
   /// [updateProduct] so the allow-list and the reason for it stay together.
+  ///
+  /// `name` and `naming` are deliberately absent. A name is settled when the
+  /// item is taken in — it is what the catalog, the issue history and SAP refer
+  /// to the item by — and the edit sheet shows it read-only, so an edit has no
+  /// business sending one.
   static const _editableOnUpdate = {
-    'name',
-    'naming',
     'category',
     'subCategory',
     'status',

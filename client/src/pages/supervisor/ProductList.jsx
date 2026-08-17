@@ -11,7 +11,6 @@ import ItemNameBuilder, {
   NameComplianceNotice,
   EMPTY_NAMING,
   isNamingBlank,
-  namingFromProduct,
 } from "../../components/ItemNameBuilder";
 import DuplicateWarning, { useDuplicateCheck } from "../../components/DuplicateWarning";
 import {
@@ -95,24 +94,21 @@ const ProductList = () => {
    * The SOI1/SOP1 fields the name is built from (ST-09), kept beside the form
    * because they are saved as their own sub-document rather than as a field.
    *
-   * Offered on an edit as much as on a new item: bringing a legacy name up to
-   * the standard is the main reason to open the builder at all, and most of the
-   * catalog was named before the convention existed.
+   * An intake concern only. A name is settled when the item is taken in — the
+   * catalog, the issue history and SAP all refer to the item by it — so an edit
+   * neither shows the builder nor lets the name be typed over.
    */
   const [naming, setNaming] = useState(EMPTY_NAMING);
   const [showBuilder, setShowBuilder] = useState(true);
 
-  /** True once the builder has produced a name different from the saved one. */
-  const renamed = activeModal === "edit" && productForm.name !== selectedProduct?.name;
-
-  // ST-14 — what the catalog already holds that looks like this. Suppressed on
-  // an edit until the name actually changes, so reopening a product does not
-  // accuse it of duplicating itself.
+  // ST-14 — what the catalog already holds that looks like this. Intake only:
+  // an edit cannot change the name, so it has nothing that could newly collide,
+  // and reopening a product must not accuse it of duplicating itself.
   const { matches: duplicateMatches, checking: checkingDuplicates } = useDuplicateCheck({
     name: productForm.name,
     category: productForm.category,
     excludeId: selectedProduct?._id || "",
-    enabled: activeModal === "add" || renamed,
+    enabled: activeModal === "add",
   });
 
   /** [silent] is used by the background poll: no spinner, no error toast. */
@@ -196,10 +192,9 @@ const ProductList = () => {
       description: product.description || "",
       image: product.image || "",
     });
-    // Seeded from the product's own naming fields when it has them, so the
-    // builder opens showing how the name was put together rather than blank.
-    setNaming(namingFromProduct(product));
-    setShowBuilder(true);
+    // Not carried over: an edit shows neither the builder nor an editable name,
+    // and a stale sub-document must not follow the user into the next add.
+    setNaming(EMPTY_NAMING);
     setActiveModal("edit");
   };
 
@@ -304,24 +299,23 @@ const ProductList = () => {
     // the form no longer shows any of them, so the payload must not carry them
     // either. Echoing them back would be harmless today (the API no-ops a zero
     // delta) but leaves a request shaped to write fields nobody was shown.
+    //
+    // The name and its naming fields are absent for the same reason: the form
+    // does not offer them, and the API re-checks a name whenever either moves —
+    // so echoing an unchanged legacy name back would hold a rack-number fix
+    // against a convention that name predates.
     const details = {
-      name: productForm.name,
       category: productForm.category,
       subCategory: productForm.subCategory,
       status: productForm.status,
       rackNumber: productForm.rackNumber,
       image: productForm.image,
       description: productForm.description,
-      // Sent only alongside a rename. The API re-checks the name whenever the
-      // naming fields move, and an unchanged legacy name would be held to a
-      // convention it predates — so a rack-number fix would first have to be
-      // confirmed past a name nobody touched.
-      ...(renamed && !isNamingBlank(naming) ? { naming } : {}),
     };
 
     try {
       await API.put(`/products/${selectedProduct._id}`, { ...details, ...overrides });
-      showToast(`"${productForm.name}" updated`, "success");
+      showToast(`"${selectedProduct.name}" updated`, "success");
       setActiveModal(null);
       fetchProducts(); // The change is live, so show it.
     } catch (error) {
@@ -685,52 +679,69 @@ const ProductList = () => {
               </div>
 
               <form onSubmit={activeModal === "add" ? handleAddRequest : handleEditProduct} className="p-6 space-y-4">
-                {/* The naming convention comes first: the name it produces is
-                    what every other field on this form hangs off. Offered on an
-                    edit too — bringing a legacy name up to the standard is the
-                    main reason to open it. */}
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowBuilder((open) => !open)}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer"
-                  >
-                    {showBuilder ? "Hide" : "Show"} standard name builder (SOI1/SOP1)
-                  </button>
-                </div>
+                {/* Intake only. On a new item the naming convention comes first,
+                    because the name it produces is what every other field hangs
+                    off; on an edit the name is already settled and cannot be
+                    changed here, so a builder would only offer something this
+                    form has no way to apply. */}
+                {activeModal === "add" && (
+                  <>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setShowBuilder((open) => !open)}
+                        className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer"
+                      >
+                        {showBuilder ? "Hide" : "Show"} standard name builder (SOI1/SOP1)
+                      </button>
+                    </div>
 
-                {showBuilder && (
-                  <ItemNameBuilder
-                    value={naming}
-                    onChange={setNaming}
-                    onApply={(name) => setProductForm((prev) => ({ ...prev, name }))}
-                  />
+                    {showBuilder && (
+                      <ItemNameBuilder
+                        value={naming}
+                        onChange={setNaming}
+                        onApply={(name) => setProductForm((prev) => ({ ...prev, name }))}
+                      />
+                    )}
+                  </>
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Name */}
                   <div className="md:col-span-2">
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Product Name *</label>
-                    <input
-                      type="text"
-                      name="name"
-                      value={productForm.name}
-                      onChange={handleFormChange}
-                      required
-                      placeholder="e.g. 25MM Bearing Deep Groove SS304"
-                      className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
-                    />
-                    {/* ST-10. Held back on an edit that has not renamed
-                        anything: the API does not hold an unchanged legacy name
-                        to the convention, so flagging it here would be a
-                        telling-off about something this save will not touch. */}
-                    {(activeModal === "add" || renamed) && (
-                      <NameComplianceNotice name={productForm.name} />
-                    )}
-                    {renamed && (
-                      <p className="mt-1.5 text-[11px] font-semibold text-brand-700">
-                        Renamed from "{selectedProduct?.name}" — saving applies it.
-                      </p>
+                    {activeModal === "edit" ? (
+                      <>
+                        {/* Shown, never typed over. The name is how the catalog,
+                            the issue history and SAP all refer to this item, so
+                            it is settled at intake rather than left open to a
+                            form somebody opened to correct a rack number. */}
+                        <input
+                          type="text"
+                          value={productForm.name}
+                          readOnly
+                          className="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 border border-slate-200 text-slate-600 cursor-not-allowed focus:outline-none"
+                        />
+                        <p className="mt-1.5 text-[11px] text-slate-500">
+                          Set when the item was taken in and not changed here.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          type="text"
+                          name="name"
+                          value={productForm.name}
+                          onChange={handleFormChange}
+                          required
+                          placeholder="e.g. 25MM Bearing Deep Groove SS304"
+                          className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
+                        />
+                        {/* ST-10 — only worth showing where it can be acted on,
+                            which now that a name is fixed once saved is intake
+                            and nowhere else. */}
+                        <NameComplianceNotice name={productForm.name} />
+                      </>
                     )}
                   </div>
 

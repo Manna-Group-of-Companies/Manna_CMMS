@@ -552,12 +552,9 @@ class _ProductFormState extends State<_ProductForm> {
 
   // ---------------------------------------------------- intake checks (ST-09→14)
 
-  /// Open by default, on an edit as much as on a new item.
-  ///
-  /// This used to be gated on the product already carrying `naming`, which hid
-  /// the builder for every item entered before SOI1/SOP1 existed — precisely
-  /// the set that needs it, since bringing a legacy name up to standard is the
-  /// main reason to open the builder while editing.
+  /// Open by default on a new item. Never shown on an edit: the name is settled
+  /// at intake and cannot be changed from the edit sheet, so a builder there
+  /// would only produce something the sheet has no way to apply.
   bool _showBuilder = true;
 
   /// Debounced checks against the name as it is typed. Both run on the same
@@ -604,10 +601,15 @@ class _ProductFormState extends State<_ProductForm> {
   @override
   void initState() {
     super.initState();
+    // Intake only — an edit shows the name read-only, so there is nothing to
+    // watch and nothing the checks could tell the supervisor to act on.
+    //
     // A listener rather than onChanged: the builder's "Use this name" writes
     // straight to the controller, and that has to be checked too.
-    _name.addListener(_onNameChanged);
-    if (_name.text.trim().isNotEmpty) _scheduleNameChecks();
+    if (!_isEdit) {
+      _name.addListener(_onNameChanged);
+      if (_name.text.trim().isNotEmpty) _scheduleNameChecks();
+    }
     _loadCategories();
     // On an edit the category is already known, so its sub-categories can be
     // fetched straight away rather than waiting for the field to change.
@@ -647,11 +649,6 @@ class _ProductFormState extends State<_ProductForm> {
       }
     }
   }
-
-  /// True once the name differs from the saved one — typed over by hand, or
-  /// adopted from the builder. A rename is the only case where the convention is
-  /// enforced on an edit, so this also gates the compliance hint.
-  bool get _renamed => _isEdit && _name.text.trim() != widget.product!.name;
 
   /// A sub-category belongs to one category, so changing the category reloads
   /// the list and drops a selection that no longer belongs to it.
@@ -700,16 +697,10 @@ class _ProductFormState extends State<_ProductForm> {
       final repository = context.read<StockRepository>();
       try {
         final check = await repository.checkItemName(name: name);
-
-        // Reopening a product must not accuse it of duplicating itself, so the
-        // check only runs once the name has actually changed.
-        final matches = _isEdit && name == widget.product!.name
-            ? const <DuplicateMatch>[]
-            : await repository.findDuplicates(
-                name: name,
-                category: _draft.category,
-                excludeId: widget.product?.id,
-              );
+        final matches = await repository.findDuplicates(
+          name: name,
+          category: _draft.category,
+        );
 
         if (!mounted || ticket != _nameTicket) return;
         setState(() {
@@ -903,69 +894,81 @@ class _ProductFormState extends State<_ProductForm> {
         canSubmit: !_awaitingConfirmation,
         onSubmit: _submit,
         children: [
-          // The naming convention comes first: the name it produces is what
-          // every other field on this form hangs off.
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: _submitting
-                  ? null
-                  : () => setState(() => _showBuilder = !_showBuilder),
-              icon: Icon(
-                _showBuilder ? Icons.expand_less : Icons.auto_fix_high_outlined,
-                size: 17,
-              ),
-              label: Text(
-                '${_showBuilder ? 'Hide' : 'Show'} standard name builder (SOI1/SOP1)',
-              ),
-              style: TextButton.styleFrom(
-                foregroundColor: AppColors.primaryDeep,
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          // Intake only. On a new item the naming convention comes first,
+          // because the name it produces is what every other field hangs off;
+          // an edit cannot change the name at all, so a builder there would
+          // only offer something the sheet has no way to apply.
+          if (!_isEdit) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _submitting
+                    ? null
+                    : () => setState(() => _showBuilder = !_showBuilder),
+                icon: Icon(
+                  _showBuilder ? Icons.expand_less : Icons.auto_fix_high_outlined,
+                  size: 17,
+                ),
+                label: Text(
+                  '${_showBuilder ? 'Hide' : 'Show'} standard name builder (SOI1/SOP1)',
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.primaryDeep,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
               ),
             ),
-          ),
-          if (_showBuilder) ...[
-            const SizedBox(height: 12),
-            ItemNameBuilderCard(
-              naming: _draft.naming,
-              enabled: !_submitting,
-              onApply: (name) => _name.text = name,
-            ),
+            if (_showBuilder) ...[
+              const SizedBox(height: 12),
+              ItemNameBuilderCard(
+                naming: _draft.naming,
+                enabled: !_submitting,
+                onApply: (name) => _name.text = name,
+              ),
+            ],
+            const SizedBox(height: 18),
           ],
-          const SizedBox(height: 18),
           _Field(
             label: 'Product Name',
             required: true,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // Shown but never typed over on an edit. The name is how the
+                // catalog, the issue history and SAP all refer to this item, so
+                // it is settled when the item is taken in rather than left open
+                // to a sheet somebody opened to correct a rack number.
                 TextFormField(
                   controller: _name,
                   validator: _requiredValidator,
-                  decoration: const InputDecoration(
+                  readOnly: _isEdit,
+                  style: _isEdit
+                      ? const TextStyle(color: AppColors.textSecondary)
+                      : null,
+                  decoration: InputDecoration(
                     hintText: 'e.g. 25MM Bearing Deep Groove',
+                    fillColor: _isEdit ? AppColors.surfaceMuted : null,
+                    filled: _isEdit ? true : null,
                   ),
                 ),
-                if (_isEdit && _renamed) ...[
+                if (_isEdit) ...[
                   const SizedBox(height: 6),
-                  Text(
-                    'Renamed from "${widget.product!.name}" — saving applies it.',
-                    style: const TextStyle(
-                      color: AppColors.primaryDeep,
+                  const Text(
+                    'Set when the item was taken in and not changed here.',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
                       fontSize: 11,
-                      fontWeight: FontWeight.w600,
                       height: 1.4,
                     ),
                   ),
                 ],
-                // ST-10 — the verdict on the name as it currently stands. Held
-                // back on an edit that has not renamed anything: the server does
-                // not hold an unchanged legacy name to the rules, so flagging it
-                // would be a telling-off for something this form will not touch.
-                if (_nameCheck != null && (!_isEdit || _renamed)) ...[
+                // ST-10 — the verdict on the name as it currently stands. Only
+                // ever runs at intake now, which is the one place it can still
+                // be acted on.
+                if (_nameCheck != null) ...[
                   const SizedBox(height: 8),
                   NameComplianceHint(check: _nameCheck!),
                 ],
