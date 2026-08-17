@@ -1,6 +1,7 @@
 import IssueHistory from "../models/IssueHistory.js";
 import Product from "../models/Product.js";
 import RestockItem from "../models/RestockItem.js";
+import StockDisposal from "../models/StockDisposal.js";
 import Notification from "../models/Notification.js";
 import { recordMovement } from "../utils/stockLedger.js";
 import { debitAcrossRooms } from "../utils/stockRooms.js";
@@ -92,7 +93,9 @@ export const issueProduct = async (req, res) => {
 
     // Populate product info for the response
     const populatedIssue = await IssueHistory.findById(issue._id)
-      .populate("product", "name code unit storeRoom image")
+      // unitCost rides along so the app can price a scrap before it is booked;
+      // the value actually recorded is snapshotted server-side on the disposal.
+      .populate("product", "name code unit storeRoom image unitCost")
       .populate("supervisor", "name email role");
 
     res.status(201).json({
@@ -122,11 +125,17 @@ export const getIssueHistory = async (req, res) => {
   try {
     const query = req.query.scope === "mine" ? { supervisor: req.user._id } : {};
     if (req.user.role === "Supervisor") {
-      query.returnStatus = { $ne: "Returned" };
+      // An issue drops off the working list once nothing is outstanding —
+      // whether the stock came back, was used up, or was thrown away. Testing
+      // returnStatus alone would strand a fully consumed issue on the list
+      // forever, since it will never be "Returned".
+      Object.assign(query, IssueHistory.OUTSTANDING_FILTER);
     }
 
     const issues = await IssueHistory.find(query)
-      .populate("product", "name code unit storeRoom image")
+      // unitCost rides along so the app can price a scrap before it is booked;
+      // the value actually recorded is snapshotted server-side on the disposal.
+      .populate("product", "name code unit storeRoom image unitCost")
       .populate("supervisor", "name email role")
       .sort({ createdAt: -1 });
 
@@ -162,12 +171,43 @@ export const getIssueHistory = async (req, res) => {
       });
     }
 
+    // The other two ways an issue settles. Same shape of question as returns —
+    // how much, by whom, when — so they are attached the same way, and the row
+    // can account for every piece of an issue that has been closed out.
+    const disposalsByIssue = new Map();
+    const disposals = await StockDisposal.find({
+      sourceIssue: { $in: issues.map((issue) => issue._id) },
+    })
+      .populate("disposedBy", "name email role")
+      .sort({ disposedAt: 1 })
+      .lean();
+
+    for (const row of disposals) {
+      const key = String(row.sourceIssue);
+      if (!disposalsByIssue.has(key)) disposalsByIssue.set(key, []);
+      disposalsByIssue.get(key).push({
+        _id: row._id,
+        disposalNumber: row.disposalNumber,
+        type: row.type,
+        quantity: row.quantity,
+        unitCost: row.unitCost,
+        value: row.value,
+        reason: row.reason,
+        disposedAt: row.disposedAt,
+        // Null once the account is deleted; the UI falls back to "Unknown".
+        disposedBy: row.disposedBy
+          ? { name: row.disposedBy.name, email: row.disposedBy.email, role: row.disposedBy.role }
+          : null,
+      });
+    }
+
     // `isMine` only labels the row as the caller's own — returning is open to
     // every supervisor, so nothing is gated on it.
     res.json(
       issues.map((issue) => ({
         ...issue.toObject(),
         returns: returnsByIssue.get(String(issue._id)) || [],
+        disposals: disposalsByIssue.get(String(issue._id)) || [],
         isMine:
           String(issue.supervisor?._id || issue.supervisor) === String(req.user._id),
       }))

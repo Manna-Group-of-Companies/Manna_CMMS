@@ -37,6 +37,12 @@ const stockMovementSchema = new mongoose.Schema(
         // still validate.
         "RETURN_TO_RESTOCK",
         "MERGE_IN",
+        // Issued stock used up, and issued or Red Stock discarded as
+        // unusable. Both are direction "NONE": the quantity left Main Stock at
+        // issue time and simply never comes back, so the room balances that
+        // `balanceAfter` reports are unchanged by the disposal itself.
+        "CONSUMED",
+        "SCRAPPED",
         "STOCK_IN",
         "STOCK_OUT",
         "STOCK_RETURN",

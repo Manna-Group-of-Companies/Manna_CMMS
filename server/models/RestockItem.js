@@ -37,10 +37,23 @@ const restockItemSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    /**
+     * How much of this batch is still in the Red Stock Room.
+     *
+     * Scrapping out of Red Stock decrements this in place, so the weekly merge
+     * — which reads `quantity` straight off the mergeable items — picks up
+     * only what is actually left without needing to know scrap exists. A batch
+     * scrapped in full lands on 0 and takes the "Scrapped" status, which is not
+     * mergeable. What was scrapped is not lost: the StockDisposal row records
+     * the quantity, the value and the batch it came out of.
+     *
+     * The floor is 0 rather than 1 for that reason; the return paths that
+     * create these all validate an incoming quantity of at least 1 themselves.
+     */
     quantity: {
       type: Number,
       required: true,
-      min: [1, "Returned quantity must be at least 1"],
+      min: [0, "Returned quantity cannot be negative"],
     },
     condition: {
       type: String,
@@ -67,7 +80,14 @@ const restockItemSchema = new mongoose.Schema(
     status: {
       type: String,
       required: true,
-      enum: ["In Red Stock", "Weekly Merge Pending", "Moved to Stock Room"],
+      enum: [
+        "In Red Stock",
+        "Weekly Merge Pending",
+        "Moved to Stock Room",
+        // Discarded straight out of Red Stock without ever being re-shelved.
+        // Terminal, and deliberately absent from MERGEABLE_STATUSES.
+        "Scrapped",
+      ],
       default: "In Red Stock",
     },
     // The issuance this stock came back from. Null for a return that came in

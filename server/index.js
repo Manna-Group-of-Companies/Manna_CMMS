@@ -21,6 +21,7 @@ import mergeRoutes from "./routes/mergeRoutes.js";
 import movementRoutes from "./routes/movementRoutes.js";
 import stockRoomRoutes from "./routes/stockRoomRoutes.js";
 import branchRequestRoutes from "./routes/branchRequestRoutes.js";
+import disposalRoutes from "./routes/disposalRoutes.js";
 
 dotenv.config();
 
@@ -87,6 +88,8 @@ app.use("/api/merge-requests", mergeRoutes);
 app.use("/api/movements", movementRoutes);
 app.use("/api/stock-rooms", stockRoomRoutes);
 app.use("/api/branch-requests", branchRequestRoutes);
+// Consumption and scrap logs, and the scrap value report.
+app.use("/api/disposals", disposalRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
