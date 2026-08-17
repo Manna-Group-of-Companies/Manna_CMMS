@@ -11,6 +11,7 @@ import {
   User,
   Search,
   Layers,
+  GitMerge,
 } from "lucide-react";
 
 const STATUS_TABS = [
@@ -19,6 +20,41 @@ const STATUS_TABS = [
   "Moved to Stock Room",
   "All",
 ];
+
+/**
+ * How a merge came about, as shown beside whoever carried it out.
+ *
+ * The distinction is the point of the column: a supervisor placing their own
+ * returns back is applied on the spot with no approval, while the weekly sweep
+ * is an Admin decision. Both end with stock in a company, and the ledger should
+ * not make them look like the same event.
+ */
+const MERGED_VIA_LABELS = {
+  Supervisor: "Supervisor merge",
+  Scheduled: "Weekly merge (scheduled)",
+  Manual: "Weekly merge (by hand)",
+};
+
+/**
+ * The merge behind one return: where it went, who moved it, how, and when.
+ *
+ * `mergedAt` is stamped on the item as it is credited, so it is the true moment
+ * the stock landed; the request's `reviewedAt` stands in for rows that predate
+ * that field. Nothing here is filled in until the stock has actually moved —
+ * a return sitting inside an open merge has a request but no destination.
+ */
+const mergeInfo = (item) => {
+  const request = item.mergeRequest;
+
+  return {
+    moved: item.status === "Moved to Stock Room",
+    room: item.destinationRoom || request?.destinationRoom || "",
+    requestId: request?.requestId || "",
+    via: request?.createdVia ? MERGED_VIA_LABELS[request.createdVia] : "",
+    by: request?.reviewedBy?.name || request?.requestedBy?.name || "",
+    at: item.mergedAt || request?.reviewedAt || null,
+  };
+};
 
 const getStatusBadge = (status) => {
   switch (status) {
@@ -58,8 +94,11 @@ const PLACEHOLDER_IMAGE =
 /**
  * The Red Stock Room — everything supervisors have handed back.
  *
- * Returns land here with no approval step, so this screen is a read-only
- * ledger: what came back, who returned it, and where it has got to since.
+ * Returns land here with no approval step, and a supervisor can merge their own
+ * back into a company without asking, so this screen is a read-only ledger and
+ * the Admin's record of both halves: what came back, who returned it, and — once
+ * it has left the room — which company took it, who merged it, by which route
+ * and at what time.
  */
 const RedStockRoom = () => {
   const { showToast } = useNotifications();
@@ -109,11 +148,21 @@ const RedStockRoom = () => {
         item.restockNumber,
         item.returnedBy?.name,
         item.department,
+        // Searchable by where it ended up and by the merge that took it there,
+        // which is how a merged row is looked for once it has left the room.
+        item.destinationRoom,
+        item.mergeRequest?.requestId,
+        item.mergeRequest?.reviewedBy?.name,
       ]
         .filter(Boolean)
         .some((field) => String(field).toLowerCase().includes(term));
     });
   }, [items, statusFilter, search]);
+
+  // Only where a merge can have happened. On the two Red Stock tabs nothing has
+  // moved yet by definition, and three columns of "—" would just push the rest
+  // of the row off the side.
+  const showMergeColumns = statusFilter === "Moved to Stock Room" || statusFilter === "All";
 
   const summaryTiles = [
     {
@@ -262,82 +311,143 @@ const RedStockRoom = () => {
                   <th className="py-4 px-6">Return Date</th>
                   <th className="py-4 px-6">Issued From</th>
                   <th className="py-4 px-6 text-center">Status</th>
+                  {/* The merge, spelled out: where the stock went, who put it
+                      there and by which route, and when it landed. */}
+                  {showMergeColumns && (
+                    <>
+                      <th className="py-4 px-6">Merged Into</th>
+                      <th className="py-4 px-6">Merged By</th>
+                      <th className="py-4 px-6">Merged On</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-slate-700">
-                {filteredItems.map((item) => (
-                  <tr key={item._id} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={item.product?.image || PLACEHOLDER_IMAGE}
-                          alt={item.productName}
-                          className="w-9 h-9 rounded-lg object-cover border border-slate-200"
-                        />
-                        <div>
-                          <div className="font-bold text-slate-900">{item.productName}</div>
-                          <div className="text-[10px] font-mono text-brand-700">
-                            {item.restockNumber} • {item.productCode || "—"}
+                {filteredItems.map((item) => {
+                  const merge = mergeInfo(item);
+
+                  return (
+                    <tr key={item._id} className="hover:bg-slate-50 transition-colors">
+                      <td className="py-4 px-6">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={item.product?.image || PLACEHOLDER_IMAGE}
+                            alt={item.productName}
+                            className="w-9 h-9 rounded-lg object-cover border border-slate-200"
+                          />
+                          <div>
+                            <div className="font-bold text-slate-900">{item.productName}</div>
+                            <div className="text-[10px] font-mono text-brand-700">
+                              {item.restockNumber} • {item.productCode || "—"}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="py-4 px-6 text-center">
-                      <span className="bg-rose-500/10 text-rose-600 border border-rose-500/20 px-2.5 py-0.5 rounded text-xs font-bold">
-                        {item.quantity} {item.unit}
-                      </span>
-                      <span
-                        className={`block mt-1 mx-auto w-fit px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getConditionBadge(
-                          item.condition
-                        )}`}
-                      >
-                        {item.condition}
-                      </span>
-                    </td>
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-2">
-                        <div className="h-7 w-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 border border-slate-200">
-                          <User className="h-3.5 w-3.5" />
-                        </div>
-                        <div>
-                          <div className="font-semibold text-slate-800 text-xs">
-                            {item.returnedBy?.name || "Unknown"}
-                          </div>
-                          <div className="text-[10px] text-slate-500">{item.department}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4 px-6 text-xs text-slate-600">
-                      <span className="flex items-center gap-1.5">
-                        <Calendar className="h-3.5 w-3.5 opacity-65" />
-                        {formatDate(item.returnDate)}
-                      </span>
-                    </td>
-                    <td className="py-4 px-6 text-xs text-slate-600">
-                      <span className="flex items-center gap-1.5">
-                        <Building2 className="h-3.5 w-3.5 opacity-65" />
-                        {item.sourceRoom || item.product?.storeRoom || "—"}
-                      </span>
-                      <span className="block text-[10px] text-slate-400 mt-0.5 font-mono">
-                        {item.sourceIssue?.issueNumber || ""}
-                      </span>
-                    </td>
-                    <td className="py-4 px-6 text-center">
-                      <span
-                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${getStatusBadge(
-                          item.status
-                        )}`}
-                      >
-                        {item.status}
-                      </span>
-                      {item.destinationRoom && (
-                        <span className="block mt-1 text-[10px] text-emerald-600 font-semibold">
-                          → {item.destinationRoom}
+                      </td>
+                      <td className="py-4 px-6 text-center">
+                        <span className="bg-rose-500/10 text-rose-600 border border-rose-500/20 px-2.5 py-0.5 rounded text-xs font-bold">
+                          {item.quantity} {item.unit}
                         </span>
+                        <span
+                          className={`block mt-1 mx-auto w-fit px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getConditionBadge(
+                            item.condition
+                          )}`}
+                        >
+                          {item.condition}
+                        </span>
+                      </td>
+                      <td className="py-4 px-6">
+                        <div className="flex items-center gap-2">
+                          <div className="h-7 w-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 border border-slate-200">
+                            <User className="h-3.5 w-3.5" />
+                          </div>
+                          <div>
+                            <div className="font-semibold text-slate-800 text-xs">
+                              {item.returnedBy?.name || "Unknown"}
+                            </div>
+                            <div className="text-[10px] text-slate-500">{item.department}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-4 px-6 text-xs text-slate-600">
+                        <span className="flex items-center gap-1.5">
+                          <Calendar className="h-3.5 w-3.5 opacity-65" />
+                          {formatDate(item.returnDate)}
+                        </span>
+                      </td>
+                      <td className="py-4 px-6 text-xs text-slate-600">
+                        <span className="flex items-center gap-1.5">
+                          <Building2 className="h-3.5 w-3.5 opacity-65" />
+                          {item.sourceRoom || item.product?.storeRoom || "—"}
+                        </span>
+                        <span className="block text-[10px] text-slate-400 mt-0.5 font-mono">
+                          {item.sourceIssue?.issueNumber || ""}
+                        </span>
+                      </td>
+                      <td className="py-4 px-6 text-center">
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${getStatusBadge(
+                            item.status
+                          )}`}
+                        >
+                          {item.status}
+                        </span>
+                        {/* Where it went has its own columns now; what belongs
+                            here is the merge still holding an unmoved return. */}
+                        {!merge.moved && merge.requestId && (
+                          <span className="block mt-1 text-[10px] font-mono text-indigo-600">
+                            in {merge.requestId}
+                          </span>
+                        )}
+                      </td>
+                      {showMergeColumns && (
+                        <>
+                          <td className="py-4 px-6 text-xs">
+                            {merge.moved ? (
+                              <>
+                                <span className="flex items-center gap-1.5 font-semibold text-emerald-600">
+                                  <Building2 className="h-3.5 w-3.5 opacity-70" />
+                                  {merge.room || "—"}
+                                </span>
+                                {merge.requestId && (
+                                  <span className="block text-[10px] font-mono text-slate-400 mt-0.5">
+                                    {merge.requestId}
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
+                          <td className="py-4 px-6 text-xs">
+                            {merge.moved && (merge.by || merge.via) ? (
+                              <>
+                                <span className="flex items-center gap-1.5 font-semibold text-slate-800">
+                                  <GitMerge className="h-3.5 w-3.5 opacity-70" />
+                                  {merge.by || "System"}
+                                </span>
+                                <span className="block text-[10px] text-slate-500 mt-0.5">
+                                  {merge.via || "Merge"}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
+                          <td className="py-4 px-6 text-xs text-slate-600">
+                            {merge.moved && merge.at ? (
+                              <span className="flex items-center gap-1.5">
+                                <Calendar className="h-3.5 w-3.5 opacity-65" />
+                                {formatDate(merge.at)}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
+                        </>
                       )}
-                    </td>
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

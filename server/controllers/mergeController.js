@@ -4,7 +4,12 @@ import Product from "../models/Product.js";
 import StockRoom from "../models/StockRoom.js";
 import Notification from "../models/Notification.js";
 import { recordMovement } from "../utils/stockLedger.js";
-import { creditRoom, resolveRoom, roomBreakdownFor } from "../utils/stockRooms.js";
+import {
+  creditRoom,
+  resolveRoom,
+  roomBreakdownFor,
+  fallbackRoomFor,
+} from "../utils/stockRooms.js";
 import {
   runWeeklyMerge,
   requestSupervisorMerge,
@@ -13,6 +18,7 @@ import {
   openMergeRequest,
   eligibleRedStock,
   nextMergeRunAt,
+  withdrawMerge,
 } from "../utils/weeklyMerge.js";
 
 /**
@@ -50,17 +56,21 @@ export const createWeeklyMergeRequest = async (req, res) => {
  * @route   POST /api/merge-requests/mine
  * @access  Private (Supervisor)
  *
- * Applied immediately — this no longer waits on the Admin. A supervisor is
- * returning stock they issued themselves, to the room it came from, so there
- * was nothing for an approval to decide.
+ * Applied immediately, and never handed to the Admin. A supervisor is returning
+ * stock they issued themselves, to the room it came from, so there was nothing
+ * for an approval to decide — the quantity is on the shelf and countable by the
+ * time this responds.
  *
  * Each line goes to its product's home room, since no one is asked to name a
- * destination. The MergeRequest is still written and closed as Approved, so the
- * merge keeps its request id, its ledger entries and its place in the Admin's
- * history — the record is unchanged, only the waiting is gone.
+ * destination, falling back to the room the stock was issued out of for a
+ * product that carries none. The MergeRequest is still written and closed as
+ * Approved, so the merge keeps its request id, its ledger entries and its place
+ * in the Admin's history — the record is unchanged, only the waiting is gone.
  *
- * The Admin's weekly merge is untouched and still needs approval: it sweeps
- * every supervisor's returns at once, and that one does need a decision.
+ * The Admin's weekly merge still needs approval: it sweeps every supervisor's
+ * returns at once, and that one does need a decision. It cannot lock a
+ * supervisor out of their own stock, though — `requestSupervisorMerge` takes
+ * their returns back out of an open weekly merge first.
  */
 export const createSupervisorMergeRequest = async (req, res) => {
   const { comment, restockItemIds } = req.body || {};
@@ -90,25 +100,18 @@ export const createSupervisorMergeRequest = async (req, res) => {
     const rooms = [...new Set(merged.map((entry) => entry.destinationRoom))];
     const quantity = merged.reduce((sum, entry) => sum + entry.quantity, 0);
 
-    // Nothing could be placed, so the merge stays on the Admin's desk after all
-    // — they can name a room the products themselves do not carry.
+    // Nothing could be placed, which now means one thing only: the install has
+    // no active store room to place it in. There is no destination an approval
+    // could pick either, so the request is withdrawn rather than parked on the
+    // Admin's desk — the stock stays in Red Stock, mergeable again the moment a
+    // room exists.
     if (!closed) {
-      await Notification.create({
-        message:
-          `${req.user.name} asked to merge ${request.totalQuantity} pcs from Red Stock, ` +
-          `but no home store room is set on ${skipped
-            .map((entry) => entry.productName)
-            .join(", ")} — choose a destination (${request.requestId})`,
-        type: "MERGE_REQUESTED",
-      });
+      await withdrawMerge(request);
 
-      return res.status(201).json({
+      return res.status(409).json({
         message:
-          `No home store room is set on ${skipped
-            .map((entry) => entry.productName)
-            .join(", ")}, so ${request.requestId} was sent to the Admin to place.`,
-        mergeRequest: result.mergeRequest,
-        merged,
+          "There is no active store room to merge into. Ask the Admin to add one, " +
+          "then merge again — your stock is still in Red Stock.",
         skipped,
       });
     }
@@ -116,7 +119,12 @@ export const createSupervisorMergeRequest = async (req, res) => {
     await Notification.create({
       message:
         `${req.user.name} merged ${quantity} pcs across ${merged.length} returned ` +
-        `item(s) from Red Stock into ${rooms.join(", ")} (${request.requestId})`,
+        `item(s) from Red Stock into ${rooms.join(", ")} (${request.requestId})` +
+        // The weekly merge had claimed some of this, so say so: the Admin's
+        // pending request is smaller than when they last looked at it.
+        (result.reclaimedFrom?.length
+          ? `, taken back out of ${result.reclaimedFrom.join(", ")}`
+          : ""),
       type: "MERGE_APPROVED",
     });
 
@@ -129,9 +137,10 @@ export const createSupervisorMergeRequest = async (req, res) => {
     // stock that never moved.
     const message = skipped.length
       ? `Merged ${quantity} pcs into ${rooms.join(", ")}. ${skipped.length} item(s) ` +
-        `left in Red Stock — no home store room set on ` +
+        `stayed in Red Stock — no store room could be found for ` +
         `${skipped.map((entry) => entry.productName).join(", ")}.`
-      : `Merged ${quantity} pcs across ${merged.length} item(s) into ${rooms.join(", ")}.`;
+      : `Merged ${quantity} pcs across ${merged.length} item(s) into ${rooms.join(", ")}. ` +
+        `It is in stock now.`;
 
     res.status(201).json({ message, mergeRequest: populated, merged, skipped });
   } catch (error) {
@@ -326,9 +335,11 @@ export const getMergeRequestById = async (req, res) => {
  * idempotency guard, the same movements, the same destination rules.
  *
  * A line's destination is the first of: an explicit per-line override,
- * [defaultRoom], or the product's own home room. That last fallback is what
- * lets a merge run without anyone naming a room, which is how the Supervisor's
- * direct path works — there is no Admin to ask.
+ * [defaultRoom], the product's own home room, or — for a product carrying no
+ * home room — the room the stock came out of, by way of `fallbackRoomFor`.
+ * Those last two are what let a merge run without anyone naming a room, which
+ * is how the Supervisor's direct path works: there is no Admin to ask, so
+ * every line has to be placeable on its own.
  */
 const applyMerge = async ({
   request,
@@ -360,10 +371,12 @@ const applyMerge = async ({
     const room =
       (override ? await resolveRoom(override) : null) ||
       defaultRoom ||
-      (await resolveRoom(product.storeRoom));
+      (await resolveRoom(product.storeRoom)) ||
+      (await fallbackRoomFor({ product, sourceRoom: restockItem.sourceRoom }));
 
-    // Nowhere to put it: leave the line claimed rather than crediting a room
-    // nobody chose, and report it so the caller can say what was left behind.
+    // Nowhere to put it — no active store room exists at all. Leave the line
+    // claimed rather than inventing a room, and report it so the caller can say
+    // what was left behind.
     if (!room) {
       skipped.push({ productName: product.name, quantity: line.quantity });
       continue;

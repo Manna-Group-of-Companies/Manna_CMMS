@@ -185,6 +185,65 @@ export const resolveRoom = async (room) => {
 export const homeRoomFor = (product) => resolveRoom(product.storeRoom);
 
 /**
+ * Resolves a room that already exists, and never creates one.
+ *
+ * `resolveRoom` creates an unknown name, which is what a product's own
+ * `storeRoom` needs — but the wrong thing for a value that was only ever a
+ * label. An issue drawn from two rooms leaves `sourceRoom` as "A, B", and
+ * putting that name through `resolveRoom` would open a third room called
+ * "A, B" and start splitting stock into it.
+ */
+export const existingRoom = async (room) => {
+  if (!room) return null;
+  if (room instanceof mongoose.Model || room?._id) return room;
+
+  const value = String(room).trim();
+  if (!value) return null;
+
+  if (mongoose.Types.ObjectId.isValid(value)) {
+    const byId = await StockRoom.findById(value);
+    if (byId) return byId;
+  }
+
+  return StockRoom.findOne({ name: currentRoomName(value) });
+};
+
+/**
+ * Somewhere to put stock when nothing has named a room and the product carries
+ * no home room either — the last link in the merge's destination chain.
+ *
+ * This is what keeps a supervisor's merge off the Admin's desk: the stock is
+ * theirs, they are putting it back, and a missing `storeRoom` on a legacy
+ * product is no reason to make them wait for someone to choose a room. In
+ * preference order:
+ *
+ *   1. the room the stock was issued out of — it came from there, so it goes
+ *      back there. Read from the return's `sourceRoom` snapshot, which may
+ *      name several rooms when the issue was drawn across them;
+ *   2. wherever this product already keeps stock, fullest room first, so a
+ *      product's quantity stays in one place rather than scattering;
+ *   3. any active room at all, so the stock is on a shelf and countable. An
+ *      Admin can move it later; leaving it in Red Stock helps nobody.
+ *
+ * Null only when the install has no active room whatsoever, which
+ * `ensureDefaultRooms` makes sure is not the case on a normal boot.
+ */
+export const fallbackRoomFor = async ({ product, sourceRoom = "" }) => {
+  for (const name of String(sourceRoom || "").split(",")) {
+    const room = await existingRoom(name);
+    if (room?.isActive) return room;
+  }
+
+  const rows = await StockRoomInventory.find({ product: product._id, quantity: { $gt: 0 } })
+    .populate("stockRoom", "name isActive")
+    .sort({ quantity: -1 });
+  const held = rows.find((row) => row.stockRoom?.isActive);
+  if (held) return held.stockRoom;
+
+  return StockRoom.findOne({ isActive: true }).sort({ createdAt: 1 });
+};
+
+/**
  * Recomputes `Product.quantity` as the sum of its room rows and saves it.
  * Returns the new total.
  */

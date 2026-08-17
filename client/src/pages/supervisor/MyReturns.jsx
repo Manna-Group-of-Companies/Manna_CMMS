@@ -15,6 +15,16 @@ import {
 const STATUS_TABS = ["All", "In Red Stock", "Weekly Merge Pending", "Moved to Stock Room"];
 
 /**
+ * Returns of the caller's own this screen will offer to merge.
+ *
+ * "Weekly Merge Pending" is in here because a supervisor is never blocked by the
+ * Admin's sweep: the server takes their returns back out of an open weekly merge
+ * and applies their merge on the spot. Leaving it out would grey the button
+ * out — the one moment they most need it — over a claim the server gives up.
+ */
+const MERGEABLE_STATUSES = ["In Red Stock", "Weekly Merge Pending"];
+
+/**
  * The whole Red Stock Room — every supervisor's returns, what came back, who
  * returned it and when. A return needs no approval, it is in the room straight
  * away, so this screen tracks how far each one has moved through the merge
@@ -117,29 +127,32 @@ const MyReturns = () => {
   const inRedStock = items.filter((item) => item.status !== "Moved to Stock Room").length;
   const myItemCount = items.filter((item) => item.isMine).length;
 
-  // What a merge request would ask for: the caller's own Red Stock not already
-  // inside one. Someone else's returns are visible here but not mergeable —
+  // What a merge would cover: the caller's own returns still in the Red Stock
+  // Room. Someone else's returns are visible here but not mergeable —
   // `requestSupervisorMerge` filters on `returnedBy` server-side.
-  const awaiting = items.filter((item) => item.isMine && item.status === "In Red Stock");
+  const awaiting = items.filter(
+    (item) => item.isMine && MERGEABLE_STATUSES.includes(item.status)
+  );
   const awaitingQuantity = awaiting.reduce((sum, item) => sum + item.quantity, 0);
 
-  // A supervisor's own merge applies on the spot, so this is normally just the
-  // last one. Pending is still possible: a product with no home store room has
-  // nowhere to go, and that merge does fall back to the Admin.
+  // A supervisor's own merge applies on the spot, so this is the last one and it
+  // is Approved. Pending only ever means a row an older server left behind,
+  // which the Admin still has to place.
   const latestMerge = merges.find((merge) => merge.status === "Pending Approval") || merges[0];
 
   const mergeSummary = (merge) => {
     if (merge.status === "Approved") {
       return merge.destinationRoom
-        ? `Merged into ${merge.destinationRoom}`
-        : "Merged into a store room";
+        ? `Merged into ${merge.destinationRoom} — in stock now`
+        : "Merged into a store room — in stock now";
     }
     if (merge.status === "Rejected") {
       return merge.rejectionReason
         ? `Rejected: ${merge.rejectionReason}`
         : "Rejected — your stock stays in Red Stock";
     }
-    // Only reached when no home store room could be found for a product.
+    // Older servers held a supervisor's merge for the Admin; nothing raised
+    // here reaches this state now.
     return "Waiting for the Admin to choose a store room";
   };
 

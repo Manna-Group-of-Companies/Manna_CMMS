@@ -271,12 +271,110 @@ export const runWeeklyMerge = async ({
 };
 
 /**
+ * Releases everything a merge request is still holding and deletes the request.
+ *
+ * For a request that turned out to cover nothing — no room to place it in, or
+ * every line taken back by the supervisor who returned it. The stock never left
+ * Red Stock, so there is no movement to unwind; keeping the empty request would
+ * only leave the Admin a decision with nothing behind it. `raiseMerge` does the
+ * same when it fails to claim anything.
+ */
+export const withdrawMerge = async (request) => {
+  await RestockItem.updateMany(
+    { mergeRequest: request._id, status: "Weekly Merge Pending" },
+    { status: "In Red Stock", mergeRequest: null }
+  );
+  // Guarded, so an approval that landed in between keeps its record rather than
+  // having it deleted out from under it.
+  await MergeRequest.deleteOne({ _id: request._id, status: "Pending Approval" });
+};
+
+/**
+ * Takes [user]'s own returns back out of any weekly merge still waiting on the
+ * Admin, so they can merge them themselves.
+ *
+ * Without this the weekly sweep decides who may place stock: it claims
+ * *everything* in Red Stock, and from that moment a supervisor's own returns
+ * could only reach a store room by the Admin approving them. Their own stock,
+ * going back to the room it came from, waiting on someone else. So the claim is
+ * given up instead — the supervisor's merge applies immediately and the Admin's
+ * request shrinks to what is left.
+ *
+ * The status guard sits in the update filter, so an approval landing at the same
+ * moment simply wins: it moves the item, this reclaim then matches nothing, and
+ * the quantity cannot be credited twice either way.
+ *
+ * Returns the request ids that gave stock up, for the caller to report.
+ */
+const reclaimFromWeeklyMerge = async ({ user, restockItemIds = null }) => {
+  const open = await MergeRequest.find({ ...WEEKLY_CYCLE, status: "Pending Approval" });
+  const reclaimedFrom = [];
+
+  for (const request of open) {
+    const mine = {
+      mergeRequest: request._id,
+      status: "Weekly Merge Pending",
+      returnedBy: user._id,
+    };
+    if (Array.isArray(restockItemIds) && restockItemIds.length > 0) {
+      mine._id = { $in: restockItemIds };
+    }
+
+    const claimed = await RestockItem.find(mine).select("_id");
+    if (claimed.length === 0) continue;
+
+    await RestockItem.updateMany(mine, { status: "In Red Stock", mergeRequest: null });
+
+    // Only what this actually released — an approval may have taken some of it
+    // first, and those lines still belong to the request.
+    const released = await RestockItem.find({
+      _id: { $in: claimed.map((item) => item._id) },
+      status: { $in: RestockItem.MERGEABLE_STATUSES },
+      mergeRequest: null,
+    }).select("_id");
+    if (released.length === 0) continue;
+
+    const releasedIds = new Set(released.map((item) => String(item._id)));
+    // Plain objects: these are sub-documents of the array being replaced, and
+    // handing them straight back leaves the cast depending on the array they
+    // came from.
+    const remaining = request.items
+      .filter((line) => !releasedIds.has(String(line.restockItem)))
+      .map((line) => (line.toObject ? line.toObject() : line));
+    reclaimedFrom.push(request.requestId);
+
+    if (remaining.length === 0) {
+      await withdrawMerge(request);
+      continue;
+    }
+
+    // A field update under a status guard rather than saving the document back:
+    // the copy in hand was read before the reclaim, so writing all of it would
+    // undo an approval that landed in the meantime.
+    await MergeRequest.updateOne(
+      { _id: request._id, status: "Pending Approval" },
+      {
+        items: remaining,
+        itemCount: remaining.length,
+        totalQuantity: remaining.reduce((sum, line) => sum + line.quantity, 0),
+      }
+    );
+  }
+
+  return reclaimedFrom;
+};
+
+/**
  * Claims a Supervisor's own Red Stock into a merge request, ready to be applied.
  *
  * Only their own returns are ever claimed, so two supervisors can merge at once
  * and neither blocks the scheduler. This writes and claims but does not move
  * anything — `createSupervisorMergeRequest` applies the result immediately, so a
- * supervisor no longer waits on the Admin.
+ * supervisor never waits on the Admin.
+ *
+ * Anything of theirs the weekly sweep has already claimed is taken back first,
+ * which is what stops that sweep from turning their own stock into an Admin
+ * decision.
  *
  * [restockItemIds] narrows the merge to specific returns; omit it to take
  * everything the supervisor has sitting in Red Stock.
@@ -290,6 +388,8 @@ export const requestSupervisorMerge = async ({
   if (!user?._id) {
     return { created: false, reason: "A supervisor is required to raise this merge", mergeRequest: null };
   }
+
+  const reclaimedFrom = await reclaimFromWeeklyMerge({ user, restockItemIds });
 
   const filter = {
     status: { $in: RestockItem.MERGEABLE_STATUSES },
@@ -305,13 +405,14 @@ export const requestSupervisorMerge = async ({
       created: false,
       reason: "You have nothing in Red Stock to merge.",
       mergeRequest: null,
+      reclaimedFrom,
     };
   }
 
   // No notification here: the caller applies this merge straight away and
   // announces what actually moved, so a "please approve" notice would be both
   // wrong and duplicated.
-  return raiseMerge({
+  const result = await raiseMerge({
     candidates,
     user,
     now,
@@ -319,6 +420,8 @@ export const requestSupervisorMerge = async ({
     createdVia: "Supervisor",
     notify: null,
   });
+
+  return { ...result, reclaimedFrom };
 };
 
 /**

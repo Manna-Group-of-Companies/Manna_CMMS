@@ -1208,11 +1208,13 @@ class MergeRequestSummary {
   bool get isApproved => status == 'Approved';
   bool get isRejected => status == 'Rejected';
 
-  /// What the supervisor needs to read off the card in one line.
+  /// What the supervisor needs to read off the card in one line. A merge they
+  /// raised is applied as it is raised, so it reads as Approved from the start;
+  /// the waiting line is only ever a row an older server left behind.
   String get summary => switch (status) {
         'Approved' => destinationRoom.isEmpty
-            ? 'Merged into a company'
-            : 'Merged into $destinationRoom',
+            ? 'Merged into a company — in stock now'
+            : 'Merged into $destinationRoom — in stock now',
         'Rejected' => rejectionReason.isEmpty
             ? 'Rejected — your stock stays in Red Stock'
             : 'Rejected: $rejectionReason',
@@ -1296,6 +1298,12 @@ class RestockRecord {
 
   /// Claimed by the open weekly merge, waiting on the Admin.
   bool get inWeeklyMerge => status == 'Weekly Merge Pending';
+
+  /// Still in the Red Stock Room, so the supervisor who returned it can merge
+  /// it themselves. A weekly claim does not take that away: the server releases
+  /// its own hold on their returns and applies their merge immediately, so the
+  /// Admin's sweep cannot leave them waiting on stock they can place.
+  bool get canMerge => awaitingMerge || inWeeklyMerge;
 
   /// Where this quantity landed, or will land once a merge is approved.
   String get destinationStoreRoom =>

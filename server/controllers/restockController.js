@@ -81,8 +81,8 @@ export const returnIssuedStock = async (req, res) => {
       issue.returnedQuantity >= issue.quantity ? "Returned" : "Partially Returned";
     await issue.save();
 
-    // The store rooms are deliberately untouched — the stock sits
-    // in Red Stock until an approved weekly merge moves it.
+    // The store rooms are deliberately untouched — the stock sits in Red Stock
+    // until it is merged, which the returning supervisor can do themselves.
     await recordMovement({
       product,
       type: "RETURN_TO_RED_STOCK",
@@ -90,7 +90,7 @@ export const returnIssuedStock = async (req, res) => {
       quantity: returnQty,
       reference: restockItem.restockNumber,
       performedBy: req.user._id,
-      note: `Returned from ${issue.issueNumber} into Red Stock; awaiting the weekly merge`,
+      note: `Returned from ${issue.issueNumber} into Red Stock; awaiting a merge`,
       fromRoom: restockItem.sourceRoom,
       toRoom: "Red Stock Room",
     });
@@ -145,7 +145,19 @@ export const getRestockItems = async (req, res) => {
       .populate("product", "name code unit storeRoom image")
       .populate("returnedBy", "name email role")
       .populate("sourceIssue", "issueNumber recipient sourceRoom")
-      .populate("mergeRequest", "requestId status weekKey destinationRoom")
+      // Deep enough to say how each merge happened, not just that one did:
+      // `createdVia` separates a supervisor placing their own returns from the
+      // Admin's weekly sweep, and `reviewedBy` is whoever actually moved it —
+      // the same supervisor on their own merge, the approving Admin on the
+      // weekly one. The ledger reads those out per row.
+      .populate({
+        path: "mergeRequest",
+        select: "requestId status weekKey destinationRoom createdVia reviewedAt",
+        populate: [
+          { path: "requestedBy", select: "name role" },
+          { path: "reviewedBy", select: "name role" },
+        ],
+      })
       .sort({ createdAt: -1 });
 
     // Weekly merge eligibility is a property of the status, so it is derived

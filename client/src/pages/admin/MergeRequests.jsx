@@ -304,10 +304,23 @@ const MergeRequests = () => {
                       </div>
                     </td>
                     <td className="py-4 px-6 text-xs text-slate-600">
+                      {/* Once resolved this is the moment the stock moved, which
+                          is not when the merge was raised — a supervisor's own
+                          merge is both at once, the weekly one rarely is. */}
                       <span className="flex items-center gap-1.5">
                         <Calendar className="h-3.5 w-3.5 opacity-65" />
-                        {formatDate(req.requestedAt)}
+                        {formatDate(req.reviewedAt || req.requestedAt)}
                       </span>
+                      {req.reviewedAt && (
+                        <span className="block text-[10px] text-slate-400 mt-0.5">
+                          raised {formatDate(req.requestedAt)}
+                        </span>
+                      )}
+                      {req.reviewedBy?.name && (
+                        <span className="block text-[10px] text-slate-500 mt-0.5">
+                          by {req.reviewedBy.name}
+                        </span>
+                      )}
                     </td>
                     <td className="py-4 px-6 text-center">
                       <span

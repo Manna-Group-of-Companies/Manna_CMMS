@@ -122,16 +122,14 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
   /// they raise, so everything about selecting and merging counts those.
   List<RestockRecord> get _mine => _items.where((item) => item.isMine).toList();
 
-  int get _awaitingMerge =>
-      _mine.where((item) => item.awaitingMerge).length;
+  int get _awaitingMerge => _mine.where((item) => item.canMerge).length;
 
   /// Nothing held: the merge covers everything in Red Stock.
   bool get _selecting => _selected.isNotEmpty;
 
   /// The returns the next merge request would carry.
   List<RestockRecord> get _mergeable => _mine
-      .where((item) =>
-          item.awaitingMerge && (!_selecting || _selected.contains(item.id)))
+      .where((item) => item.canMerge && (!_selecting || _selected.contains(item.id)))
       .toList();
 
   /// How much that is, which is what the button offers to send.
@@ -139,14 +137,14 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
       _mergeable.fold(0, (sum, item) => sum + item.quantity);
 
   /// Holding a return picks it out; holding or tapping again puts it back.
-  /// Only Red Stock can be picked — anything already in a merge, or moved, or
-  /// returned by another supervisor, is not this supervisor's to send.
+  /// Only the Red Stock Room can be picked — anything already moved, or returned
+  /// by another supervisor, is not this supervisor's to merge.
   void _toggle(RestockRecord item) {
     if (!item.isMine) {
       Toast.error('Only the supervisor who returned this can merge it');
       return;
     }
-    if (!item.awaitingMerge) {
+    if (!item.canMerge) {
       Toast.error('Only stock still in Red Stock can be merged');
       return;
     }
@@ -155,12 +153,13 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
     });
   }
 
-  /// What to report back: the merge still on the Admin's desk, or failing that
-  /// the outcome of the last one raised.
+  /// What to report back: the outcome of the last merge raised. A pending one is
+  /// preferred only because an older server could still leave one waiting.
   MergeRequestSummary? get _latestMerge =>
       _merges.where((merge) => merge.isPending).firstOrNull ?? _merges.firstOrNull;
 
-  /// Confirms, then puts the request on the Admin's desk. Nothing moves here.
+  /// Confirms, then merges. The stock is in its company by the time this
+  /// returns — there is nothing left for the Admin to approve.
   Future<void> _requestMerge() async {
     final picked = _mergeable;
     if (picked.isEmpty) return;
@@ -283,9 +282,7 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
                 selectable: _awaitingMerge,
                 onSelectAll: () => setState(() => _selected
                   ..clear()
-                  ..addAll(_mine
-                      .where((item) => item.awaitingMerge)
-                      .map((item) => item.id))),
+                  ..addAll(_mine.where((item) => item.canMerge).map((item) => item.id))),
                 onClear: () => setState(_selected.clear),
               ),
               if (_latestMerge case final merge?) ...[
@@ -366,7 +363,7 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
         AppTableColumn('Status', width: 82, center: true),
       ],
       cellsOf: (context, item) {
-        final pickable = item.isMine && item.awaitingMerge;
+        final pickable = item.isMine && item.canMerge;
 
         return [
           Row(
@@ -581,8 +578,9 @@ class _SelectionBar extends StatelessWidget {
   }
 }
 
-/// Where the supervisor's last merge request stands. The Admin owns the
-/// decision, so this is the only place the outcome shows up unprompted.
+/// Where the supervisor's last merge stands: which company it went into, and
+/// that the stock is there now. Their own merges apply as they are raised, so
+/// this reports an outcome rather than a decision someone else still owes them.
 class _MergeStatusLine extends StatelessWidget {
   const _MergeStatusLine({required this.merge});
 

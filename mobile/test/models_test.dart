@@ -282,7 +282,12 @@ void main() {
       });
 
       expect(item.mergeRequestId, 'MERGE-202608-001');
-      expect(item.awaitingMerge, isFalse, reason: 'already locked to a merge');
+      expect(item.awaitingMerge, isFalse, reason: 'claimed by an open merge');
+      expect(
+        item.canMerge,
+        isTrue,
+        reason: 'the weekly claim is given up when the supervisor merges',
+      );
       expect(item.destinationStoreRoom, isEmpty, reason: 'product not populated');
     });
   });
