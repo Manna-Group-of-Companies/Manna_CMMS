@@ -709,7 +709,10 @@ const ProductList = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Name */}
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Product Name *</label>
+                    {/* No asterisk on an edit: nothing is being asked for. */}
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">
+                      Product Name{activeModal === "edit" ? "" : " *"}
+                    </label>
                     {activeModal === "edit" ? (
                       <>
                         {/* Shown, never typed over. The name is how the catalog,

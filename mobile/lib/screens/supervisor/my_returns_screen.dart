@@ -18,8 +18,8 @@ import '../../widgets/room_inventory_view.dart';
 /// merge, plus the live per-room stock balances on a second tab.
 ///
 /// The room is shared but a merge is not: a supervisor can only send their own
-/// batches, and even then the decision is not theirs — the request goes to the
-/// Admin, and only an approval moves stock into a store room.
+/// batches. Their merge moves the stock into the main store immediately, with
+/// no Admin approval step.
 class MyReturnsScreen extends StatefulWidget {
   const MyReturnsScreen({super.key});
 
@@ -63,7 +63,7 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
   void initState() {
     super.initState();
     _load();
-    // The Admin's merge decision lands on their console.
+    // Other stock activity can change this list while the screen is open.
     startAutoRefresh();
   }
 
@@ -158,7 +158,7 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
   MergeRequestSummary? get _latestMerge =>
       _merges.where((merge) => merge.isPending).firstOrNull ?? _merges.firstOrNull;
 
-  /// Confirms, then merges. The stock is in its company by the time this
+  /// Confirms, then merges. The stock is in the main store by the time this
   /// returns — there is nothing left for the Admin to approve.
   Future<void> _requestMerge() async {
     final picked = _mergeable;
@@ -167,11 +167,11 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Merge to companies', style: TextStyle(fontSize: 17)),
+        title: const Text('Merge to Main Store', style: TextStyle(fontSize: 17)),
         content: Text(
           'Merge $_mergeQuantity Pcs across ${picked.length} '
           '${_selecting ? "selected " : ""}returned item(s) out of Red Stock.'
-          '\n\nEach item goes back to its own company, and the stock is '
+          '\n\nAll items move into the main store, and the stock is '
           'available straight away — this no longer waits for the Admin.',
           style: const TextStyle(color: AppColors.textSecondary, fontSize: 13.5, height: 1.4),
         ),
@@ -469,7 +469,7 @@ class _MergeButton extends StatelessWidget {
   String get _label {
     if (quantity == 0) return 'Nothing to merge';
     if (count > 0) return 'Merge $count Selected ($quantity Pcs)';
-    return 'Merge $quantity Pcs to Companies';
+    return 'Merge $quantity Pcs to Main Store';
   }
 
   @override

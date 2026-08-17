@@ -60,8 +60,8 @@ const MyReturns = () => {
   };
 
   /**
-   * Merges this supervisor's Red Stock back into the store rooms, applied
-   * immediately — each item returns to its own store room.
+   * Merges this supervisor's Red Stock into the main store room, applied
+   * immediately without waiting for Admin approval.
    */
   const requestMerge = async () => {
     try {
@@ -216,7 +216,7 @@ const MyReturns = () => {
             )}
             {awaiting.length === 0
               ? "Nothing to merge"
-              : `Merge ${awaitingQuantity} pcs to Companies`}
+              : `Merge ${awaitingQuantity} pcs to Main Store`}
           </button>
 
           <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-xl border border-slate-200">

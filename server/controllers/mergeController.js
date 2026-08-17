@@ -61,11 +61,10 @@ export const createWeeklyMergeRequest = async (req, res) => {
  * for an approval to decide — the quantity is on the shelf and countable by the
  * time this responds.
  *
- * Each line goes to its product's home room, since no one is asked to name a
- * destination, falling back to the room the stock was issued out of for a
- * product that carries none. The MergeRequest is still written and closed as
- * Approved, so the merge keeps its request id, its ledger entries and its place
- * in the Admin's history — the record is unchanged, only the waiting is gone.
+ * Every line goes straight to the main store room. The MergeRequest is still
+ * written and closed as Approved, so the merge keeps its request id, its
+ * ledger entries and its place in the Admin's history — the record is
+ * unchanged, only the waiting is gone.
  *
  * The Admin's weekly merge still needs approval: it sweeps every supervisor's
  * returns at once, and that one does need a decision. It cannot lock a
@@ -87,11 +86,31 @@ export const createSupervisorMergeRequest = async (req, res) => {
       return res.status(409).json({ message: result.reason, mergeRequest: result.mergeRequest });
     }
 
+    // The first configured default room is the application's main store room.
+    // If an older installation does not have it, use its earliest active room
+    // rather than putting a supervisor's merge back into an approval queue.
+    const mainStoreRoom =
+      (await StockRoom.findOne({
+        name: StockRoom.DEFAULT_ROOMS[0],
+        isActive: true,
+      })) || (await StockRoom.findOne({ isActive: true }).sort({ createdAt: 1 }));
+
+    if (!mainStoreRoom) {
+      const request = await MergeRequest.findById(result.mergeRequest._id);
+      await withdrawMerge(request);
+      return res.status(409).json({
+        message:
+          "There is no active main store room. Ask the Admin to add one, then merge again — " +
+          "your stock is still in Red Stock.",
+      });
+    }
+
     // Re-read as a document: requestSupervisorMerge returns a populated copy,
     // and applyMerge saves what it is given.
     const request = await MergeRequest.findById(result.mergeRequest._id);
     const { merged, skipped, closed } = await applyMerge({
       request,
+      defaultRoom: mainStoreRoom,
       performedBy: req.user,
       noteFor: (restockItem, room) =>
         `${req.user.name} merged ${restockItem.restockNumber} from Red Stock into ${room.name}`,

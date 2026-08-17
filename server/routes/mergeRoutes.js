@@ -16,9 +16,9 @@ const router = express.Router();
 
 router.use(protect);
 
-// A Supervisor may raise a merge over their own returns and follow it, but
-// nothing more — the decision stays with the Admin. Registered before the
-// Admin guard, and before "/:id" so "mine" is not read as an id.
+// A Supervisor may merge only their own returns. That merge is applied directly
+// to the main store room. Registered before the Admin guard, and before "/:id"
+// so "mine" is not read as an id.
 router
   .route("/mine")
   .post(authorizeRoles("Supervisor"), createSupervisorMergeRequest)

@@ -933,7 +933,8 @@ class _ProductFormState extends State<_ProductForm> {
           ],
           _Field(
             label: 'Product Name',
-            required: true,
+            // No asterisk on an edit: nothing is being asked for.
+            required: !_isEdit,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [

@@ -317,7 +317,8 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2">
-            <label className={label}>Product Name *</label>
+            {/* No asterisk on an edit: nothing is being asked for. */}
+            <label className={label}>Product Name{isEdit ? "" : " *"}</label>
             {isEdit ? (
               <>
                 {/* Shown, never typed over. The name is how the catalog, the

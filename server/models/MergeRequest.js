@@ -5,10 +5,8 @@ import mongoose from "mongoose";
  *
  * Two things raise one: the weekly run over everything in Red Stock, and a
  * Supervisor asking for their own returns to be moved without waiting for the
- * week. Either way this is the only Admin approval in the return flow — a
- * return itself creates nothing — and creating the request moves no stock. The
- * stock moves once, when the request is approved and the Admin names the
- * destination store room.
+ * week. Weekly merges wait for Admin approval; supervisor merges are approved
+ * and moved directly to the main store room. A return itself creates nothing.
  */
 const mergeRequestItemSchema = new mongoose.Schema(
   {
