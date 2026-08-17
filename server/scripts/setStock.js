@@ -1,7 +1,7 @@
 /**
  * Sets opening stock levels from a counted-stock sheet.
  *
- *   node scripts/setStock.js <stock.csv> [--room "Engineer Room"] [--add] [--dry-run]
+ *   node scripts/setStock.js <stock.csv> [--room "Manna Rubber Park"] [--add] [--dry-run]
  *
  * The file needs a product code column and a quantity column; the same heading
  * aliases importProducts.js accepts work here (code/sku/sapid, qty/quantity/
@@ -30,7 +30,7 @@ import { creditRoom, debitRoom, ensureDefaultRooms, resolveRoom } from "../utils
 
 dotenv.config();
 
-const DEFAULT_ROOM = "Engineer Room";
+const DEFAULT_ROOM = "Manna Rubber Park";
 
 const CODE_ALIASES = ["code", "productcode", "itemcode", "sku", "sapid", "sap", "partno", "id"];
 const QTY_ALIASES = [
@@ -82,7 +82,7 @@ const run = async () => {
   const roomName = argv.includes("--room") ? argv[argv.indexOf("--room") + 1] : DEFAULT_ROOM;
 
   if (!file) {
-    console.error('Usage: node scripts/setStock.js <stock.csv> [--room "Engineer Room"] [--add] [--dry-run]');
+    console.error('Usage: node scripts/setStock.js <stock.csv> [--room "Manna Rubber Park"] [--add] [--dry-run]');
     process.exit(1);
   }
 

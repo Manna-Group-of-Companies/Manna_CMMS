@@ -177,7 +177,7 @@ const ProductList = () => {
               aria-label="Filter by store room"
             >
               <option value="">All Rooms</option>
-              <option value="Engineer Room">Engineer Room</option>
+              <option value="Manna Rubber Park">Manna Rubber Park</option>
               <option value="Consumables Room">Consumables Room</option>
             </select>
 

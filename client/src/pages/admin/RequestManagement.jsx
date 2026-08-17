@@ -673,7 +673,7 @@ const RequestManagement = () => {
                             {selectedRequest.quantity} {selectedRequest.product?.unit}
                           </strong>{" "}
                           into the <strong>Red Stock Room</strong>, not into a store room. It
-                          reaches the Engineer Room or the Consumables Room only through an
+                          reaches Manna Rubber Park or the Consumables Room only through an
                           approved merge.
                         </span>
                       </div>

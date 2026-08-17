@@ -1081,7 +1081,7 @@ class _ProductFormState extends State<_ProductForm> {
               child: DropdownShell(
                 child: AppDropdown<String>(
                   value: _draft.storeRoom,
-                  items: const ['Engineer Room', 'Consumables Room'],
+                  items: const ['Manna Rubber Park', 'Consumables Room'],
                   onChanged: (value) =>
                       setState(() => _draft.storeRoom = value ?? _draft.storeRoom),
                 ),
@@ -1818,7 +1818,7 @@ class _ReturnStockFormState extends State<_ReturnStockForm> {
               Expanded(
                 child: Text(
                   'This goes straight into the Red Stock Room — no approval needed. '
-                  'It reaches a store room only once an Admin approves the weekly merge.',
+                  'Merge it from the Red Room screen to put it back on a shelf.',
                   style: const TextStyle(
                     color: AppColors.accent,
                     fontSize: 11.5,

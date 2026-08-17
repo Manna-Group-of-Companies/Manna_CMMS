@@ -374,7 +374,7 @@ class _ProductBrowserState extends State<ProductBrowser>
                       _SheetField(
                         label: 'Store room',
                         value: storeRoom,
-                        items: const [_anyRoom, 'Engineer Room', 'Consumables Room'],
+                        items: const [_anyRoom, 'Manna Rubber Park', 'Consumables Room'],
                         onChanged: (value) => setSheetState(() => storeRoom = value),
                       ),
                       const SizedBox(height: 12),

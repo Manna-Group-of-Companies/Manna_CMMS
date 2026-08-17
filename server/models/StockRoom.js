@@ -33,16 +33,22 @@ const stockRoomSchema = new mongoose.Schema(
 );
 
 /** The rooms every install starts with, in display order. */
-stockRoomSchema.statics.DEFAULT_ROOMS = ["Engineer Room", "Consumables Room"];
+stockRoomSchema.statics.DEFAULT_ROOMS = ["Manna Rubber Park", "Consumables Room"];
 
 /**
  * Rooms that have been renamed, old name → new. The room record is renamed in
  * place on boot and every copy of the old name held elsewhere is rewritten;
  * see `renameStockRooms` in utils/stockRooms.js.
+ *
+ * Applied in order, so a chain works: a database still on "Store Room 1" is
+ * carried to "Engineer Room" by the first entry and on to "Manna Rubber Park"
+ * by the third. Old entries therefore stay even once no install can still be
+ * holding that name.
  */
 stockRoomSchema.statics.RENAMED_ROOMS = [
   ["Store Room 1", "Engineer Room"],
   ["Store Room 2", "Consumables Room"],
+  ["Engineer Room", "Manna Rubber Park"],
 ];
 
 const StockRoom = mongoose.model("StockRoom", stockRoomSchema);

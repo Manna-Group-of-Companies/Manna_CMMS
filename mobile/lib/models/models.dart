@@ -344,7 +344,7 @@ class ProductDraft {
     this.quantity = 0,
     this.unit = 'Pcs',
     this.minStock = 5,
-    this.storeRoom = 'Engineer Room',
+    this.storeRoom = 'Manna Rubber Park',
     this.description = '',
     this.image = '',
     NamingParts? naming,
@@ -401,7 +401,7 @@ class ProductDraft {
         quantity: asInt(json['quantity']),
         unit: asString(json['unit']),
         minStock: asInt(json['minStock']),
-        storeRoom: asString(json['storeRoom'], 'Engineer Room'),
+        storeRoom: asString(json['storeRoom'], 'Manna Rubber Park'),
         description: asString(json['description']),
         image: asString(json['image']),
         naming: NamingParts.maybe(json['naming']),
@@ -1234,8 +1234,8 @@ class MergeRequestSummary {
 }
 
 /// One returned batch sitting in the Red Stock Room, as returned by
-/// `/red-stock`. A return needs no approval to get here; it only reaches a
-/// store room once an Admin approves the weekly merge.
+/// `/red-stock`. A return needs no approval to get here, and the supervisor
+/// merges it back into a store room themselves.
 class RestockRecord {
   const RestockRecord({
     required this.id,

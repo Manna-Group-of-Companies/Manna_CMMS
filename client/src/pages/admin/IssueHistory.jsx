@@ -208,7 +208,7 @@ const AdminIssueHistory = () => {
   // Rooms are admin-configurable, so only the two an install ships with get
   // their own colour; anything added later falls back to slate.
   const ROOM_TONE = {
-    "Engineer Room": "badge-indigo",
+    "Manna Rubber Park": "badge-indigo",
     "Consumables Room": "badge-cyan",
   };
 

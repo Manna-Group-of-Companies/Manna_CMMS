@@ -132,6 +132,30 @@ export const ensureDefaultRooms = async () => {
 };
 
 /**
+ * Follows `StockRoom.RENAMED_ROOMS` for a name that is out of date.
+ *
+ * A room is renamed in the database on boot, but a tablet running an older
+ * build still posts the name it was compiled with — and `resolveRoom` creates
+ * an unknown name rather than failing, so without this the old room would come
+ * back as a second location and stock would start splitting across the two.
+ * Chains are followed, and a cycle cannot spin because each name is only
+ * visited once.
+ */
+const currentRoomName = (name) => {
+  const seen = new Set();
+  let current = name;
+
+  while (!seen.has(current)) {
+    seen.add(current);
+    const renamed = StockRoom.RENAMED_ROOMS.find(([from]) => from === current);
+    if (!renamed) break;
+    current = renamed[1];
+  }
+
+  return current;
+};
+
+/**
  * Resolves a room id, a room name, or a StockRoom document to a document.
  * Named rooms that do not exist yet are created, so a product carrying a
  * legacy `storeRoom` string always has somewhere to put its stock.
@@ -148,10 +172,13 @@ export const resolveRoom = async (room) => {
     if (byId) return byId;
   }
 
-  const byName = await StockRoom.findOne({ name: value });
+  // A retired name resolves to the room that replaced it, never to a fresh one.
+  const name = currentRoomName(value);
+
+  const byName = await StockRoom.findOne({ name });
   if (byName) return byName;
 
-  return StockRoom.create({ name: value });
+  return StockRoom.create({ name });
 };
 
 /** The product's default room — where stock lands when no room is named. */

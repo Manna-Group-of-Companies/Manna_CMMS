@@ -3,6 +3,17 @@ import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import { COMMON_STATUSES, statusTone } from "../../utils/productStatus";
+import TaxonomySelect, {
+  useCategoryOptions,
+  useSubCategoryOptions,
+} from "../../components/TaxonomySelect";
+import ItemNameBuilder, {
+  NameComplianceNotice,
+  EMPTY_NAMING,
+  isNamingBlank,
+  namingFromProduct,
+} from "../../components/ItemNameBuilder";
+import DuplicateWarning, { useDuplicateCheck } from "../../components/DuplicateWarning";
 import {
   Search,
   Filter,
@@ -11,6 +22,7 @@ import {
   Eye,
   X,
   Boxes,
+  Lock,
   Loader2,
   AlertCircle,
   HelpCircle,
@@ -49,18 +61,58 @@ const ProductList = () => {
   const [issueRecipient, setIssueRecipient] = useState("");
   const [issuePurpose, setIssuePurpose] = useState("");
 
-  // Product Form State (For ADD / EDIT requests)
+  /**
+   * The add / edit form.
+   *
+   * Adding still raises a request for the Admin; editing saves straight onto the
+   * product. `subCategory` has to be here for either to carry it — the form used
+   * to leave the key out entirely, so a sub-category could be looked at on this
+   * page but never set from it, and an edit that changed it silently sent
+   * nothing.
+   */
   const [productForm, setProductForm] = useState({
     name: "",
     category: "",
+    subCategory: "",
     status: "Good Condition",
     rackNumber: "",
     quantity: 0,
     unit: "Pcs",
     minStock: 5,
-    storeRoom: "Engineer Room",
+    storeRoom: "Manna Rubber Park",
     description: "",
     image: "",
+  });
+
+  // The classifications already in use, offered as dropdowns so the catalog
+  // stops collecting "Bearing" / "Bearings" / "BEARING" as three categories.
+  // Separate from the filter bar's lists above, which follow what is *being
+  // filtered on* rather than what is being entered.
+  const formCategoryOptions = useCategoryOptions();
+  const formSubCategoryOptions = useSubCategoryOptions(productForm.category);
+
+  /**
+   * The SOI1/SOP1 fields the name is built from (ST-09), kept beside the form
+   * because they are saved as their own sub-document rather than as a field.
+   *
+   * Offered on an edit as much as on a new item: bringing a legacy name up to
+   * the standard is the main reason to open the builder at all, and most of the
+   * catalog was named before the convention existed.
+   */
+  const [naming, setNaming] = useState(EMPTY_NAMING);
+  const [showBuilder, setShowBuilder] = useState(true);
+
+  /** True once the builder has produced a name different from the saved one. */
+  const renamed = activeModal === "edit" && productForm.name !== selectedProduct?.name;
+
+  // ST-14 — what the catalog already holds that looks like this. Suppressed on
+  // an edit until the name actually changes, so reopening a product does not
+  // accuse it of duplicating itself.
+  const { matches: duplicateMatches, checking: checkingDuplicates } = useDuplicateCheck({
+    name: productForm.name,
+    category: productForm.category,
+    excludeId: selectedProduct?._id || "",
+    enabled: activeModal === "add" || renamed,
   });
 
   /** [silent] is used by the background poll: no spinner, no error toast. */
@@ -134,6 +186,7 @@ const ProductList = () => {
     setProductForm({
       name: product.name,
       category: product.category,
+      subCategory: product.subCategory || "",
       status: product.status || "",
       rackNumber: product.rackNumber || "",
       quantity: product.quantity,
@@ -143,6 +196,10 @@ const ProductList = () => {
       description: product.description || "",
       image: product.image || "",
     });
+    // Seeded from the product's own naming fields when it has them, so the
+    // builder opens showing how the name was put together rather than blank.
+    setNaming(namingFromProduct(product));
+    setShowBuilder(true);
     setActiveModal("edit");
   };
 
@@ -182,19 +239,56 @@ const ProductList = () => {
   };
 
   // Submit Product Add Request
-  const handleAddRequest = async (e) => {
-    e.preventDefault();
+  //
+  // [overrides] answers one of the two intake checks; see the catch.
+  const handleAddRequest = async (e, overrides = {}) => {
+    e?.preventDefault();
     try {
       await API.post("/requests/product", {
         requestType: "ADD",
-        details: productForm,
+        details: {
+          ...productForm,
+          // Carried so the approved product keeps the fields its name was built
+          // from (ST-09) instead of only the finished string. Omitted when
+          // blank, which is what a hand-typed name leaves it as.
+          ...(isNamingBlank(naming) ? {} : { naming }),
+        },
+        ...overrides,
       });
       showToast("Product ADD request submitted successfully!", "success");
       setActiveModal(null);
       resetProductForm();
     } catch (error) {
+      const retry = intakeOverrideFor(error, overrides);
+      if (retry) return handleAddRequest(null, { ...overrides, ...retry });
+
       showToast(error.response?.data?.message || "Failed to submit request", "error");
     }
+  };
+
+  /**
+   * Turns a refused save into the flag that answers it, once the user agrees.
+   *
+   * 422 and 409 are not failures — they are the naming convention (ST-10) and
+   * the duplicate check (ST-14) asking a question. Confirming re-sends the same
+   * payload with the matching override, which the API then accepts. Returns null
+   * when the error is something else, or when that override was already set (so
+   * a refusal can never loop).
+   */
+  const intakeOverrideFor = (error, overrides) => {
+    const { status, data } = error.response || {};
+
+    const flag =
+      status === 422 && data?.code === "NAME_NOT_COMPLIANT"
+        ? "acknowledgeNaming"
+        : status === 409 && data?.code === "POSSIBLE_DUPLICATE"
+          ? "allowDuplicate"
+          : null;
+
+    if (!flag || overrides[flag]) return null;
+    if (!window.confirm(`${data.message}.\n\nSave anyway?`)) return null;
+
+    return { [flag]: true };
   };
 
   // Save an edit straight to the product. Only a new item still waits for the
@@ -205,10 +299,25 @@ const ProductList = () => {
   const handleEditProduct = async (e, overrides = {}) => {
     e?.preventDefault();
 
-    // `quantity` is deliberately left out of the payload: stock still comes in
-    // through a Stock In request, and the API refuses a supervisor that tries
-    // to set a total from here.
-    const { quantity: _quantity, ...details } = productForm;
+    // Only what the edit form actually offers. Quantity and store room move real
+    // stock, and unit and minimum stock are identity and purchasing figures —
+    // the form no longer shows any of them, so the payload must not carry them
+    // either. Echoing them back would be harmless today (the API no-ops a zero
+    // delta) but leaves a request shaped to write fields nobody was shown.
+    const details = {
+      name: productForm.name,
+      category: productForm.category,
+      subCategory: productForm.subCategory,
+      status: productForm.status,
+      rackNumber: productForm.rackNumber,
+      image: productForm.image,
+      description: productForm.description,
+      // Sent only alongside a rename. The API re-checks the name whenever the
+      // naming fields move, and an unchanged legacy name would be held to a
+      // convention it predates — so a rack-number fix would first have to be
+      // confirmed past a name nobody touched.
+      ...(renamed && !isNamingBlank(naming) ? { naming } : {}),
+    };
 
     try {
       await API.put(`/products/${selectedProduct._id}`, { ...details, ...overrides });
@@ -216,23 +325,10 @@ const ProductList = () => {
       setActiveModal(null);
       fetchProducts(); // The change is live, so show it.
     } catch (error) {
-      const { status, data } = error.response || {};
+      const retry = intakeOverrideFor(error, overrides);
+      if (retry) return handleEditProduct(null, { ...overrides, ...retry });
 
-      // 422 and 409 are the two intake checks asking a question (ST-10, ST-14),
-      // not failures: confirming sends the same edit back with the flag that
-      // answers it.
-      const override =
-        status === 422 && data?.code === "NAME_NOT_COMPLIANT"
-          ? "acknowledgeNaming"
-          : status === 409 && data?.code === "POSSIBLE_DUPLICATE"
-            ? "allowDuplicate"
-            : null;
-
-      if (override && !overrides[override] && window.confirm(`${data.message}.\n\nSave anyway?`)) {
-        return handleEditProduct(null, { ...overrides, [override]: true });
-      }
-
-      showToast(data?.message || "Failed to save the product", "error");
+      showToast(error.response?.data?.message || "Failed to save the product", "error");
     }
   };
 
@@ -240,16 +336,29 @@ const ProductList = () => {
     setProductForm({
       name: "",
       category: "",
+      subCategory: "",
       status: "Good Condition",
       rackNumber: "",
       quantity: 0,
       unit: "Pcs",
       minStock: 5,
-      storeRoom: "Engineer Room",
+      storeRoom: "Manna Rubber Park",
       description: "",
       image: "",
     });
   };
+
+  /**
+   * Changing the main category invalidates the sub-category under it — "Ring
+   * Spanners" does not belong to "Bearings" — so it is cleared rather than left
+   * pointing at the wrong parent.
+   */
+  const setFormCategory = (category) =>
+    setProductForm((prev) => ({
+      ...prev,
+      category,
+      subCategory: category === prev.category ? prev.subCategory : "",
+    }));
 
   return (
     <div className="space-y-6">
@@ -313,7 +422,7 @@ const ProductList = () => {
               className="px-3 py-2 text-xs rounded-xl bg-white border border-slate-200 text-slate-700 focus:outline-none focus:border-brand-500"
             >
               <option value="">All Rooms</option>
-              <option value="Engineer Room">Engineer Room</option>
+              <option value="Manna Rubber Park">Manna Rubber Park</option>
               <option value="Consumables Room">Consumables Room</option>
             </select>
 
@@ -589,17 +698,33 @@ const ProductList = () => {
                     />
                   </div>
 
-                  {/* Category */}
+                  {/* Category — a dropdown over what the store already uses,
+                      with "add a new one" for a class of item it has not
+                      stocked before. */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Category *</label>
-                    <input
-                      type="text"
-                      name="category"
+                    <TaxonomySelect
                       value={productForm.category}
-                      onChange={handleFormChange}
+                      options={formCategoryOptions}
+                      onChange={setFormCategory}
+                      placeholder="Select a category…"
                       required
-                      placeholder="e.g. Electronics, Furniture"
-                      className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+
+                  {/* Sub-Category — narrowed to the category above. */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Sub-Category</label>
+                    <TaxonomySelect
+                      value={productForm.subCategory}
+                      options={formSubCategoryOptions}
+                      onChange={(subCategory) =>
+                        setProductForm((prev) => ({ ...prev, subCategory }))
+                      }
+                      placeholder={
+                        productForm.category ? "Select a sub-category…" : "Pick a category first"
+                      }
+                      disabled={!productForm.category}
                     />
                   </div>
 
@@ -637,70 +762,67 @@ const ProductList = () => {
                     />
                   </div>
 
-                  {/* Quantity (Add Only) */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Initial Quantity *</label>
-                    <input
-                      type="number"
-                      name="quantity"
-                      value={productForm.quantity}
-                      onChange={handleFormChange}
-                      required
-                      min="0"
-                      // Locked on an edit: the details save directly, but stock
-                      // still arrives through a Stock In request.
-                      disabled={activeModal === "edit"}
-                      className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 disabled:opacity-50 focus:outline-none focus:border-brand-500"
-                    />
-                    {activeModal === "edit" && (
-                      <p className="text-[10px] text-slate-500 mt-1">
-                        Quantity is locked here — raise a Stock In request to change it.
-                      </p>
-                    )}
-                  </div>
+                  {/* Asked for once, when the item is first taken in. An edit
+                      does not offer them: quantity and store room move real
+                      stock, and unit and minimum stock are identity and
+                      purchasing figures that should not drift from a form
+                      somebody opened to fix a shelf label. */}
+                  {activeModal === "add" && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Initial Quantity *</label>
+                        <input
+                          type="number"
+                          name="quantity"
+                          value={productForm.quantity}
+                          onChange={handleFormChange}
+                          required
+                          min="0"
+                          className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
+                        />
+                      </div>
 
-                  {/* Unit */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Unit of Measure *</label>
-                    <input
-                      type="text"
-                      name="unit"
-                      value={productForm.unit}
-                      onChange={handleFormChange}
-                      required
-                      placeholder="e.g. Pcs, Box, Kg"
-                      className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
-                    />
-                  </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Unit of Measure *</label>
+                        <input
+                          type="text"
+                          name="unit"
+                          value={productForm.unit}
+                          onChange={handleFormChange}
+                          required
+                          placeholder="e.g. Pcs, Box, Kg"
+                          className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
+                        />
+                      </div>
 
-                  {/* Min Stock */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Minimum Stock Limit *</label>
-                    <input
-                      type="number"
-                      name="minStock"
-                      value={productForm.minStock}
-                      onChange={handleFormChange}
-                      required
-                      min="0"
-                      className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
-                    />
-                  </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Minimum Stock Limit *</label>
+                        <input
+                          type="number"
+                          name="minStock"
+                          value={productForm.minStock}
+                          onChange={handleFormChange}
+                          required
+                          min="0"
+                          className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
+                        />
+                      </div>
 
-                  {/* Home store room for the product */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Store Room *</label>
-                    <select
-                      name="storeRoom"
-                      value={productForm.storeRoom}
-                      onChange={handleFormChange}
-                      required
-                      className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
-                    >
-                      <option value="Engineer Room">Engineer Room</option>
-                      <option value="Consumables Room">Consumables Room</option>
-                    </select>
-                  </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Store Room *</label>
+                        <select
+                          name="storeRoom"
+                          value={productForm.storeRoom}
+                          onChange={handleFormChange}
+                          required
+                          className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
+                        >
+                          <option value="Manna Rubber Park">Manna Rubber Park</option>
+                          <option value="Consumables Room">Consumables Room</option>
+                        </select>
+                      </div>
+                    </>
+                  )}
 
                   {/* Image URL / Quick Select */}
                   <div>
@@ -740,6 +862,43 @@ const ProductList = () => {
                     className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500 resize-none"
                   ></textarea>
                 </div>
+
+                {/* Still shown on an edit, just not editable — somebody fixing a
+                    rack number still needs to know which room and how much, and
+                    a form that silently omits half an item reads as though the
+                    data were missing. */}
+                {activeModal === "edit" && selectedProduct && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                    <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Lock className="h-3.5 w-3.5 text-slate-400" /> Not changed here
+                    </h4>
+                    <dl className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3">
+                      {[
+                        ["Code", selectedProduct.code, "fixed identity"],
+                        ["Unit", selectedProduct.unit, "fixed identity"],
+                        [
+                          "Current Stock",
+                          `${selectedProduct.quantity} ${selectedProduct.unit}`,
+                          "Stock In request",
+                        ],
+                        ["Store Room", selectedProduct.storeRoom, "Admin moves it"],
+                      ].map(([term, value, why]) => (
+                        <div key={term} className="min-w-0">
+                          <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                            {term}
+                          </dt>
+                          <dd
+                            className="text-xs font-semibold text-slate-800 truncate"
+                            title={value}
+                          >
+                            {value}
+                          </dd>
+                          <dd className="text-[10px] text-slate-400">{why}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                )}
 
                 {/* Buttons */}
                 <div className="pt-4 border-t border-slate-200 flex justify-end gap-3">
