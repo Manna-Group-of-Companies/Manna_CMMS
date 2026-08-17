@@ -90,6 +90,55 @@ class StockRepository {
     return _list(data, Product.fromJson);
   }
 
+  /// Saves an edit straight onto the catalog product — no approval involved.
+  ///
+  /// Adding an item is the only catalog change that still goes through a
+  /// request; changing one takes effect as soon as this returns.
+  ///
+  /// Only the fields the edit sheet actually offers are sent — the
+  /// classification and the descriptive ones, plus the name when the SOI1/SOP1
+  /// builder has renamed the item. See [_editableOnUpdate].
+  ///
+  /// The rest is dropped rather than echoed back. Posting it unchanged would be
+  /// harmless today (the API no-ops a zero delta) but it leaves a request shaped
+  /// to write fields the sheet never showed, which is how a later change starts
+  /// moving stock by accident. Quantity and store room move real stock; unit and
+  /// minimum stock are identity and purchasing figures.
+  ///
+  /// The two intake checks apply exactly as they do on a request — 422 (the name
+  /// breaks SOI1/SOP1) and 409 (an item like this already exists) — and are
+  /// answered the same way, by re-sending with [acknowledgeNaming] or
+  /// [allowDuplicate].
+  Future<Product> updateProduct({
+    required String productId,
+    required ProductDraft details,
+    bool acknowledgeNaming = false,
+    bool allowDuplicate = false,
+  }) async {
+    final body = details.toJson()
+      ..removeWhere((key, _) => !_editableOnUpdate.contains(key));
+
+    final data = await _api.put('/products/$productId', {
+      ...body,
+      'acknowledgeNaming': acknowledgeNaming,
+      'allowDuplicate': allowDuplicate,
+    });
+    return Product.fromJson(Map<String, dynamic>.from(data as Map));
+  }
+
+  /// The only product fields an edit from the app may set. Kept next to
+  /// [updateProduct] so the allow-list and the reason for it stay together.
+  static const _editableOnUpdate = {
+    'name',
+    'naming',
+    'category',
+    'subCategory',
+    'status',
+    'rackNumber',
+    'image',
+    'description',
+  };
+
   /// Records what SAP did with an item. [status] is `Created`, `Pending` or
   /// `Not Required`. Admin only.
   Future<Product> setSapStatus({
@@ -194,51 +243,52 @@ class StockRepository {
   }) =>
       _api.put('/requests/$rawType/$id/$action', {'adminComments': adminComments});
 
-  /// Raises an ADD or EDIT request against the catalog.
+  /// Raises an ADD request against the catalog — a new item is the only catalog
+  /// change that still waits for the Admin. An edit is saved directly; see
+  /// [updateProduct].
   ///
   /// The API applies the two intake checks first and refuses with 422 (the name
   /// breaks SOI1/SOP1) or 409 (an item like this already exists). Both are
   /// answerable rather than final: set [acknowledgeNaming] or [allowDuplicate]
   /// and send the same draft again to go ahead deliberately.
   Future<void> createProductRequest({
-    required String requestType, // ADD | EDIT
-    String? productId,
     required ProductDraft details,
     bool acknowledgeNaming = false,
     bool allowDuplicate = false,
   }) =>
       _api.post('/requests/product', {
-        'requestType': requestType,
-        'productId': ?productId,
+        'requestType': 'ADD',
         'details': details.toJson(),
         'acknowledgeNaming': acknowledgeNaming,
         'allowDuplicate': allowDuplicate,
       });
 
-  /// [kind] is one of `stockin`, `stockout`, `stockreturn`.
+  /// Asks the Admin to take delivery of stock. This is the one stock change a
+  /// supervisor cannot make alone — issuing, consuming, scrapping and returning
+  /// all apply immediately.
   ///
   /// [stockRoomId] names the room the supervisor would like the stock placed
   /// in. It is advisory — the Admin picks the room actually credited.
-  Future<String> createStockRequest({
-    required String kind,
+  Future<String> createStockInRequest({
     required String productId,
     required int quantity,
     String? stockRoomId,
   }) async {
-    final data = await _api.post('/requests/$kind', {
+    final data = await _api.post('/requests/stockin', {
       'productId': productId,
       'quantity': quantity,
       'stockRoomId': ?stockRoomId,
     });
-    // The create endpoints return the request document itself, so the number
+    // The create endpoint returns the request document itself, so the number
     // is read from there rather than from a `message` field.
     final requestNumber =
         data is Map ? asString(data['requestNumber']) : '';
     return requestNumber;
   }
 
-  /// Edits a still-pending stock request. [kind] is `stockin`, `stockout` or
-  /// `stockreturn`. The API rejects this once an Admin has decided it.
+  /// Edits a still-pending stock request. [kind] is `stockin`, or `stockout` /
+  /// `stockreturn` for a row raised back when those were requests too. The API
+  /// rejects this once an Admin has decided it.
   Future<String> updateStockRequest({
     required String kind,
     required String id,

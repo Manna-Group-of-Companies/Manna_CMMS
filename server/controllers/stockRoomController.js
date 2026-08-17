@@ -29,7 +29,7 @@ export const getInventoryByRoom = async (req, res) => {
     const rooms = await StockRoom.find({ isActive: true }).sort({ name: 1 });
 
     const rows = await StockRoomInventory.find()
-      .populate("product", "name code unit image minStock maxStock category")
+      .populate("product", "name code unit image minStock category")
       .sort({ quantity: -1 });
 
     const byRoom = new Map(rooms.map((room) => [String(room._id), []]));

@@ -160,7 +160,7 @@ class _ProductBrowserState extends State<ProductBrowser>
                         )
                       : ProductTable(
                           products: _products,
-                          // Clears the "Request Product" button floating over
+                          // Clears the "Add Products" button floating over
                           // the bottom of the list.
                           bottomInset: 88,
                           actionsOf: (context, product) =>

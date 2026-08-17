@@ -486,12 +486,6 @@ const ProductList = () => {
                       {selectedProduct.minStock} {selectedProduct.unit}
                     </span>
                   </div>
-                  <div className="kv col-span-2">
-                    <span className="kv-label">Max Stock Limit</span>
-                    <span className="kv-value">
-                      {selectedProduct.maxStock} {selectedProduct.unit}
-                    </span>
-                  </div>
                 </div>
 
                 <div className="kv">

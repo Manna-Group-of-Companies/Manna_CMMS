@@ -2,8 +2,6 @@ import express from "express";
 import {
   createProductRequest,
   createStockInRequest,
-  createStockOutRequest,
-  createStockReturnRequest,
   getMyRequests,
   getAllRequests,
   processRequest,
@@ -14,11 +12,11 @@ import { protect, authorizeRoles } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// Supervisor endpoints
+// Supervisor endpoints. Only two things still go to the Admin: a new catalog
+// item, and stock coming in. An edit is saved on the product itself
+// (PUT /api/products/:id), and stock out / stock return have no request either.
 router.post("/product", protect, authorizeRoles("Supervisor"), createProductRequest);
 router.post("/stockin", protect, authorizeRoles("Supervisor"), createStockInRequest);
-router.post("/stockout", protect, authorizeRoles("Supervisor"), createStockOutRequest);
-router.post("/stockreturn", protect, authorizeRoles("Supervisor"), createStockReturnRequest);
 router.get("/myrequests", protect, authorizeRoles("Supervisor"), getMyRequests);
 
 // Supervisors may change their own requests while they are still Pending.

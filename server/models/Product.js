@@ -140,12 +140,6 @@ const productSchema = new mongoose.Schema(
       default: 5,
       min: [0, "Minimum stock cannot be negative"],
     },
-    maxStock: {
-      type: Number,
-      required: [true, "Maximum stock is required"],
-      default: 100,
-      min: [0, "Maximum stock cannot be negative"],
-    },
     // The product's home room: where stock lands when a flow does not name a
     // room, and what the catalog filter matches on. The authoritative
     // per-room balances live in StockRoomInventory — a product may hold

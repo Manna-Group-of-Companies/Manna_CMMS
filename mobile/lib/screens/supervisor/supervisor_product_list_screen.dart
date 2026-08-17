@@ -6,7 +6,9 @@ import '../../widgets/app_shell.dart';
 import '../../widgets/product_browser.dart';
 import 'product_forms.dart';
 
-/// `pages/supervisor/ProductList.jsx` — browse the catalog and raise requests.
+/// `pages/supervisor/ProductList.jsx` — browse the catalog, edit and issue what
+/// is on the shelf, and raise the two things the Admin still decides: a brand
+/// new item, and stock coming in.
 class SupervisorProductListScreen extends StatefulWidget {
   const SupervisorProductListScreen({super.key});
 
@@ -37,11 +39,11 @@ class _SupervisorProductListScreenState extends State<SupervisorProductListScree
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add, size: 20),
         label: const Text(
-          'Request Product',
+          'Add Products',
           style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
         ),
         onPressed: () async {
-          final submitted = await showProductRequestForm(context);
+          final submitted = await showProductForm(context);
           if (submitted && mounted) setState(() => _reloadToken++);
         },
       ),
@@ -51,17 +53,21 @@ class _SupervisorProductListScreenState extends State<SupervisorProductListScree
         // the only way to reach them.
         actionsBuilder: (context, product, reload) => [
           ProductAction(
-            label: 'Request Edit',
+            label: 'Edit Product',
             icon: Icons.edit_outlined,
             color: AppColors.primaryDeep,
-            onSelected: () => showProductRequestForm(context, product: product),
+            onSelected: () async {
+              // An edit is saved on the product itself rather than queued for
+              // the Admin, so the list has to re-read to show it.
+              final saved = await showProductForm(context, product: product);
+              if (saved) await reload();
+            },
           ),
           ProductAction(
             label: 'Request Stock',
             icon: Icons.arrow_upward,
             color: AppColors.success,
-            onSelected: () =>
-                showStockRequestForm(context, product: product, kind: 'stockin'),
+            onSelected: () => showStockInRequestForm(context, product: product),
           ),
           ProductAction(
             filled: true,

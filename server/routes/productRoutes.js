@@ -30,18 +30,23 @@ router.get("/subcategories", getSubCategories);
 //
 // A supervisor drafting an ADD request needs the same naming help and the same
 // duplicate warning as the Admin creating the product outright, so these are
-// open to both roles. Only the write below is Admin-only.
+// open to both roles. Only the creates and deletes below are Admin-only.
 router.post("/name-preview", previewItemName);
 router.get("/duplicates", checkDuplicates);
 router.get("/sap-pending", getSapPending);
 
-// Catalog writes are Admin-only; supervisors raise ADD/EDIT requests instead.
+// Creating a catalog item is Admin-only; a supervisor raises an ADD request,
+// which is the one request left in the flow.
 router.post("/", authorizeRoles("Admin"), createProduct);
 
 router.get("/:id", getProductById);
 router.get("/:id/rooms", getProductRooms);
 router.put("/:id/sap", authorizeRoles("Admin"), updateSapStatus);
-router.put("/:id", authorizeRoles("Admin"), updateProduct);
+// An edit is saved straight to the product — supervisors no longer raise an
+// EDIT request for it. Quantity is the exception: only an Admin may set it from
+// here, because stock still comes in through a Stock In request (see
+// updateProduct).
+router.put("/:id", authorizeRoles("Admin", "Supervisor"), updateProduct);
 router.delete("/:id", authorizeRoles("Admin"), deleteProduct);
 
 export default router;

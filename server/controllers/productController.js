@@ -272,10 +272,12 @@ export const updateSapStatus = async (req, res) => {
 };
 
 // ==========================================
-// ADMIN: direct catalog management
+// Direct catalog management
 //
-// Supervisors change the catalog by raising ADD/EDIT requests. An Admin edits
-// it directly here. Quantity is never assigned — it is applied through the
+// Creating an item is Admin-only — a supervisor raises an ADD request for it.
+// Editing one is not: both roles save changes here, and only the quantity is
+// held back from a supervisor, because stock arrives through a Stock In
+// request. Quantity is never assigned either way — it is applied through the
 // stock room helpers so the per-room rows stay the source of truth.
 // ==========================================
 
@@ -293,7 +295,6 @@ const EDITABLE_FIELDS = [
   "rackNumber",
   "unit",
   "minStock",
-  "maxStock",
   "unitCost",
   "description",
   "image",
@@ -414,7 +415,7 @@ export const createProduct = async (req, res) => {
 
 // @desc    Update a product. Quantity and store room changes move real stock.
 // @route   PUT /api/products/:id
-// @access  Private (Admin)
+// @access  Private (Admin, Supervisor — quantity is Admin-only)
 export const updateProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -424,6 +425,22 @@ export const updateProduct = async (req, res) => {
 
     const { code, quantity, storeRoom, acknowledgeNaming = false, allowDuplicate = false } =
       req.body;
+
+    // A supervisor's edit changes the item's details, never how much of it there
+    // is: stock still comes in through a Stock In request the Admin approves. A
+    // payload that merely echoes the current total is let through, so a form
+    // that posts every field it rendered is not treated as an adjustment.
+    const setsQuantity = quantity !== undefined && quantity !== null;
+    if (
+      req.user.role !== "Admin" &&
+      setsQuantity &&
+      Number(quantity) !== product.quantity
+    ) {
+      return res.status(403).json({
+        message:
+          "Quantity cannot be changed from an edit — raise a Stock In request instead",
+      });
+    }
 
     // Product code is user-facing and must stay unique.
     if (code && code.trim() && code.trim() !== product.code) {
@@ -447,7 +464,17 @@ export const updateProduct = async (req, res) => {
       if (!named.name) {
         return res.status(400).json({ message: "Product name is required" });
       }
-      if (!named.compliant && !acknowledgeNaming) {
+
+      const renamed = named.name !== product.name;
+
+      // Only a *new* name is held to the convention. An edit that leaves the
+      // name as it found it did not introduce the problem and is not the place
+      // to litigate it: most of the imported catalog predates SOI1/SOP1, and
+      // refusing here would mean every rack-number correction on a legacy item
+      // first needed somebody to tick "save anyway" about a name they had not
+      // touched. Renaming it — which is how a legacy name gets fixed — goes
+      // through the check in full.
+      if (!named.compliant && renamed && !acknowledgeNaming) {
         return res.status(422).json({
           code: "NAME_NOT_COMPLIANT",
           message: `"${named.name}" does not follow the SOI1/SOP1 naming convention`,
@@ -458,7 +485,7 @@ export const updateProduct = async (req, res) => {
 
       // A rename can collide with something already on the shelf just as an
       // intake can, so it gets the same warning (ST-14).
-      if (!allowDuplicate && named.name !== product.name) {
+      if (!allowDuplicate && renamed) {
         const matches = await findSimilarProducts({
           name: named.name,
           brand: req.body.brand ?? product.brand,
@@ -478,7 +505,10 @@ export const updateProduct = async (req, res) => {
 
       product.name = named.name;
       if (named.naming) product.naming = named.naming;
-      product.nameCompliant = named.compliant;
+      // The verdict is recorded only for a name this edit actually set. Leaving
+      // it alone keeps `null` meaning "never checked" on the legacy rows rather
+      // than quietly restating them as non-compliant.
+      if (renamed) product.nameCompliant = named.compliant;
     }
 
     for (const field of EDITABLE_FIELDS) {

@@ -727,10 +727,6 @@ const SupervisorIssueHistory = () => {
                   <span className="text-slate-500 block mb-0.5">Min Stock Limit</span>
                   <span className="font-semibold text-slate-800">{selectedProduct.minStock} {selectedProduct.unit}</span>
                 </div>
-                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                  <span className="text-slate-500 block mb-0.5">Max Stock Limit</span>
-                  <span className="font-semibold text-slate-800">{selectedProduct.maxStock} {selectedProduct.unit}</span>
-                </div>
               </div>
 
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">

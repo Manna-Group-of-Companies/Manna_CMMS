@@ -254,7 +254,6 @@ class Product {
     required this.quantity,
     required this.unit,
     required this.minStock,
-    required this.maxStock,
     required this.storeRoom,
     required this.description,
     required this.image,
@@ -289,7 +288,6 @@ class Product {
   final int quantity;
   final String unit;
   final int minStock;
-  final int maxStock;
   final String storeRoom;
   final String description;
   final String image;
@@ -322,7 +320,6 @@ class Product {
         quantity: asInt(json['quantity']),
         unit: asString(json['unit']),
         minStock: asInt(json['minStock']),
-        maxStock: asInt(json['maxStock']),
         storeRoom: asString(json['storeRoom']),
         description: asString(json['description']),
         image: asString(json['image']),
@@ -341,12 +338,12 @@ class ProductDraft {
   ProductDraft({
     this.name = '',
     this.category = '',
+    this.subCategory = '',
     this.status = 'Good Condition',
     this.rackNumber = '',
     this.quantity = 0,
     this.unit = 'Pcs',
     this.minStock = 5,
-    this.maxStock = 100,
     this.storeRoom = 'Engineer Room',
     this.description = '',
     this.image = '',
@@ -355,6 +352,11 @@ class ProductDraft {
 
   String name;
   String category;
+
+  /// Second level of the store's classification — category "Tools" /
+  /// sub-category "Ring Spanners". Optional, and blank on requests raised
+  /// before the field existed.
+  String subCategory;
 
   /// Condition of the stock, picked from `productStatuses` — see
   /// core/product_status.dart. A new product is assumed to be in good condition
@@ -365,7 +367,6 @@ class ProductDraft {
   int quantity;
   String unit;
   int minStock;
-  int maxStock;
   String storeRoom;
   String description;
   String image;
@@ -377,12 +378,12 @@ class ProductDraft {
   factory ProductDraft.fromProduct(Product product) => ProductDraft(
         name: product.name,
         category: product.category,
+        subCategory: product.subCategory,
         status: product.status,
         rackNumber: product.rackNumber,
         quantity: product.quantity,
         unit: product.unit,
         minStock: product.minStock,
-        maxStock: product.maxStock,
         storeRoom: product.storeRoom,
         description: product.description,
         image: product.image,
@@ -394,12 +395,12 @@ class ProductDraft {
   factory ProductDraft.fromJson(Map<String, dynamic> json) => ProductDraft(
         name: asString(json['name']),
         category: asString(json['category']),
+        subCategory: asString(json['subCategory']),
         status: asString(json['status']),
         rackNumber: asString(json['rackNumber']),
         quantity: asInt(json['quantity']),
         unit: asString(json['unit']),
         minStock: asInt(json['minStock']),
-        maxStock: asInt(json['maxStock']),
         storeRoom: asString(json['storeRoom'], 'Engineer Room'),
         description: asString(json['description']),
         image: asString(json['image']),
@@ -409,12 +410,12 @@ class ProductDraft {
   Map<String, dynamic> toJson() => {
         'name': name,
         'category': category,
+        'subCategory': subCategory,
         'status': status,
         'rackNumber': rackNumber,
         'quantity': quantity,
         'unit': unit,
         'minStock': minStock,
-        'maxStock': maxStock,
         'storeRoom': storeRoom,
         'description': description,
         'image': image,

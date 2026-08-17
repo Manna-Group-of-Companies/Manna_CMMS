@@ -202,7 +202,6 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                                 : AppColors.textStrong,
                       ),
                       SpecTile(label: 'Min Stock Limit', value: '${p.minStock} $unit'),
-                      SpecTile(label: 'Max Stock Limit', value: '${p.maxStock} $unit'),
                     ],
                   ),
                   const SizedBox(height: 12),

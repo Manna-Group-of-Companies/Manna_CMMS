@@ -199,7 +199,7 @@ export const getBranchDashboard = async (req, res) => {
     }
 
     const rows = await StockRoomInventory.find({ stockRoom: room._id })
-      .populate("product", "name code unit image category minStock maxStock")
+      .populate("product", "name code unit image category minStock")
       .sort({ quantity: -1 });
 
     // A row whose product was deleted has nothing left to show.
@@ -214,7 +214,6 @@ export const getBranchDashboard = async (req, res) => {
         unit: row.product.unit,
         image: row.product.image,
         minStock: row.product.minStock ?? 0,
-        maxStock: row.product.maxStock ?? 0,
         quantity: row.quantity,
         isOutOfStock: row.quantity === 0,
         isLowStock: row.quantity > 0 && row.quantity <= (row.product.minStock ?? 0),

@@ -8,9 +8,6 @@ import {
   Filter,
   Plus,
   Edit,
-  ArrowUpRight,
-  ArrowDownRight,
-  RotateCcw,
   Eye,
   X,
   Boxes,
@@ -44,12 +41,8 @@ const ProductList = () => {
   const [stockStatus, setStockStatus] = useState("");
 
   // Modals Toggles
-  const [activeModal, setActiveModal] = useState(null); // 'add' | 'edit' | 'stock' | 'details' | 'issue' | null
+  const [activeModal, setActiveModal] = useState(null); // 'add' | 'edit' | 'details' | 'issue' | null
   const [selectedProduct, setSelectedProduct] = useState(null);
-
-  // Stock Mutation Form State
-  const [mutationType, setMutationType] = useState("IN"); // IN | OUT | RETURN
-  const [mutationQty, setMutationQty] = useState(1);
 
   // Issue Product Form State
   const [issueQty, setIssueQty] = useState(1);
@@ -65,7 +58,6 @@ const ProductList = () => {
     quantity: 0,
     unit: "Pcs",
     minStock: 5,
-    maxStock: 100,
     storeRoom: "Engineer Room",
     description: "",
     image: "",
@@ -132,7 +124,7 @@ const ProductList = () => {
     const { name, value } = e.target;
     setProductForm((prev) => ({
       ...prev,
-      [name]: name === "quantity" || name === "minStock" || name === "maxStock" ? Number(value) : value,
+      [name]: name === "quantity" || name === "minStock" ? Number(value) : value,
     }));
   };
 
@@ -147,20 +139,11 @@ const ProductList = () => {
       quantity: product.quantity,
       unit: product.unit,
       minStock: product.minStock,
-      maxStock: product.maxStock,
       storeRoom: product.storeRoom,
       description: product.description || "",
       image: product.image || "",
     });
     setActiveModal("edit");
-  };
-
-  // Open Stock Mutation Form
-  const openStockModal = (product, type) => {
-    setSelectedProduct(product);
-    setMutationType(type);
-    setMutationQty(1);
-    setActiveModal("stock");
   };
 
   // Open Issue Product Form
@@ -214,44 +197,42 @@ const ProductList = () => {
     }
   };
 
-  // Submit Product Edit Request
-  const handleEditRequest = async (e) => {
-    e.preventDefault();
-    try {
-      await API.post("/requests/product", {
-        requestType: "EDIT",
-        productId: selectedProduct._id,
-        details: productForm,
-      });
-      showToast("Product EDIT request submitted successfully!", "success");
-      setActiveModal(null);
-    } catch (error) {
-      showToast(error.response?.data?.message || "Failed to submit request", "error");
-    }
-  };
+  // Save an edit straight to the product. Only a new item still waits for the
+  // Admin — an edit takes effect as soon as it is saved, so there is no request
+  // to track and the row is re-read instead.
+  //
+  // [overrides] carries the answer to one of the intake checks; see the catch.
+  const handleEditProduct = async (e, overrides = {}) => {
+    e?.preventDefault();
 
-  // Submit Stock Mutation Request
-  const handleStockRequest = async (e) => {
-    e.preventDefault();
-    if (mutationQty < 1) {
-      showToast("Quantity must be at least 1", "error");
-      return;
-    }
+    // `quantity` is deliberately left out of the payload: stock still comes in
+    // through a Stock In request, and the API refuses a supervisor that tries
+    // to set a total from here.
+    const { quantity: _quantity, ...details } = productForm;
 
     try {
-      let endpoint = "/requests/stockin";
-      if (mutationType === "OUT") endpoint = "/requests/stockout";
-      if (mutationType === "RETURN") endpoint = "/requests/stockreturn";
-
-      await API.post(endpoint, {
-        productId: selectedProduct._id,
-        quantity: mutationQty,
-      });
-
-      showToast(`Stock ${mutationType.replace("_", " ")} request submitted successfully!`, "success");
+      await API.put(`/products/${selectedProduct._id}`, { ...details, ...overrides });
+      showToast(`"${productForm.name}" updated`, "success");
       setActiveModal(null);
+      fetchProducts(); // The change is live, so show it.
     } catch (error) {
-      showToast(error.response?.data?.message || "Failed to submit request", "error");
+      const { status, data } = error.response || {};
+
+      // 422 and 409 are the two intake checks asking a question (ST-10, ST-14),
+      // not failures: confirming sends the same edit back with the flag that
+      // answers it.
+      const override =
+        status === 422 && data?.code === "NAME_NOT_COMPLIANT"
+          ? "acknowledgeNaming"
+          : status === 409 && data?.code === "POSSIBLE_DUPLICATE"
+            ? "allowDuplicate"
+            : null;
+
+      if (override && !overrides[override] && window.confirm(`${data.message}.\n\nSave anyway?`)) {
+        return handleEditProduct(null, { ...overrides, [override]: true });
+      }
+
+      showToast(data?.message || "Failed to save the product", "error");
     }
   };
 
@@ -264,7 +245,6 @@ const ProductList = () => {
       quantity: 0,
       unit: "Pcs",
       minStock: 5,
-      maxStock: 100,
       storeRoom: "Engineer Room",
       description: "",
       image: "",
@@ -466,15 +446,14 @@ const ProductList = () => {
                             <Eye className="h-4 w-4" />
                           </button>
 
-                          {/* Edit */}
+                          {/* Edit (direct — no approval) */}
                           <button
                             onClick={() => openEditModal(product)}
                             className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-brand-700 transition-all cursor-pointer"
-                            title="Request Edit Product"
+                            title="Edit Product"
                           >
                             <Edit className="h-4 w-4" />
                           </button>
-
 
 
                           {/* Issue Product (direct) */}
@@ -569,10 +548,6 @@ const ProductList = () => {
                     <span className="text-slate-500 block mb-0.5">Min Stock Limit</span>
                     <span className="font-semibold text-slate-800">{selectedProduct.minStock} {selectedProduct.unit}</span>
                   </div>
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                    <span className="text-slate-500 block mb-0.5">Max Stock Limit</span>
-                    <span className="font-semibold text-slate-800">{selectedProduct.maxStock} {selectedProduct.unit}</span>
-                  </div>
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
@@ -588,7 +563,7 @@ const ProductList = () => {
             <div className="glass-premium w-full max-w-2xl rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="font-bold text-lg text-slate-900">
-                  {activeModal === "add" ? "Request Add New Product" : `Request Edit Product: ${selectedProduct?.name}`}
+                  {activeModal === "add" ? "Request Add New Product" : `Edit Product: ${selectedProduct?.name}`}
                 </h3>
                 <button
                   onClick={() => setActiveModal(null)}
@@ -598,7 +573,7 @@ const ProductList = () => {
                 </button>
               </div>
 
-              <form onSubmit={activeModal === "add" ? handleAddRequest : handleEditRequest} className="p-6 space-y-4">
+              <form onSubmit={activeModal === "add" ? handleAddRequest : handleEditProduct} className="p-6 space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Name */}
                   <div>
@@ -672,9 +647,16 @@ const ProductList = () => {
                       onChange={handleFormChange}
                       required
                       min="0"
-                      disabled={activeModal === "edit"} // Quantity edits must go through stock request
+                      // Locked on an edit: the details save directly, but stock
+                      // still arrives through a Stock In request.
+                      disabled={activeModal === "edit"}
                       className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 disabled:opacity-50 focus:outline-none focus:border-brand-500"
                     />
+                    {activeModal === "edit" && (
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Quantity is locked here — raise a Stock In request to change it.
+                      </p>
+                    )}
                   </div>
 
                   {/* Unit */}
@@ -698,20 +680,6 @@ const ProductList = () => {
                       type="number"
                       name="minStock"
                       value={productForm.minStock}
-                      onChange={handleFormChange}
-                      required
-                      min="0"
-                      className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
-                    />
-                  </div>
-
-                  {/* Max Stock */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Maximum Stock Limit *</label>
-                    <input
-                      type="number"
-                      name="maxStock"
-                      value={productForm.maxStock}
                       onChange={handleFormChange}
                       required
                       min="0"
@@ -786,81 +754,14 @@ const ProductList = () => {
                     type="submit"
                     className="px-4 py-2 text-xs font-semibold rounded-xl bg-brand-600 hover:bg-brand-500 text-white cursor-pointer shadow-lg active:scale-98 transition-all"
                   >
-                    Submit Request
+                    {activeModal === "add" ? "Submit Request" : "Save Changes"}
                   </button>
                 </div>
               </form>
             </div>
           )}
 
-          {/* 3. Modal: STOCK MUTATION FORM */}
-          {activeModal === "stock" && selectedProduct && (
-            <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
-              <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-                <h3 className="font-bold text-lg text-slate-900">
-                  Request Stock {mutationType === "IN" ? "In" : mutationType === "OUT" ? "Out" : "Return"}
-                </h3>
-                <button
-                  onClick={() => setActiveModal(null)}
-                  className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 cursor-pointer"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              <form onSubmit={handleStockRequest} className="p-6 space-y-4">
-                <div className="flex gap-3 mb-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
-                  <img
-                    src={selectedProduct.image || "https://images.unsplash.com/photo-1595246140707-1e5b22b271d4?w=50&auto=format"}
-                    alt={selectedProduct.name}
-                    className="w-12 h-12 rounded-lg object-cover border border-slate-200"
-                  />
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-900">{selectedProduct.name}</h4>
-                    <span className="text-[10px] text-slate-600">Current Stock: <strong className="text-brand-700">{selectedProduct.quantity} {selectedProduct.unit}</strong></span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                    Mutation Quantity ({selectedProduct.unit}) *
-                  </label>
-                  <input
-                    type="number"
-                    value={mutationQty}
-                    onChange={(e) => setMutationQty(Math.max(1, Number(e.target.value)))}
-                    required
-                    min="1"
-                    className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
-                  />
-                  {mutationType === "OUT" && mutationQty > selectedProduct.quantity && (
-                    <div className="text-rose-600 text-[10px] mt-1 flex items-center gap-1 font-medium">
-                      <AlertCircle className="h-3.5 w-3.5" /> Quantity exceeds available stock!
-                    </div>
-                  )}
-                </div>
-
-                <div className="pt-4 border-t border-slate-200 flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setActiveModal(null)}
-                    className="px-4 py-2 text-xs font-semibold rounded-xl bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={mutationType === "OUT" && mutationQty > selectedProduct.quantity}
-                    className="px-4 py-2 text-xs font-semibold rounded-xl bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-50 cursor-pointer shadow-lg active:scale-98 transition-all"
-                  >
-                    Submit Mutation
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-
-          {/* 4. Modal: ISSUE PRODUCT FORM */}
+          {/* 3. Modal: ISSUE PRODUCT FORM */}
           {activeModal === "issue" && selectedProduct && (
             <div className="glass-premium w-full max-w-md rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">

@@ -515,12 +515,6 @@ const RequestManagement = () => {
                           {selectedRequest.details.minStock} {selectedRequest.details.unit}
                         </span>
                       </div>
-                      <div className="kv">
-                        <span className="kv-label">Max Stock Limit</span>
-                        <span className="kv-value">
-                          {selectedRequest.details.maxStock} {selectedRequest.details.unit}
-                        </span>
-                      </div>
                     </div>
 
                     <div className="kv">
@@ -555,10 +549,9 @@ const RequestManagement = () => {
                           <span className="kv-value text-slate-600">{selectedRequest.product?.storeRoom}</span>
                         </div>
                         <div>
-                          <span className="kv-label">Stock Bounds</span>
+                          <span className="kv-label">Min Stock</span>
                           <span className="kv-value text-slate-600">
-                            Min: {selectedRequest.product?.minStock} | Max:{" "}
-                            {selectedRequest.product?.maxStock}
+                            {selectedRequest.product?.minStock}
                           </span>
                         </div>
                       </div>
@@ -591,15 +584,13 @@ const RequestManagement = () => {
                           </span>
                         </div>
                         <div>
-                          <span className="kv-label">Stock Bounds</span>
+                          <span className="kv-label">Min Stock</span>
                           <span className={`kv-value ${
-                            selectedRequest.product?.minStock !== selectedRequest.details.minStock ||
-                            selectedRequest.product?.maxStock !== selectedRequest.details.maxStock
+                            selectedRequest.product?.minStock !== selectedRequest.details.minStock
                               ? "text-brand-700"
                               : "text-slate-700"
                           }`}>
-                            Min: {selectedRequest.details.minStock} | Max:{" "}
-                            {selectedRequest.details.maxStock}
+                            {selectedRequest.details.minStock}
                           </span>
                         </div>
                       </div>

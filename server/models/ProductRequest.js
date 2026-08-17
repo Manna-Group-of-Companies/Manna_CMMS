@@ -24,6 +24,11 @@ const productRequestSchema = new mongoose.Schema(
       code: String,
       name: { type: String, required: true },
       category: { type: String, required: true },
+      // The second level of the store's classification, e.g. category "Tools" /
+      // sub-category "Ring Spanners". Optional: requests raised before the field
+      // existed carry none, and an approval must not blank out what the product
+      // already says — see the EDIT branch of processRequest.
+      subCategory: { type: String, default: "", trim: true },
       // Condition as picked in the app. Free text for the same reason it is on
       // the product — the store's phrasings keep changing — and optional so a
       // request raised by an older client still validates.
@@ -34,7 +39,6 @@ const productRequestSchema = new mongoose.Schema(
       quantity: { type: Number, required: true, default: 0 },
       unit: { type: String, required: true },
       minStock: { type: Number, required: true, default: 5 },
-      maxStock: { type: Number, required: true, default: 100 },
       // Named rather than referenced, because the request records what the
       // supervisor asked for. Any active room is allowed: pinning an enum here
       // meant a renamed or newly added room could not be requested at all.

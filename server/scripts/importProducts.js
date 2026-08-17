@@ -68,7 +68,6 @@ const COLUMN_ALIASES = {
   ],
   unit: ["unit", "uom", "units", "measure"],
   minStock: ["minstock", "min", "minimum", "minimumstock", "reorderlevel", "minqty"],
-  maxStock: ["maxstock", "max", "maximum", "maximumstock", "maxqty"],
   unitCost: ["unitcost", "cost", "rate", "price", "unitprice"],
   storeRoom: ["storeroom", "room", "store", "stockroom", "warehouse"],
   description: ["description", "details", "remarks", "notes", "specification"],
@@ -284,7 +283,6 @@ const run = async () => {
       description: record.description || "",
       image: record.image || "",
       minStock: toNumber(record.minStock, 5),
-      maxStock: toNumber(record.maxStock, 100),
       unitCost: Math.max(toDecimal(record.unitCost, 0), 0),
       openingStock: toDecimal(record.quantity, 0),
       line: record.__line,
@@ -320,8 +318,8 @@ const run = async () => {
       invalid.push(`Line ${row.line} (${row.code}): quantity cannot be negative`);
       continue;
     }
-    if (row.minStock < 0 || row.maxStock < 0) {
-      invalid.push(`Line ${row.line} (${row.code}): min/max stock cannot be negative`);
+    if (row.minStock < 0) {
+      invalid.push(`Line ${row.line} (${row.code}): min stock cannot be negative`);
       continue;
     }
     if (seen.has(row.code)) {

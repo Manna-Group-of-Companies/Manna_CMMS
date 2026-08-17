@@ -17,6 +17,7 @@ import '../../widgets/common.dart';
 import '../../widgets/item_name_builder.dart';
 import '../../widgets/product_details_sheet.dart' show SheetGrabber;
 
+
 /// Photos are stored inline on the product record as a base64 `data:` URI, so
 /// keep them small enough for the API request (and the Mongo document).
 const _maxPhotoBytes = 2 * 1024 * 1024;
@@ -46,29 +47,32 @@ const _sampleImages = <({String name, String url})>[
   ),
 ];
 
-/// ADD (when [product] is null) or EDIT product request form.
-/// Resolves to `true` when a request was submitted.
-Future<bool> showProductRequestForm(BuildContext context, {Product? product}) async {
+/// The product form: an ADD request when [product] is null, and a direct edit
+/// of [product] when one is given.
+///
+/// Adding an item is the one catalog change the Admin still approves. An edit is
+/// saved on the product itself, so it is live as soon as the sheet closes.
+/// Resolves to `true` when something was submitted or saved.
+Future<bool> showProductForm(BuildContext context, {Product? product}) async {
   final result = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => _ProductRequestForm(product: product),
+    builder: (_) => _ProductForm(product: product),
   );
   return result ?? false;
 }
 
-/// Stock In / Out / Return request. [kind] is `stockin`, `stockout` or `stockreturn`.
-Future<bool> showStockRequestForm(
+/// Stock In request — the one stock change that waits for the Admin.
+Future<bool> showStockInRequestForm(
   BuildContext context, {
   required Product product,
-  required String kind,
 }) async {
   final result = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => _StockRequestForm(product: product, kind: kind),
+    builder: (_) => _StockInRequestForm(product: product),
   );
   return result ?? false;
 }
@@ -285,6 +289,170 @@ class _Field extends StatelessWidget {
   }
 }
 
+/// Sentinel item that swaps the dropdown for a text box.
+const _addNewTaxonomy = '__add_new__';
+
+/// Sentinel for "nothing picked yet". A dropdown's value has to be one of its
+/// items, so the placeholder needs a value of its own.
+const _unsetTaxonomy = '';
+
+/// Category / sub-category picker over the classifications already in use.
+///
+/// A free text box is why a catalog ends up holding "Bearing", "Bearings" and
+/// "BEARING" as three separate categories. A closed dropdown would be worse —
+/// the store genuinely does meet a class of item it has never stocked. So this
+/// is a dropdown with exactly one escape hatch, which makes reusing an existing
+/// classification the easy path and inventing one a deliberate act.
+///
+/// [options] are owned by the parent: the sub-category list depends on the
+/// category chosen above it, so the reload belongs to whoever holds both.
+class _TaxonomyPicker extends StatefulWidget {
+  const _TaxonomyPicker({
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    this.placeholder = 'Select…',
+    this.newLabel = '＋ Add a new one…',
+    this.hintText = '',
+    this.enabled = true,
+    this.loading = false,
+  });
+
+  final String value;
+  final List<String> options;
+  final ValueChanged<String> onChanged;
+  final String placeholder;
+  final String newLabel;
+
+  /// Shown inside the text box once "add a new one" is chosen.
+  final String hintText;
+  final bool enabled;
+
+  /// The options are still on their way. Shown rather than hidden, so the field
+  /// does not look empty when it is merely unloaded.
+  final bool loading;
+
+  @override
+  State<_TaxonomyPicker> createState() => _TaxonomyPickerState();
+}
+
+class _TaxonomyPickerState extends State<_TaxonomyPicker> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.value);
+
+  late bool _typing = _isFreeText;
+
+  /// A value the option list does not contain can only have been typed in.
+  /// Guarded on the list being loaded — before that, *everything* looks unknown.
+  bool get _isFreeText =>
+      widget.value.isNotEmpty &&
+      widget.options.isNotEmpty &&
+      !widget.options.contains(widget.value);
+
+  @override
+  void didUpdateWidget(covariant _TaxonomyPicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // The list arrived after the widget mounted (the usual case on an edit) and
+    // the saved value turns out not to be in it.
+    if (!_typing && _isFreeText) {
+      _controller.text = widget.value;
+      setState(() => _typing = true);
+      return;
+    }
+
+    // The *parent* cleared the field — a sub-category dropped because the
+    // category above it changed. Fall back to the list, which is now a
+    // different list.
+    //
+    // Told apart from the user emptying the text box by the inner controller
+    // rather than by the old value: every keystroke writes straight through, so
+    // those two stay in step, and only an outside change can leave the
+    // controller holding text the parent no longer has. Comparing against
+    // `oldWidget.value` instead would treat backspacing the last character of a
+    // half-typed name as a reset, clearing the box and snapping it back to a
+    // dropdown mid-word.
+    if (_typing && widget.value.isEmpty && _controller.text.isNotEmpty) {
+      _controller.clear();
+      setState(() => _typing = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String _labelFor(String item) => switch (item) {
+        _unsetTaxonomy => widget.loading ? 'Loading…' : widget.placeholder,
+        _addNewTaxonomy => widget.newLabel,
+        _ => item,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    if (_typing) {
+      return Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              enabled: widget.enabled,
+              textCapitalization: TextCapitalization.words,
+              autofocus: true,
+              onChanged: widget.onChanged,
+              decoration: InputDecoration(
+                hintText:
+                    widget.hintText.isEmpty ? widget.placeholder : widget.hintText,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            onPressed: widget.enabled
+                ? () {
+                    _controller.clear();
+                    widget.onChanged('');
+                    setState(() => _typing = false);
+                  }
+                : null,
+            icon: const Icon(Icons.list, size: 20),
+            color: AppColors.textSecondary,
+            tooltip: 'Pick from the list instead',
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      );
+    }
+
+    // Deduped because a dropdown asserts on repeated values, and the option
+    // lists come straight off the API.
+    final items = <String>{_unsetTaxonomy, ...widget.options, _addNewTaxonomy}.toList();
+
+    return DropdownShell(
+      child: AppDropdown<String>(
+        value: widget.options.contains(widget.value) ? widget.value : _unsetTaxonomy,
+        items: items,
+        labelBuilder: _labelFor,
+        onChanged: (picked) {
+          if (!widget.enabled) return;
+
+          if (picked == _addNewTaxonomy) {
+            // Cleared, so the box opens empty rather than holding the value the
+            // user has just decided is wrong.
+            _controller.clear();
+            widget.onChanged('');
+            setState(() => _typing = true);
+            return;
+          }
+          widget.onChanged(picked ?? '');
+        },
+      ),
+    );
+  }
+}
+
 /// Compact product header shown at the top of the stock/issue forms.
 class _ProductSummary extends StatelessWidget {
   const _ProductSummary({required this.product});
@@ -344,19 +512,19 @@ class _ProductSummary extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// ADD / EDIT product request
+// ADD request / direct edit
 // ---------------------------------------------------------------------------
 
-class _ProductRequestForm extends StatefulWidget {
-  const _ProductRequestForm({this.product});
+class _ProductForm extends StatefulWidget {
+  const _ProductForm({this.product});
 
   final Product? product;
 
   @override
-  State<_ProductRequestForm> createState() => _ProductRequestFormState();
+  State<_ProductForm> createState() => _ProductFormState();
 }
 
-class _ProductRequestFormState extends State<_ProductRequestForm> {
+class _ProductFormState extends State<_ProductForm> {
   final _formKey = GlobalKey<FormState>();
 
   late final bool _isEdit = widget.product != null;
@@ -365,12 +533,13 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
       : ProductDraft.fromProduct(widget.product!);
 
   late final _name = TextEditingController(text: _draft.name);
-  late final _category = TextEditingController(text: _draft.category);
+  // Category and sub-category have no controller of their own: TaxonomyPicker
+  // is a dropdown that keeps its own text box for the "add a new one" case, so
+  // the draft is the single source of truth for both.
   late final _rackNumber = TextEditingController(text: _draft.rackNumber);
   late final _quantity = TextEditingController(text: '${_draft.quantity}');
   late final _unit = TextEditingController(text: _draft.unit);
   late final _minStock = TextEditingController(text: '${_draft.minStock}');
-  late final _maxStock = TextEditingController(text: '${_draft.maxStock}');
   late final _description = TextEditingController(text: _draft.description);
   // A captured photo lives in [_photo], not in the URL field: a base64 data URI
   // is far too long to sit inside a text input.
@@ -383,9 +552,13 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
 
   // ---------------------------------------------------- intake checks (ST-09→14)
 
-  /// Open by default on a new item, and on an existing one that was named with
-  /// the builder — so its parts are visible rather than hidden.
-  late bool _showBuilder = !_isEdit || widget.product?.naming != null;
+  /// Open by default, on an edit as much as on a new item.
+  ///
+  /// This used to be gated on the product already carrying `naming`, which hid
+  /// the builder for every item entered before SOI1/SOP1 existed — precisely
+  /// the set that needs it, since bringing a legacy name up to standard is the
+  /// main reason to open the builder while editing.
+  bool _showBuilder = true;
 
   /// Debounced checks against the name as it is typed. Both run on the same
   /// timer so a keystroke costs one round of requests, not two.
@@ -410,6 +583,24 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
       (_refusedName != null && !_acknowledgeNaming) ||
       (_refusedDuplicates != null && !_allowDuplicate);
 
+  // ------------------------------------------------- category / sub-category
+
+  /// Categories and sub-categories already in the catalog, offered as choices.
+  ///
+  /// The classifications already in use, offered by [TaxonomyPicker].
+  ///
+  /// Reusing one is the easy path — that is what keeps "Bearing", "Bearings"
+  /// and "BEARING" from becoming three categories — while the picker's "add a
+  /// new one" escape hatch still covers a class of item the store has never
+  /// stocked before.
+  List<String> _categoryOptions = const [];
+  List<String> _subCategoryOptions = const [];
+
+  /// Shown as "Loading…" in the picker, so an unloaded list does not read as an
+  /// empty one.
+  bool _loadingCategories = true;
+  bool _loadingSubCategories = false;
+
   @override
   void initState() {
     super.initState();
@@ -417,6 +608,63 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
     // straight to the controller, and that has to be checked too.
     _name.addListener(_onNameChanged);
     if (_name.text.trim().isNotEmpty) _scheduleNameChecks();
+    _loadCategories();
+    // On an edit the category is already known, so its sub-categories can be
+    // fetched straight away rather than waiting for the field to change.
+    if (_draft.category.isNotEmpty) {
+      _loadingSubCategories = true;
+      _loadSubCategories(_draft.category);
+    }
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final options = await context.read<StockRepository>().categories();
+      if (mounted) setState(() => _categoryOptions = options);
+    } catch (error) {
+      // Without its options the picker still offers "add a new one", so the
+      // form stays usable — not worth interrupting it for.
+      debugPrint('Could not load categories: $error');
+    } finally {
+      if (mounted) setState(() => _loadingCategories = false);
+    }
+  }
+
+  Future<void> _loadSubCategories(String category) async {
+    try {
+      final options =
+          await context.read<StockRepository>().subCategories(category: category);
+      // A late reply for a category the user has since changed away from must
+      // not repopulate the list underneath them.
+      if (mounted && _draft.category == category) {
+        setState(() => _subCategoryOptions = options);
+      }
+    } catch (error) {
+      debugPrint('Could not load sub-categories: $error');
+    } finally {
+      if (mounted && _draft.category == category) {
+        setState(() => _loadingSubCategories = false);
+      }
+    }
+  }
+
+  /// True once the builder has produced a name different from the saved one.
+  ///
+  /// The name field is read-only on an edit, so this is the only way it moves —
+  /// and the only case where the convention is enforced on a rename.
+  bool get _renamed => _isEdit && _name.text.trim() != widget.product!.name;
+
+  /// A sub-category belongs to one category, so changing the category reloads
+  /// the list and drops a selection that no longer belongs to it.
+  void _onCategoryChanged(String category) {
+    final picked = category.trim();
+    setState(() {
+      _draft.category = picked;
+      _draft.subCategory = '';
+      _subCategoryOptions = const [];
+      _loadingSubCategories = picked.isNotEmpty;
+    });
+    if (picked.isNotEmpty) _loadSubCategories(picked);
   }
 
   void _onNameChanged() {
@@ -460,7 +708,7 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
             ? const <DuplicateMatch>[]
             : await repository.findDuplicates(
                 name: name,
-                category: _category.text.trim(),
+                category: _draft.category,
                 excludeId: widget.product?.id,
               );
 
@@ -501,12 +749,10 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
     _nameTimer?.cancel();
     for (final controller in [
       _name,
-      _category,
       _rackNumber,
       _quantity,
       _unit,
       _minStock,
-      _maxStock,
       _description,
       _image,
     ]) {
@@ -519,29 +765,47 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
 
+    // Category is a dropdown rather than a form field, so `validate()` cannot
+    // speak for it — it is checked here instead.
+    if (_draft.category.isEmpty) {
+      Toast.error('Pick a category');
+      return;
+    }
+
+    // Category and sub-category are written straight to the draft as they are
+    // picked, so they are already current here.
     _draft
       ..name = _name.text.trim()
-      ..category = _category.text.trim()
       ..rackNumber = _rackNumber.text.trim()
       ..quantity = int.tryParse(_quantity.text) ?? 0
       ..unit = _unit.text.trim()
       ..minStock = int.tryParse(_minStock.text) ?? 0
-      ..maxStock = int.tryParse(_maxStock.text) ?? 0
       ..description = _description.text.trim()
       ..image = _photo ?? _image.text.trim();
 
     setState(() => _submitting = true);
     try {
-      await context.read<StockRepository>().createProductRequest(
-            requestType: _isEdit ? 'EDIT' : 'ADD',
-            productId: widget.product?.id,
-            details: _draft,
-            acknowledgeNaming: _acknowledgeNaming,
-            allowDuplicate: _allowDuplicate,
-          );
-      Toast.success(
-        'Product ${_isEdit ? 'EDIT' : 'ADD'} request submitted successfully!',
-      );
+      final repository = context.read<StockRepository>();
+
+      // An edit is saved straight onto the product; only a new item is queued
+      // for the Admin. Either way the same two intake checks run server-side,
+      // and are answered from the same two confirmations below.
+      if (_isEdit) {
+        await repository.updateProduct(
+          productId: widget.product!.id,
+          details: _draft,
+          acknowledgeNaming: _acknowledgeNaming,
+          allowDuplicate: _allowDuplicate,
+        );
+        Toast.success('"${_draft.name}" updated');
+      } else {
+        await repository.createProductRequest(
+          details: _draft,
+          acknowledgeNaming: _acknowledgeNaming,
+          allowDuplicate: _allowDuplicate,
+        );
+        Toast.success('Product ADD request submitted successfully!');
+      }
       if (mounted) Navigator.of(context).pop(true);
     } on ApiException catch (error) {
       // 422 and 409 are the two intake checks asking for confirmation (ST-10,
@@ -553,7 +817,7 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
               .map(NamingIssue.fromJson)
               .toList();
         });
-        Toast.error('Check the product name before submitting');
+        Toast.error('Check the product name before saving');
       } else if (error.statusCode == 409 && error.code == 'POSSIBLE_DUPLICATE' && mounted) {
         setState(() {
           _refusedDuplicates = (error.body?['matches'] as List? ?? [])
@@ -567,7 +831,7 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
         Toast.error(error.message);
       }
     } catch (_) {
-      Toast.error('Failed to submit request');
+      Toast.error(_isEdit ? 'Failed to save the product' : 'Failed to submit request');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -633,9 +897,9 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
       key: _formKey,
       child: _FormSheet(
         title: _isEdit
-            ? 'Request Edit: ${widget.product!.name}'
+            ? 'Edit: ${widget.product!.name}'
             : 'Request Add New Product',
-        submitLabel: 'Submit Request',
+        submitLabel: _isEdit ? 'Save Changes' : 'Submit Request',
         submitting: _submitting,
         canSubmit: !_awaitingConfirmation,
         onSubmit: _submit,
@@ -682,10 +946,39 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
                 TextFormField(
                   controller: _name,
                   validator: _requiredValidator,
-                  decoration: const InputDecoration(hintText: 'e.g. 25MM Bearing Deep Groove'),
+                  // Not typed by hand on an edit: a name is changed by building
+                  // a compliant one above and adopting it. Typing over a name
+                  // in the field is how the catalog drifted off the standard in
+                  // the first place.
+                  readOnly: _isEdit,
+                  style: _isEdit
+                      ? const TextStyle(color: AppColors.textSecondary)
+                      : null,
+                  decoration: InputDecoration(
+                    hintText: 'e.g. 25MM Bearing Deep Groove',
+                    fillColor: _isEdit ? AppColors.surfaceMuted : null,
+                    filled: _isEdit ? true : null,
+                  ),
                 ),
-                // ST-10 — the verdict on the name as it currently stands.
-                if (_nameCheck != null) ...[
+                if (_isEdit) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    _renamed
+                        ? 'Renamed from "${widget.product!.name}" — saving applies it.'
+                        : 'Use the builder above and press "Use this name" to change it.',
+                    style: TextStyle(
+                      color: _renamed ? AppColors.primaryDeep : AppColors.textMuted,
+                      fontSize: 11,
+                      fontWeight: _renamed ? FontWeight.w600 : FontWeight.w400,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+                // ST-10 — the verdict on the name as it currently stands. Held
+                // back on an edit that has not renamed anything: the server does
+                // not hold an unchanged legacy name to the rules, so flagging it
+                // would be a telling-off for something this form will not touch.
+                if (_nameCheck != null && (!_isEdit || _renamed)) ...[
                   const SizedBox(height: 8),
                   NameComplianceHint(check: _nameCheck!),
                 ],
@@ -700,10 +993,34 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
           _Field(
             label: 'Category',
             required: true,
-            child: TextFormField(
-              controller: _category,
-              validator: _requiredValidator,
-              decoration: const InputDecoration(hintText: 'e.g. Electronics, Furniture'),
+            child: _TaxonomyPicker(
+              value: _draft.category,
+              options: _categoryOptions,
+              loading: _loadingCategories,
+              enabled: !_submitting,
+              placeholder: 'Select a category…',
+              newLabel: '＋ Add a new category…',
+              hintText: 'e.g. Bearings',
+              onChanged: _onCategoryChanged,
+            ),
+          ),
+          // Narrowed to the category above — the catalog carries well over a
+          // hundred sub-categories, and an unscoped list is unusable.
+          _Field(
+            label: 'Sub-category',
+            child: _TaxonomyPicker(
+              value: _draft.subCategory,
+              options: _subCategoryOptions,
+              loading: _loadingSubCategories,
+              // Nothing to narrow by until a category is chosen.
+              enabled: !_submitting && _draft.category.isNotEmpty,
+              placeholder: _draft.category.isEmpty
+                  ? 'Pick a category first'
+                  : 'Select a sub-category…',
+              newLabel: '＋ Add a new sub-category…',
+              hintText: 'e.g. Ring Spanners',
+              onChanged: (value) =>
+                  setState(() => _draft.subCategory = value.trim()),
             ),
           ),
           _Field(
@@ -727,88 +1044,69 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
               decoration: const InputDecoration(hintText: 'e.g. A-1'),
             ),
           ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: _Field(
-                  label: 'Initial Quantity',
-                  required: true,
-                  child: TextFormField(
-                    controller: _quantity,
-                    // Quantity changes must go through a stock request.
-                    enabled: !_isEdit,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: _numberValidator,
+          // Asked for once, when the item is first taken in. An edit does not
+          // offer them: quantity and store room move real stock, and unit and
+          // minimum stock are identity and purchasing figures that should not
+          // drift from a sheet somebody opened to fix a shelf label.
+          if (!_isEdit) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: _Field(
+                    label: 'Initial Quantity',
+                    required: true,
+                    child: TextFormField(
+                      controller: _quantity,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: _numberValidator,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _Field(
-                  label: 'Unit of Measure',
-                  required: true,
-                  child: TextFormField(
-                    controller: _unit,
-                    validator: _requiredValidator,
-                    decoration: const InputDecoration(hintText: 'Pcs, Box, Kg'),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _Field(
+                    label: 'Unit of Measure',
+                    required: true,
+                    child: TextFormField(
+                      controller: _unit,
+                      validator: _requiredValidator,
+                      decoration: const InputDecoration(hintText: 'Pcs, Box, Kg'),
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-          if (_isEdit)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 16),
-              child: Text(
-                'Quantity is locked on edit requests — use a Stock In / Out request '
-                'to change it.',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 11, height: 1.4),
+              ],
+            ),
+            _Field(
+              label: 'Minimum Stock',
+              required: true,
+              child: TextFormField(
+                controller: _minStock,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                validator: _numberValidator,
               ),
             ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: _Field(
-                  label: 'Minimum Stock',
-                  required: true,
-                  child: TextFormField(
-                    controller: _minStock,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: _numberValidator,
-                  ),
+            _Field(
+              label: 'Store Room',
+              required: true,
+              child: DropdownShell(
+                child: AppDropdown<String>(
+                  value: _draft.storeRoom,
+                  items: const ['Engineer Room', 'Consumables Room'],
+                  onChanged: (value) =>
+                      setState(() => _draft.storeRoom = value ?? _draft.storeRoom),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _Field(
-                  label: 'Maximum Stock',
-                  required: true,
-                  child: TextFormField(
-                    controller: _maxStock,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: _numberValidator,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          _Field(
-            label: 'Store Room',
-            required: true,
-            child: DropdownShell(
-              child: AppDropdown<String>(
-                value: _draft.storeRoom,
-                items: const ['Engineer Room', 'Consumables Room'],
-                onChanged: (value) =>
-                    setState(() => _draft.storeRoom = value ?? _draft.storeRoom),
               ),
             ),
-          ),
+          ],
+          // Still shown on an edit, just not editable — the figures are needed
+          // to make sense of the item, and each says where it does change.
+          if (_isEdit) ...[
+            _LockedFacts(product: widget.product!),
+            const SizedBox(height: 18),
+          ],
           _Field(
             label: 'Product Image',
             child: Column(
@@ -1007,6 +1305,100 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
   }
 }
 
+/// The figures an edit does not offer, with where each one actually changes.
+///
+/// Shown rather than dropped: somebody correcting a rack number still needs to
+/// know which room and how much, and a form that silently omits half an item
+/// reads as though the data were missing.
+class _LockedFacts extends StatelessWidget {
+  const _LockedFacts({required this.product});
+
+  final Product product;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <({String label, String value, String where})>[
+      (label: 'Product Code', value: product.code, where: 'fixed identity'),
+      (label: 'Unit of Measure', value: product.unit, where: 'fixed identity'),
+      (
+        label: 'Current Stock',
+        value: '${product.quantity} ${product.unit}',
+        where: 'Stock In request',
+      ),
+      (label: 'Store Room', value: product.storeRoom, where: 'Admin moves it'),
+      (
+        label: 'Minimum Stock',
+        value: '${product.minStock} ${product.unit}',
+        where: 'purchasing figure',
+      ),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceMuted,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.lock_outline, size: 14, color: AppColors.textMuted),
+              SizedBox(width: 6),
+              Text(
+                'Not changed here',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          for (final row in rows)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 7),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 4,
+                    child: Text(
+                      row.label,
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 5,
+                    child: Text(
+                      row.value,
+                      style: const TextStyle(
+                        color: AppColors.textBody,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 4,
+                    child: Text(
+                      row.where,
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(color: AppColors.textFaint, fontSize: 10),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Camera / gallery button pair shown next to the image preview.
 class _PhotoSourceButton extends StatelessWidget {
   const _PhotoSourceButton({
@@ -1038,43 +1430,36 @@ class _PhotoSourceButton extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Stock In / Out / Return request
+// Stock In request
+//
+// Stock arriving is the one movement a supervisor cannot make alone: the Admin
+// takes delivery of it and says which room it landed in. Stock leaving needs no
+// request — it is issued, consumed, scrapped or returned, and each of those
+// applies straight away.
 // ---------------------------------------------------------------------------
 
-class _StockRequestForm extends StatefulWidget {
-  const _StockRequestForm({required this.product, required this.kind});
+class _StockInRequestForm extends StatefulWidget {
+  const _StockInRequestForm({required this.product});
 
   final Product product;
-  final String kind;
 
   @override
-  State<_StockRequestForm> createState() => _StockRequestFormState();
+  State<_StockInRequestForm> createState() => _StockInRequestFormState();
 }
 
-class _StockRequestFormState extends State<_StockRequestForm> {
+class _StockInRequestFormState extends State<_StockInRequestForm> {
   final _controller = TextEditingController(text: '1');
   bool _submitting = false;
 
-  /// Only a Stock In lands somewhere, so only it offers a room.
-  bool get _picksRoom => widget.kind == 'stockin';
   List<StockRoom> _rooms = const [];
   String? _roomId;
 
-  String get _label => switch (widget.kind) {
-        'stockin' => 'Stock In',
-        'stockout' => 'Stock Out',
-        _ => 'Stock Return',
-      };
-
   int get _quantity => int.tryParse(_controller.text.trim()) ?? 0;
-
-  bool get _exceedsStock =>
-      widget.kind == 'stockout' && _quantity > widget.product.quantity;
 
   @override
   void initState() {
     super.initState();
-    if (_picksRoom) _loadRooms();
+    _loadRooms();
   }
 
   Future<void> _loadRooms() async {
@@ -1112,15 +1497,15 @@ class _StockRequestFormState extends State<_StockRequestForm> {
 
     setState(() => _submitting = true);
     try {
-      final requestNumber = await context.read<StockRepository>().createStockRequest(
-            kind: widget.kind,
-            productId: widget.product.id,
-            quantity: _quantity,
-            stockRoomId: _picksRoom ? _roomId : null,
-          );
+      final requestNumber =
+          await context.read<StockRepository>().createStockInRequest(
+                productId: widget.product.id,
+                quantity: _quantity,
+                stockRoomId: _roomId,
+              );
       Toast.success(
         requestNumber.isEmpty
-            ? '$_label request submitted successfully!'
+            ? 'Stock In request submitted successfully!'
             : 'Stock request $requestNumber submitted successfully.',
       );
       if (mounted) Navigator.of(context).pop(true);
@@ -1136,53 +1521,23 @@ class _StockRequestFormState extends State<_StockRequestForm> {
   @override
   Widget build(BuildContext context) {
     return _FormSheet(
-      title: 'Request $_label',
+      title: 'Request Stock In',
       submitLabel: 'Submit Request',
       submitting: _submitting,
-      canSubmit: !_exceedsStock,
       initialSize: 0.55,
       onSubmit: _submit,
       children: [
         _ProductSummary(product: widget.product),
         const SizedBox(height: 18),
         _Field(
-          label: 'Mutation Quantity (${widget.product.unit})',
+          label: 'Quantity Received (${widget.product.unit})',
           required: true,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              QuantityStepper(
-                controller: _controller,
-                max: widget.kind == 'stockout' ? widget.product.quantity : null,
-                onChanged: () => setState(() {}),
-              ),
-              if (widget.kind == 'stockout') ...[
-                const SizedBox(height: 7),
-                Text(
-                  'Max available: ${widget.product.quantity} ${widget.product.unit}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5),
-                ),
-              ],
-            ],
+          child: QuantityStepper(
+            controller: _controller,
+            onChanged: () => setState(() {}),
           ),
         ),
-        if (_exceedsStock)
-          const Row(
-            children: [
-              Icon(Icons.error_outline, size: 14, color: AppColors.dangerDeep),
-              SizedBox(width: 6),
-              Text(
-                'Quantity exceeds available stock!',
-                style: TextStyle(
-                  color: AppColors.dangerDeep,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        if (_picksRoom && _rooms.isNotEmpty)
+        if (_rooms.isNotEmpty)
           _Field(
             label: 'Preferred Stock Room',
             child: Column(
@@ -1206,10 +1561,10 @@ class _StockRequestFormState extends State<_StockRequestForm> {
             ),
           ),
         const SizedBox(height: 8),
-        Text(
+        const Text(
           'This request goes to the office Admin for approval; stock changes only '
           'once it is approved.',
-          style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5, height: 1.5),
+          style: TextStyle(color: AppColors.textMuted, fontSize: 11.5, height: 1.5),
         ),
       ],
     );

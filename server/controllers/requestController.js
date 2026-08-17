@@ -34,13 +34,17 @@ const stampDecision = (request, { adminId, approved }) => {
 
 // ==========================================
 // SUPERVISOR: Create Requests
+//
+// Two things still need the Admin: a brand new catalog item, and stock coming
+// in. Everything else a supervisor does — editing an item, issuing it, sending
+// it back to Red Stock — is applied the moment it is saved, so there is no
+// request for it to raise.
 // ==========================================
 
-// Create ADD or EDIT Product Request
+// Create an ADD Product Request
 export const createProductRequest = async (req, res) => {
   const {
-    requestType,
-    productId,
+    requestType = "ADD",
     details,
     // Same overrides as the Admin's direct create — the supervisor confirms a
     // flagged name or a possible duplicate rather than being blocked by it.
@@ -50,8 +54,15 @@ export const createProductRequest = async (req, res) => {
   const supervisorId = req.user._id;
 
   try {
-    if (!requestType || !["ADD", "EDIT"].includes(requestType)) {
-      return res.status(400).json({ message: "Invalid request type (must be ADD or EDIT)" });
+    // An EDIT is saved straight to the product now (PUT /api/products/:id), so
+    // the only request raised here is for an item that does not exist yet. An
+    // older client still posting EDIT is told where the change belongs rather
+    // than having it silently queued for an approval that no longer comes.
+    if (requestType !== "ADD") {
+      return res.status(400).json({
+        message:
+          "Product edits no longer need approval — save the change on the product itself",
+      });
     }
 
     // ST-09 / ST-10 — a request carries the name that will become the product,
@@ -70,43 +81,25 @@ export const createProductRequest = async (req, res) => {
       });
     }
 
+    // Auto-generate product code if not provided
     let productCode = details.code;
-    if (requestType === "ADD") {
-      // Auto-generate product code if not provided
-      if (!productCode) {
-        productCode = `PRD-${Math.floor(100000 + Math.random() * 900000)}`;
-      }
-      // Check if product code already exists in active products or pending ADD requests
-      const codeExists = await Product.findOne({ code: productCode });
-      if (codeExists) {
-        return res.status(400).json({ message: `Product code ${productCode} already exists in catalog` });
-      }
+    if (!productCode) {
+      productCode = `PRD-${Math.floor(100000 + Math.random() * 900000)}`;
     }
-
-    let editTarget = null;
-    if (requestType === "EDIT") {
-      if (!productId) {
-        return res.status(400).json({ message: "Product ID is required for edit requests" });
-      }
-      editTarget = await Product.findById(productId);
-      if (!editTarget) {
-        return res.status(404).json({ message: "Product not found" });
-      }
-      productCode = editTarget.code;
+    // Check if product code already exists in active products or pending ADD requests
+    const codeExists = await Product.findOne({ code: productCode });
+    if (codeExists) {
+      return res.status(400).json({ message: `Product code ${productCode} already exists in catalog` });
     }
 
     // ST-14 — warn on a request that would add something the store already
-    // holds. An EDIT is checked too, but only against *other* products, and
-    // only when it is actually renaming this one.
-    const isRename = !editTarget || named.name !== editTarget.name;
-
-    if (!allowDuplicate && isRename) {
+    // holds.
+    if (!allowDuplicate) {
       const matches = await findSimilarProducts({
         name: named.name,
-        code: requestType === "ADD" ? productCode : "",
+        code: productCode,
         brand: details?.brand,
         category: details?.category,
-        excludeId: editTarget?._id || null,
       });
 
       if (matches.length) {
@@ -122,12 +115,11 @@ export const createProductRequest = async (req, res) => {
       }
     }
 
-    const requestNumber = generateRequestNumber(requestType === "ADD" ? "REQ-ADD" : "REQ-EDT");
+    const requestNumber = generateRequestNumber("REQ-ADD");
 
     const newRequest = await ProductRequest.create({
       requestNumber,
-      requestType,
-      product: requestType === "EDIT" ? productId : undefined,
+      requestType: "ADD",
       details: {
         ...details,
         code: productCode,
@@ -194,84 +186,11 @@ export const createStockInRequest = async (req, res) => {
   }
 };
 
-// Create Stock Out Request
-export const createStockOutRequest = async (req, res) => {
-  const { productId, quantity } = req.body;
-  const supervisorId = req.user._id;
-
-  try {
-    if (!productId || !quantity || quantity < 1) {
-      return res.status(400).json({ message: "Valid Product ID and Quantity (>= 1) are required" });
-    }
-
-    const product = await Product.findById(productId);
-    if (!product) {
-      return res.status(404).json({ message: "Product not found" });
-    }
-
-    // Check if enough stock exists currently (warn Supervisor, but enforce on approval)
-    if (product.quantity < quantity) {
-      return res.status(400).json({
-        message: `Insufficient stock. Requested: ${quantity}, Available: ${product.quantity}`,
-      });
-    }
-
-    const requestNumber = generateRequestNumber("REQ-OUT");
-
-    const newRequest = await StockOutRequest.create({
-      requestNumber,
-      product: productId,
-      quantity,
-      supervisor: supervisorId,
-    });
-
-    // Notify admins
-    await Notification.create({
-      message: `New Stock Out request (${requestNumber}) for "${product.name}" (Qty: ${quantity}) by ${req.user.name}`,
-      type: "REQUEST_CREATED",
-    });
-
-    res.status(201).json(newRequest);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// Create Stock Return Request
-export const createStockReturnRequest = async (req, res) => {
-  const { productId, quantity } = req.body;
-  const supervisorId = req.user._id;
-
-  try {
-    if (!productId || !quantity || quantity < 1) {
-      return res.status(400).json({ message: "Valid Product ID and Quantity (>= 1) are required" });
-    }
-
-    const product = await Product.findById(productId);
-    if (!product) {
-      return res.status(404).json({ message: "Product not found" });
-    }
-
-    const requestNumber = generateRequestNumber("REQ-RET");
-
-    const newRequest = await StockReturnRequest.create({
-      requestNumber,
-      product: productId,
-      quantity,
-      supervisor: supervisorId,
-    });
-
-    // Notify admins
-    await Notification.create({
-      message: `New Stock Return request (${requestNumber}) for "${product.name}" (Qty: ${quantity}) by ${req.user.name}`,
-      type: "REQUEST_CREATED",
-    });
-
-    res.status(201).json(newRequest);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
+// Stock Out and Stock Return are no longer raised as requests — a supervisor
+// takes stock out by issuing it, and hands it back through Red Stock, both of
+// which apply immediately. The two collections stay readable below (and their
+// approval branches stay in processRequest) so rows raised before this still
+// list and can still be closed.
 
 // ==========================================
 // SUPERVISOR: Edit / Cancel own pending requests
@@ -619,6 +538,11 @@ export const getAllRequests = async (req, res) => {
 
 // ==========================================
 // ADMIN: Approval / Rejection Logic
+//
+// Only ADD product and Stock In are raised now, but the EDIT, Stock Out and
+// Stock Return branches below stay: rows raised before those flows became
+// direct are still sitting in the queue, and an Admin has to be able to close
+// them.
 // ==========================================
 export const processRequest = async (req, res) => {
   const { type, id, action } = req.params; // type: product, stockin, stockout, stockreturn. action: approve, reject, keep-pending
@@ -686,7 +610,7 @@ export const processRequest = async (req, res) => {
     if (type === "product") {
       if (request.requestType === "ADD") {
         // Create Product in collection
-        const { code, name, category, status, rackNumber, quantity, unit, minStock, maxStock, storeRoom, description, image, naming, nameCompliant } = request.details;
+        const { code, name, category, subCategory, status, rackNumber, quantity, unit, minStock, storeRoom, description, image, naming, nameCompliant } = request.details;
 
         // Double check uniqueness of code
         const codeExists = await Product.findOne({ code });
@@ -700,12 +624,12 @@ export const processRequest = async (req, res) => {
           code,
           name,
           category,
+          subCategory,
           status,
           rackNumber,
           quantity: 0,
           unit,
           minStock,
-          maxStock,
           storeRoom,
           description,
           image,
@@ -742,7 +666,7 @@ export const processRequest = async (req, res) => {
           return res.status(404).json({ message: "Target product no longer exists" });
         }
 
-        const { name, category, status, rackNumber, quantity, unit, minStock, maxStock, storeRoom, description, image, naming, nameCompliant } = request.details;
+        const { name, category, subCategory, status, rackNumber, quantity, unit, minStock, storeRoom, description, image, naming, nameCompliant } = request.details;
 
         const quantityBefore = product.quantity;
 
@@ -754,13 +678,14 @@ export const processRequest = async (req, res) => {
           product.nameCompliant = nameCompliant;
         }
         product.category = category;
-        // Requests raised before the condition existed carry none, and must not
-        // blank out what the product already says.
+        // Requests raised before these fields existed carry neither, and must
+        // not blank out what the product already says. `undefined` is "the
+        // client never sent it"; an empty string is a deliberate clearing.
+        if (subCategory !== undefined) product.subCategory = subCategory;
         if (status) product.status = status;
         product.rackNumber = rackNumber;
         product.unit = unit;
         product.minStock = minStock;
-        product.maxStock = maxStock;
         product.storeRoom = storeRoom;
         product.description = description;
         product.image = image;

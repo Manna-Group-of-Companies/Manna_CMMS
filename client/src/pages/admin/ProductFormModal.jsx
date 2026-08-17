@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
-import { Loader2, X, Boxes, AlertCircle, ShieldAlert } from "lucide-react";
+import { Loader2, X, Boxes, Lock, ShieldAlert } from "lucide-react";
 import { COMMON_STATUSES } from "../../utils/productStatus";
 import ItemNameBuilder, {
   NameComplianceNotice,
@@ -10,6 +10,10 @@ import ItemNameBuilder, {
   namingFromProduct,
 } from "../../components/ItemNameBuilder";
 import DuplicateWarning, { useDuplicateCheck } from "../../components/DuplicateWarning";
+import TaxonomySelect, {
+  useCategoryOptions,
+  useSubCategoryOptions,
+} from "../../components/TaxonomySelect";
 
 const EMPTY = {
   code: "",
@@ -22,7 +26,6 @@ const EMPTY = {
   quantity: 0,
   unit: "Pcs",
   minStock: 5,
-  maxStock: 100,
   unitCost: 0,
   storeRoom: "",
   description: "",
@@ -33,9 +36,17 @@ const EMPTY = {
  * Create or edit a product directly, as an Admin.
  *
  * Supervisors change the catalog by raising ADD/EDIT requests; this is the
- * Admin's direct path. Quantity here is the product's **total** across every
- * room — the backend applies any change to the home room. Per-room figures
- * are moved on the Stock Rooms page instead.
+ * Admin's direct path.
+ *
+ * **Adding** asks for everything. **Editing** is deliberately narrow: only the
+ * classification and the descriptive fields — category, sub-category, rack,
+ * condition, image, description — plus the name, and that only through the
+ * SOI1/SOP1 builder.
+ *
+ * Everything else is read-only here because it has a proper home elsewhere:
+ * quantity and store room move real stock (Stock Rooms page), and code, unit,
+ * min stock and cost are identity and purchasing figures that should not drift
+ * from a form somebody opened to fix a shelf label.
  */
 const ProductFormModal = ({ product, onClose, onSaved }) => {
   const { showToast } = useNotifications();
@@ -63,6 +74,14 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
   const [acknowledgeNaming, setAcknowledgeNaming] = useState(false);
   const [allowDuplicate, setAllowDuplicate] = useState(false);
 
+  // The classifications already in use, so the catalog stops accumulating
+  // "Bearing" / "Bearings" / "BEARING" as three separate categories.
+  const categoryOptions = useCategoryOptions();
+  const subCategoryOptions = useSubCategoryOptions(form.category);
+
+  /** True once the builder has produced a name different from the saved one. */
+  const renamed = isEdit && form.name !== product.name;
+
   // Live duplicate check while the name is typed (ST-14). Suppressed on edit
   // until the name actually changes — reopening a product should not accuse it
   // of duplicating itself.
@@ -88,21 +107,22 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         quantity: product.quantity ?? 0,
         unit: product.unit || "Pcs",
         minStock: product.minStock ?? 5,
-        maxStock: product.maxStock ?? 100,
         unitCost: product.unitCost ?? 0,
         storeRoom: product.storeRoom || "",
         description: product.description || "",
         image: product.image || "",
       });
       setNaming(namingFromProduct(product));
-      // Open the builder for a product that was named with it, so its parts
-      // are visible rather than hidden behind a collapsed section.
-      setShowBuilder(Boolean(product.naming));
     } else {
       setForm(EMPTY);
       setNaming(EMPTY_NAMING);
-      setShowBuilder(true);
     }
+
+    // Open on edit as well as on create. Gating this on `product.naming` hid
+    // the builder for every item entered before SOI1/SOP1 existed — which is
+    // precisely the set of items that needs it, since bringing a legacy name
+    // up to standard is the main reason to open the builder while editing.
+    setShowBuilder(true);
 
     setNameIssues(null);
     setDuplicateBlock(null);
@@ -147,6 +167,18 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
     setAllowDuplicate(false);
   };
 
+  /**
+   * Changing the main category invalidates the sub-category under it — "Ring
+   * Spanners" is not a sub-category of "Bearings" — so it is cleared rather
+   * than left pointing at the wrong parent.
+   */
+  const setCategory = (category) =>
+    setForm((prev) => ({
+      ...prev,
+      category,
+      subCategory: category === prev.category ? prev.subCategory : "",
+    }));
+
   // The standard conditions, plus whatever this product already carries. A few
   // catalog rows use one-off phrasings ("BreakDown on High loads") that predate
   // the list; opening one in the form must not quietly rewrite it.
@@ -154,9 +186,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
     form.status && !COMMON_STATUSES.includes(form.status)
       ? [form.status, ...COMMON_STATUSES]
       : COMMON_STATUSES;
-
-  const roomChanged = isEdit && form.storeRoom !== product.storeRoom;
-  const quantityChanged = isEdit && Number(form.quantity) !== product.quantity;
 
   // A pending refusal holds the save until it is answered, so the button never
   // re-sends a payload the API has already turned down.
@@ -169,27 +198,52 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
 
     if (!form.name.trim()) return showToast("Product name is required", "error");
     if (!form.category.trim()) return showToast("Category is required", "error");
-    if (!form.storeRoom) return showToast("Select a store room", "error");
 
     const quantity = Number(form.quantity);
-    if (!Number.isInteger(quantity) || quantity < 0) {
-      return showToast("Quantity must be a whole number of 0 or more", "error");
+    if (!isEdit) {
+      if (!form.storeRoom) return showToast("Select a store room", "error");
+      if (!Number.isInteger(quantity) || quantity < 0) {
+        return showToast("Quantity must be a whole number of 0 or more", "error");
+      }
     }
 
     try {
       setSubmitting(true);
-      const payload = {
-        ...form,
-        quantity,
-        minStock: Number(form.minStock),
-        maxStock: Number(form.maxStock),
-        unitCost: Number(form.unitCost) || 0,
-        // Only sent when there is something to send. An empty sub-document
-        // would overwrite the naming fields of a product created with them.
-        ...(isNamingBlank(naming) ? {} : { naming }),
-        acknowledgeNaming,
-        allowDuplicate,
-      };
+
+      // Editing sends only what it is allowed to change. Posting the untouched
+      // rest back would be harmless today — the API no-ops a zero delta — but
+      // it invites a future field to be written by a form that never offered it.
+      //
+      // The name and its parts go only when the builder actually renamed the
+      // item. Sending an unchanged legacy name would put it back through the
+      // convention and refuse the save, so a rack-number fix would first need
+      // somebody to tick "save anyway" about a name they had not touched.
+      const payload = isEdit
+        ? {
+            category: form.category,
+            subCategory: form.subCategory,
+            rackNumber: form.rackNumber,
+            status: form.status,
+            image: form.image,
+            description: form.description,
+            ...(renamed && {
+              name: form.name,
+              ...(isNamingBlank(naming) ? {} : { naming }),
+            }),
+            acknowledgeNaming,
+            allowDuplicate,
+          }
+        : {
+            ...form,
+            quantity,
+            minStock: Number(form.minStock),
+            unitCost: Number(form.unitCost) || 0,
+            // Only sent when there is something to send. An empty sub-document
+            // would overwrite the naming fields of a product created with them.
+            ...(isNamingBlank(naming) ? {} : { naming }),
+            acknowledgeNaming,
+            allowDuplicate,
+          };
 
       if (isEdit) {
         await API.put(`/products/${product._id}`, payload);
@@ -266,37 +320,61 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2">
             <label className={label}>Product Name *</label>
-            <input type="text" value={form.name} onChange={set("name")} required className={field} />
-            <NameComplianceNotice name={form.name} />
+            {isEdit ? (
+              <>
+                {/* Not typed directly on edit — a name is changed by building a
+                    compliant one above and adopting it, never by hand. */}
+                <input
+                  type="text"
+                  value={form.name}
+                  readOnly
+                  className={`${field} bg-slate-50 text-slate-600 cursor-not-allowed`}
+                />
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  {renamed ? (
+                    <span className="font-semibold text-brand-700">
+                      Renamed from "{product.name}" — saving applies it.
+                    </span>
+                  ) : (
+                    <>Use the builder above and press "Use this name" to change it.</>
+                  )}
+                </p>
+              </>
+            ) : (
+              <input
+                type="text"
+                value={form.name}
+                onChange={set("name")}
+                required
+                className={field}
+              />
+            )}
+            {/* Only worth showing where it can be acted on: on edit an unchanged
+                legacy name is not held to the rules, so flagging it would be
+                telling the user off for something this form will not touch. */}
+            {(!isEdit || renamed) && <NameComplianceNotice name={form.name} />}
           </div>
-          <div>
-            <label className={label}>
-              Product Code {!isEdit && <span className="font-normal text-slate-500">(auto if blank)</span>}
-            </label>
-            <input type="text" value={form.code} onChange={set("code")} className={field} />
-          </div>
+
+          {/* --- the editable classification, on both add and edit --- */}
           <div>
             <label className={label}>Category *</label>
-            <input type="text" value={form.category} onChange={set("category")} required className={field} />
-          </div>
-          <div>
-            <label className={label}>Sub-Category</label>
-            <input
-              type="text"
-              value={form.subCategory}
-              onChange={set("subCategory")}
-              placeholder="e.g. Ring Spanners"
-              className={field}
+            <TaxonomySelect
+              value={form.category}
+              options={categoryOptions}
+              onChange={setCategory}
+              placeholder="Select a category…"
+              disabled={submitting}
+              required
             />
           </div>
           <div>
-            <label className={label}>Brand</label>
-            <input
-              type="text"
-              value={form.brand}
-              onChange={set("brand")}
-              placeholder="e.g. Taparia"
-              className={field}
+            <label className={label}>Sub-Category</label>
+            <TaxonomySelect
+              value={form.subCategory}
+              options={subCategoryOptions}
+              onChange={(subCategory) => setForm((prev) => ({ ...prev, subCategory }))}
+              placeholder={form.category ? "Select a sub-category…" : "Pick a category first"}
+              disabled={submitting || !form.category}
             />
           </div>
           <div>
@@ -324,52 +402,80 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
               className={field}
             />
           </div>
-          <div>
-            <label className={label}>Unit</label>
-            <input type="text" value={form.unit} onChange={set("unit")} className={field} />
-          </div>
-          <div>
-            <label className={label}>
-              {isEdit ? "Total Quantity (all rooms)" : "Opening Quantity"}
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={form.quantity}
-              onChange={set("quantity")}
-              className={field}
-            />
-          </div>
-          <div>
-            <label className={label}>Home Store Room *</label>
-            <select value={form.storeRoom} onChange={set("storeRoom")} required className={`${field} cursor-pointer`}>
-              <option value="">Select a store room…</option>
-              {rooms.map((room) => (
-                <option key={room._id} value={room.name}>
-                  {room.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className={label}>Min Stock</label>
-            <input type="number" min="0" value={form.minStock} onChange={set("minStock")} className={field} />
-          </div>
-          <div>
-            <label className={label}>Max Stock</label>
-            <input type="number" min="0" value={form.maxStock} onChange={set("maxStock")} className={field} />
-          </div>
-          <div>
-            <label className={label}>Unit Cost (₹)</label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.unitCost}
-              onChange={set("unitCost")}
-              className={field}
-            />
-          </div>
+
+          {/* --- asked for once, when the item is first taken in --- */}
+          {!isEdit && (
+            <>
+              <div>
+                <label className={label}>
+                  Product Code{" "}
+                  <span className="font-normal text-slate-500">(auto if blank)</span>
+                </label>
+                <input type="text" value={form.code} onChange={set("code")} className={field} />
+              </div>
+              <div>
+                <label className={label}>Brand</label>
+                <input
+                  type="text"
+                  value={form.brand}
+                  onChange={set("brand")}
+                  placeholder="e.g. Taparia"
+                  className={field}
+                />
+              </div>
+              <div>
+                <label className={label}>Unit</label>
+                <input type="text" value={form.unit} onChange={set("unit")} className={field} />
+              </div>
+              <div>
+                <label className={label}>Opening Quantity</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.quantity}
+                  onChange={set("quantity")}
+                  className={field}
+                />
+              </div>
+              <div>
+                <label className={label}>Home Store Room *</label>
+                <select
+                  value={form.storeRoom}
+                  onChange={set("storeRoom")}
+                  required
+                  className={`${field} cursor-pointer`}
+                >
+                  <option value="">Select a store room…</option>
+                  {rooms.map((room) => (
+                    <option key={room._id} value={room.name}>
+                      {room.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={label}>Min Stock</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.minStock}
+                  onChange={set("minStock")}
+                  className={field}
+                />
+              </div>
+              <div>
+                <label className={label}>Unit Cost (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.unitCost}
+                  onChange={set("unitCost")}
+                  className={field}
+                />
+              </div>
+            </>
+          )}
         </div>
 
         <div>
@@ -386,6 +492,40 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
             className={`${field} field-area`}
           ></textarea>
         </div>
+
+        {/* Still shown on edit, just not editable — the figures are needed to
+            make sense of the item, and each says where it is actually changed. */}
+        {isEdit && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+            <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+              <Lock className="h-3.5 w-3.5 text-slate-400" /> Not changed here
+            </h4>
+            <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+              {[
+                ["Product Code", product.code, "fixed identity"],
+                ["Brand", product.brand || "—", "raise a new item if it differs"],
+                ["Unit", product.unit, "fixed identity"],
+                [
+                  "Total Quantity",
+                  `${product.quantity} ${product.unit}`,
+                  "moves on Stock Rooms",
+                ],
+                ["Home Store Room", product.storeRoom, "moves on Stock Rooms"],
+                ["Min Stock", `${product.minStock} ${product.unit}`, "purchasing figure"],
+              ].map(([term, value, why]) => (
+                <div key={term} className="min-w-0">
+                  <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    {term}
+                  </dt>
+                  <dd className="text-xs font-semibold text-slate-800 truncate" title={value}>
+                    {value}
+                  </dd>
+                  <dd className="text-[10px] text-slate-400">{why}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
 
         {/* ST-14 — what the catalog already holds that looks like this. Shown
             live while typing, and again (with the confirmation) if the save was
@@ -444,27 +584,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
           </div>
         )}
 
-        {/* Spell out the stock consequences before they are applied. */}
-        {(roomChanged || quantityChanged) && (
-          <div className="note note-amber flex-col gap-1">
-            <span className="font-bold flex items-center gap-1.5">
-              <AlertCircle className="h-4 w-4" /> This also moves stock
-            </span>
-            {roomChanged && (
-              <p>
-                Stock currently in <strong>{product.storeRoom}</strong> will move to{" "}
-                <strong>{form.storeRoom}</strong>.
-              </p>
-            )}
-            {quantityChanged && (
-              <p>
-                Total goes from <strong>{product.quantity}</strong> to{" "}
-                <strong>{Number(form.quantity)}</strong>; the difference is applied to{" "}
-                <strong>{form.storeRoom}</strong>.
-              </p>
-            )}
-          </div>
-        )}
         </div>
 
         <div className="modal-foot">

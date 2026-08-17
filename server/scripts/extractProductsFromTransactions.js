@@ -133,14 +133,13 @@ const run = () => {
       quantity: 0,
       unit: product.unit || "Units",
       minStock: 5,
-      maxStock: 100,
       description: `Imported from transaction ledger (${product.movements} movement${product.movements === 1 ? "" : "s"}).`,
     });
   }
 
   ready.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 
-  const columns = ["code", "name", "category", "quantity", "unit", "minStock", "maxStock", "description"];
+  const columns = ["code", "name", "category", "quantity", "unit", "minStock", "description"];
   const csv = [
     columns.join(","),
     ...ready.map((product) => columns.map((column) => escapeCsv(product[column])).join(",")),
