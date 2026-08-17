@@ -320,34 +320,20 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2">
             <label className={label}>Product Name *</label>
-            {isEdit ? (
-              <>
-                {/* Not typed directly on edit — a name is changed by building a
-                    compliant one above and adopting it, never by hand. */}
-                <input
-                  type="text"
-                  value={form.name}
-                  readOnly
-                  className={`${field} bg-slate-50 text-slate-600 cursor-not-allowed`}
-                />
-                <p className="mt-1.5 text-[11px] text-slate-500">
-                  {renamed ? (
-                    <span className="font-semibold text-brand-700">
-                      Renamed from "{product.name}" — saving applies it.
-                    </span>
-                  ) : (
-                    <>Use the builder above and press "Use this name" to change it.</>
-                  )}
-                </p>
-              </>
-            ) : (
-              <input
-                type="text"
-                value={form.name}
-                onChange={set("name")}
-                required
-                className={field}
-              />
+            {/* Typed by hand or adopted from the builder above — both work, on
+                an edit as much as on a create. The builder is the guided way to
+                a compliant name, not a gate in front of the field. */}
+            <input
+              type="text"
+              value={form.name}
+              onChange={set("name")}
+              required
+              className={field}
+            />
+            {isEdit && renamed && (
+              <p className="mt-1.5 text-[11px] font-semibold text-brand-700">
+                Renamed from "{product.name}" — saving applies it.
+              </p>
             )}
             {/* Only worth showing where it can be acted on: on edit an unchanged
                 legacy name is not held to the rules, so flagging it would be

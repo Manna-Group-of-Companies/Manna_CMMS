@@ -648,10 +648,9 @@ class _ProductFormState extends State<_ProductForm> {
     }
   }
 
-  /// True once the builder has produced a name different from the saved one.
-  ///
-  /// The name field is read-only on an edit, so this is the only way it moves —
-  /// and the only case where the convention is enforced on a rename.
+  /// True once the name differs from the saved one — typed over by hand, or
+  /// adopted from the builder. A rename is the only case where the convention is
+  /// enforced on an edit, so this also gates the compliance hint.
   bool get _renamed => _isEdit && _name.text.trim() != widget.product!.name;
 
   /// A sub-category belongs to one category, so changing the category reloads
@@ -946,30 +945,18 @@ class _ProductFormState extends State<_ProductForm> {
                 TextFormField(
                   controller: _name,
                   validator: _requiredValidator,
-                  // Not typed by hand on an edit: a name is changed by building
-                  // a compliant one above and adopting it. Typing over a name
-                  // in the field is how the catalog drifted off the standard in
-                  // the first place.
-                  readOnly: _isEdit,
-                  style: _isEdit
-                      ? const TextStyle(color: AppColors.textSecondary)
-                      : null,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     hintText: 'e.g. 25MM Bearing Deep Groove',
-                    fillColor: _isEdit ? AppColors.surfaceMuted : null,
-                    filled: _isEdit ? true : null,
                   ),
                 ),
-                if (_isEdit) ...[
+                if (_isEdit && _renamed) ...[
                   const SizedBox(height: 6),
                   Text(
-                    _renamed
-                        ? 'Renamed from "${widget.product!.name}" — saving applies it.'
-                        : 'Use the builder above and press "Use this name" to change it.',
-                    style: TextStyle(
-                      color: _renamed ? AppColors.primaryDeep : AppColors.textMuted,
+                    'Renamed from "${widget.product!.name}" — saving applies it.',
+                    style: const TextStyle(
+                      color: AppColors.primaryDeep,
                       fontSize: 11,
-                      fontWeight: _renamed ? FontWeight.w600 : FontWeight.w400,
+                      fontWeight: FontWeight.w600,
                       height: 1.4,
                     ),
                   ),
