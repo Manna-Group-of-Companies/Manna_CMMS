@@ -1,14 +1,14 @@
 {
-  "latestVersion": "1.0.1",
-  "versionCode": 2,
-  "apkUrl": "https://github.com/Manna-Group-of-Companies/Manna_CMMS/releases/download/v1.0.1/stockmaster-1.0.1.apk",
+  "latestVersion": "1.0.2",
+  "versionCode": 3,
+  "apkUrl": "https://github.com/Manna-Group-of-Companies/Manna_CMMS/releases/download/v1.0.2/stockmaster-1.0.2.apk",
   "releaseNotes": [
-    "Edit a product without waiting for approval",
-    "Requests are now only for new items and stock in",
-    "Items carry a sub-category, suggested from the catalog"
+    "The product name can be typed when editing an item",
+    "Store rooms are now called companies",
+    "The Engineer Room is now Manna Rubber Park"
   ],
   "fileSize": 54690600,
-  "sha256": "8c4081bf16a15fdd219b9df99fad2e2d8b5b8d49f5d260ac42c13ab523f6b980",
+  "sha256": "51130dadcd006168db2defe24ea6ab5da6c006ea9a865e939a07e221316bd7e7",
   "mandatory": false,
   "minSupportedVersion": "1.0.0"
 }
