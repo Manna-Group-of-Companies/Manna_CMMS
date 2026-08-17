@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
-import { Loader2, X, Boxes, AlertCircle } from "lucide-react";
+import { Loader2, X, Boxes, AlertCircle, ShieldAlert } from "lucide-react";
 import { COMMON_STATUSES } from "../../utils/productStatus";
+import ItemNameBuilder, {
+  NameComplianceNotice,
+  EMPTY_NAMING,
+  isNamingBlank,
+  namingFromProduct,
+} from "../../components/ItemNameBuilder";
+import DuplicateWarning, { useDuplicateCheck } from "../../components/DuplicateWarning";
 
 const EMPTY = {
   code: "",
@@ -38,6 +45,36 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
   const [rooms, setRooms] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
+  // The SOI1/SOP1 fields the name is built from (ST-09). Kept beside the form
+  // rather than inside it because they are saved as their own sub-document.
+  const [naming, setNaming] = useState(EMPTY_NAMING);
+  const [showBuilder, setShowBuilder] = useState(false);
+
+  /**
+   * What the server refused, and what the user has since confirmed.
+   *
+   * Both intake checks are advisory: the API answers 422 for a non-compliant
+   * name and 409 for a possible duplicate, and re-accepts the same payload once
+   * the matching flag is set. Holding the refusal here is what lets the form
+   * show *why* and offer "save anyway" rather than just failing.
+   */
+  const [nameIssues, setNameIssues] = useState(null);
+  const [duplicateBlock, setDuplicateBlock] = useState(null);
+  const [acknowledgeNaming, setAcknowledgeNaming] = useState(false);
+  const [allowDuplicate, setAllowDuplicate] = useState(false);
+
+  // Live duplicate check while the name is typed (ST-14). Suppressed on edit
+  // until the name actually changes — reopening a product should not accuse it
+  // of duplicating itself.
+  const { matches, checking: checkingDuplicates } = useDuplicateCheck({
+    name: form.name,
+    code: form.code,
+    brand: form.brand,
+    category: form.category,
+    excludeId: product?._id || "",
+    enabled: !isEdit || form.name !== product?.name,
+  });
+
   useEffect(() => {
     if (product) {
       setForm({
@@ -57,9 +94,20 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         description: product.description || "",
         image: product.image || "",
       });
+      setNaming(namingFromProduct(product));
+      // Open the builder for a product that was named with it, so its parts
+      // are visible rather than hidden behind a collapsed section.
+      setShowBuilder(Boolean(product.naming));
     } else {
       setForm(EMPTY);
+      setNaming(EMPTY_NAMING);
+      setShowBuilder(true);
     }
+
+    setNameIssues(null);
+    setDuplicateBlock(null);
+    setAcknowledgeNaming(false);
+    setAllowDuplicate(false);
   }, [product]);
 
   useEffect(() => {
@@ -76,7 +124,28 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
     loadRooms();
   }, []);
 
-  const set = (field) => (e) => setForm({ ...form, [field]: e.target.value });
+  const set = (field) => (e) => {
+    setForm({ ...form, [field]: e.target.value });
+
+    // Editing the name invalidates both confirmations — they were given about
+    // a different name, and carrying them forward would let a fresh problem
+    // through unremarked.
+    if (field === "name") {
+      setNameIssues(null);
+      setDuplicateBlock(null);
+      setAcknowledgeNaming(false);
+      setAllowDuplicate(false);
+    }
+  };
+
+  /** Applies a name built by the builder, and re-opens both checks on it. */
+  const applyBuiltName = (name) => {
+    setForm((prev) => ({ ...prev, name }));
+    setNameIssues(null);
+    setDuplicateBlock(null);
+    setAcknowledgeNaming(false);
+    setAllowDuplicate(false);
+  };
 
   // The standard conditions, plus whatever this product already carries. A few
   // catalog rows use one-off phrasings ("BreakDown on High loads") that predate
@@ -88,6 +157,12 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
 
   const roomChanged = isEdit && form.storeRoom !== product.storeRoom;
   const quantityChanged = isEdit && Number(form.quantity) !== product.quantity;
+
+  // A pending refusal holds the save until it is answered, so the button never
+  // re-sends a payload the API has already turned down.
+  const awaitingConfirmation =
+    (Boolean(nameIssues) && !acknowledgeNaming) ||
+    (Boolean(duplicateBlock) && !allowDuplicate);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -109,6 +184,11 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         minStock: Number(form.minStock),
         maxStock: Number(form.maxStock),
         unitCost: Number(form.unitCost) || 0,
+        // Only sent when there is something to send. An empty sub-document
+        // would overwrite the naming fields of a product created with them.
+        ...(isNamingBlank(naming) ? {} : { naming }),
+        acknowledgeNaming,
+        allowDuplicate,
       };
 
       if (isEdit) {
@@ -122,8 +202,24 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       onSaved();
       onClose();
     } catch (error) {
+      const refusal = error.response?.data;
+
+      // 422 and 409 are not failures — they are the two intake checks asking
+      // for confirmation (ST-10, ST-14). Show what was found and let the user
+      // decide; the retry carries the matching override.
+      if (error.response?.status === 422 && refusal?.code === "NAME_NOT_COMPLIANT") {
+        setNameIssues(refusal.issues || []);
+        showToast("Check the product name before saving", "error");
+        return;
+      }
+      if (error.response?.status === 409 && refusal?.code === "POSSIBLE_DUPLICATE") {
+        setDuplicateBlock(refusal);
+        showToast(refusal.message || "This item may already exist", "error");
+        return;
+      }
+
       console.error("Error saving product:", error);
-      showToast(error.response?.data?.message || "Failed to save product", "error");
+      showToast(refusal?.message || "Failed to save product", "error");
     } finally {
       setSubmitting(false);
     }
@@ -146,10 +242,32 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
 
       <form onSubmit={handleSubmit} className="contents">
         <div className="modal-body space-y-4">
+        {/* The naming convention comes first: the name it produces is what
+            every other field on this form hangs off. */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowBuilder((open) => !open)}
+            className="btn btn-sm btn-subtle"
+          >
+            {showBuilder ? "Hide" : "Show"} standard name builder (SOI1/SOP1)
+          </button>
+        </div>
+
+        {showBuilder && (
+          <ItemNameBuilder
+            value={naming}
+            onChange={setNaming}
+            onApply={applyBuiltName}
+            disabled={submitting}
+          />
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
+          <div className="sm:col-span-2">
             <label className={label}>Product Name *</label>
             <input type="text" value={form.name} onChange={set("name")} required className={field} />
+            <NameComplianceNotice name={form.name} />
           </div>
           <div>
             <label className={label}>
@@ -269,6 +387,63 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
           ></textarea>
         </div>
 
+        {/* ST-14 — what the catalog already holds that looks like this. Shown
+            live while typing, and again (with the confirmation) if the save was
+            refused. */}
+        {!duplicateBlock && (
+          <DuplicateWarning matches={matches} checking={checkingDuplicates} />
+        )}
+
+        {duplicateBlock && (
+          <div className="space-y-2">
+            <DuplicateWarning
+              matches={duplicateBlock.matches || []}
+              heading={duplicateBlock.message}
+            />
+            <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allowDuplicate}
+                onChange={(e) => setAllowDuplicate(e.target.checked)}
+                className="mt-0.5 cursor-pointer"
+              />
+              <span>
+                This is a <strong>different item</strong> from the ones above — create it
+                anyway.
+              </span>
+            </label>
+          </div>
+        )}
+
+        {/* ST-10 — a non-compliant name is flagged before it is saved, not
+            silently accepted and not outright refused. */}
+        {nameIssues && (
+          <div className="space-y-2">
+            <div className="note note-rose flex-col gap-1 items-start">
+              <span className="font-bold flex items-center gap-1.5">
+                <ShieldAlert className="h-4 w-4" /> "{form.name}" does not follow SOI1/SOP1
+              </span>
+              <ul className="list-disc pl-4 space-y-0.5">
+                {nameIssues.map((issue) => (
+                  <li key={issue.code + issue.message}>{issue.message}</li>
+                ))}
+              </ul>
+            </div>
+            <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={acknowledgeNaming}
+                onChange={(e) => setAcknowledgeNaming(e.target.checked)}
+                className="mt-0.5 cursor-pointer"
+              />
+              <span>
+                Save with this name anyway — it will be marked{" "}
+                <strong>non-compliant</strong> in the catalog.
+              </span>
+            </label>
+          </div>
+        )}
+
         {/* Spell out the stock consequences before they are applied. */}
         {(roomChanged || quantityChanged) && (
           <div className="note note-amber flex-col gap-1">
@@ -296,7 +471,11 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
           <button type="button" onClick={onClose} className="btn btn-neutral">
             Cancel
           </button>
-          <button type="submit" disabled={submitting} className="btn btn-primary">
+          <button
+            type="submit"
+            disabled={submitting || awaitingConfirmation}
+            className="btn btn-primary"
+          >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
             {isEdit ? "Save Changes" : "Add Product"}
           </button>

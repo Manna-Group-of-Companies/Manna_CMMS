@@ -12,6 +12,8 @@ import {
   resolveRoom,
   homeRoomFor,
 } from "../utils/stockRooms.js";
+import { resolveItemName } from "../utils/itemNaming.js";
+import { findSimilarProducts } from "../utils/duplicateCheck.js";
 
 // Helper to generate unique request numbers
 const generateRequestNumber = (prefix) => {
@@ -36,12 +38,36 @@ const stampDecision = (request, { adminId, approved }) => {
 
 // Create ADD or EDIT Product Request
 export const createProductRequest = async (req, res) => {
-  const { requestType, productId, details } = req.body;
+  const {
+    requestType,
+    productId,
+    details,
+    // Same overrides as the Admin's direct create — the supervisor confirms a
+    // flagged name or a possible duplicate rather than being blocked by it.
+    acknowledgeNaming = false,
+    allowDuplicate = false,
+  } = req.body;
   const supervisorId = req.user._id;
 
   try {
     if (!requestType || !["ADD", "EDIT"].includes(requestType)) {
       return res.status(400).json({ message: "Invalid request type (must be ADD or EDIT)" });
+    }
+
+    // ST-09 / ST-10 — a request carries the name that will become the product,
+    // so the convention is applied here rather than waiting for approval. An
+    // Admin should never be asked to approve a name they cannot change.
+    const named = resolveItemName({ name: details?.name, naming: details?.naming });
+    if (!named.name) {
+      return res.status(400).json({ message: "Product name is required" });
+    }
+    if (!named.compliant && !acknowledgeNaming) {
+      return res.status(422).json({
+        code: "NAME_NOT_COMPLIANT",
+        message: `"${named.name}" does not follow the SOI1/SOP1 naming convention`,
+        name: named.name,
+        issues: named.issues,
+      });
     }
 
     let productCode = details.code;
@@ -57,15 +83,43 @@ export const createProductRequest = async (req, res) => {
       }
     }
 
+    let editTarget = null;
     if (requestType === "EDIT") {
       if (!productId) {
         return res.status(400).json({ message: "Product ID is required for edit requests" });
       }
-      const productExists = await Product.findById(productId);
-      if (!productExists) {
+      editTarget = await Product.findById(productId);
+      if (!editTarget) {
         return res.status(404).json({ message: "Product not found" });
       }
-      productCode = productExists.code;
+      productCode = editTarget.code;
+    }
+
+    // ST-14 — warn on a request that would add something the store already
+    // holds. An EDIT is checked too, but only against *other* products, and
+    // only when it is actually renaming this one.
+    const isRename = !editTarget || named.name !== editTarget.name;
+
+    if (!allowDuplicate && isRename) {
+      const matches = await findSimilarProducts({
+        name: named.name,
+        code: requestType === "ADD" ? productCode : "",
+        brand: details?.brand,
+        category: details?.category,
+        excludeId: editTarget?._id || null,
+      });
+
+      if (matches.length) {
+        return res.status(409).json({
+          code: "POSSIBLE_DUPLICATE",
+          message:
+            matches.length === 1
+              ? `"${matches[0].name}" is already in the catalog`
+              : `${matches.length} similar items are already in the catalog`,
+          matches,
+          blocking: matches.some((match) => match.exact),
+        });
+      }
     }
 
     const requestNumber = generateRequestNumber(requestType === "ADD" ? "REQ-ADD" : "REQ-EDT");
@@ -77,6 +131,11 @@ export const createProductRequest = async (req, res) => {
       details: {
         ...details,
         code: productCode,
+        // The standardized name, not whatever was typed — the request and the
+        // product it becomes must read the same.
+        name: named.name,
+        naming: named.naming,
+        nameCompliant: named.compliant,
       },
       supervisor: supervisorId,
     });
@@ -627,7 +686,7 @@ export const processRequest = async (req, res) => {
     if (type === "product") {
       if (request.requestType === "ADD") {
         // Create Product in collection
-        const { code, name, category, status, rackNumber, quantity, unit, minStock, maxStock, storeRoom, description, image } = request.details;
+        const { code, name, category, status, rackNumber, quantity, unit, minStock, maxStock, storeRoom, description, image, naming, nameCompliant } = request.details;
 
         // Double check uniqueness of code
         const codeExists = await Product.findOne({ code });
@@ -650,6 +709,14 @@ export const processRequest = async (req, res) => {
           storeRoom,
           description,
           image,
+          // The naming fields and the verdict travel with the request, so an
+          // approved item lands in the catalog knowing how its name was built
+          // (ST-09/ST-10). Requests raised before the builder existed carry
+          // neither, and the product keeps the schema defaults.
+          naming: naming || null,
+          nameCompliant: nameCompliant ?? null,
+          // A new item, so the Plant Manager owes it a SAP record (ST-13).
+          sap: { status: "Pending" },
         });
 
         if (quantity > 0) {
@@ -675,11 +742,17 @@ export const processRequest = async (req, res) => {
           return res.status(404).json({ message: "Target product no longer exists" });
         }
 
-        const { name, category, status, rackNumber, quantity, unit, minStock, maxStock, storeRoom, description, image } = request.details;
+        const { name, category, status, rackNumber, quantity, unit, minStock, maxStock, storeRoom, description, image, naming, nameCompliant } = request.details;
 
         const quantityBefore = product.quantity;
 
         product.name = name;
+        // Only overwritten when the request actually carries them; an older
+        // client's EDIT must not wipe naming fields it never knew about.
+        if (naming) product.naming = naming;
+        if (nameCompliant !== undefined && nameCompliant !== null) {
+          product.nameCompliant = nameCompliant;
+        }
         product.category = category;
         // Requests raised before the condition existed carry none, and must not
         // blank out what the product already says.

@@ -8,17 +8,28 @@ import 'server_config.dart';
 /// Error surfaced by [ApiClient]. [message] mirrors the `message` field the
 /// Express API returns on failure, so it can be shown to the user directly.
 class ApiException implements Exception {
-  ApiException(this.message, {this.statusCode, this.isNetworkError = false});
+  ApiException(this.message, {this.statusCode, this.isNetworkError = false, this.body});
 
   /// The request never reached the API (host unreachable, timed out, DNS).
   /// Callers use this to keep a cached session instead of signing the user out.
   ApiException.network(this.message)
       : statusCode = null,
-        isNetworkError = true;
+        isNetworkError = true,
+        body = null;
 
   final String message;
   final int? statusCode;
   final bool isNetworkError;
+
+  /// The decoded error body, when the API sent one.
+  ///
+  /// Most failures say everything they need to in [message]. A few answer with
+  /// structured detail the caller has to act on — the naming issues behind a
+  /// 422, the duplicate matches behind a 409 — and those are read from here.
+  final Map<String, dynamic>? body;
+
+  /// Machine-readable reason, e.g. `NAME_NOT_COMPLIANT`, `POSSIBLE_DUPLICATE`.
+  String get code => body?['code'] is String ? body!['code'] as String : '';
 
   @override
   String toString() => message;
@@ -123,6 +134,7 @@ class ApiClient {
       throw ApiException(
         _messageOf(decoded) ?? 'Request failed (${response.statusCode})',
         statusCode: response.statusCode,
+        body: decoded is Map ? Map<String, dynamic>.from(decoded) : null,
       );
     }
 

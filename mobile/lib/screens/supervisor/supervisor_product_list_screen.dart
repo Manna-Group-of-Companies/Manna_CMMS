@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/palette.dart';
 import '../../widgets/app_shell.dart';
@@ -22,6 +23,15 @@ class _SupervisorProductListScreenState extends State<SupervisorProductListScree
   Widget build(BuildContext context) {
     return AppShell(
       title: 'Browse Products Catalog',
+      actions: [
+        // The SAP hand-off queue belongs to intake, so it sits beside the
+        // catalog rather than taking a slot in the bottom bar.
+        IconButton(
+          onPressed: () => context.push('/supervisor/sap-handoff'),
+          icon: const Icon(Icons.swap_horiz, size: 22),
+          tooltip: 'SAP hand-off',
+        ),
+      ],
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,

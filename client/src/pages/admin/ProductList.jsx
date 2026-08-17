@@ -248,6 +248,26 @@ const ProductList = () => {
                           <div className="min-w-0">
                             <div className="cell-title truncate">{product.name}</div>
                             <div className="mono text-brand-700">{product.code}</div>
+                            {/* The two intake flags. Only shown when they say
+                                something: a null nameCompliant means "never
+                                checked", which is not a finding. */}
+                            <div className="flex flex-wrap gap-1 mt-0.5">
+                              {product.nameCompliant === false && (
+                                <span className="badge badge-amber badge-soft text-[10px]">
+                                  Name not SOI1/SOP1
+                                </span>
+                              )}
+                              {product.sap?.status === "Pending" && (
+                                <span className="badge badge-indigo badge-soft text-[10px]">
+                                  Pending SAP
+                                </span>
+                              )}
+                              {product.sap?.status === "Created" && product.sap.code && (
+                                <span className="badge badge-emerald badge-soft text-[10px]">
+                                  SAP {product.sap.code}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>

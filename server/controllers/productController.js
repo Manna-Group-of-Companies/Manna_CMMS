@@ -8,6 +8,8 @@ import {
   resolveRoom,
   roomBreakdownFor,
 } from "../utils/stockRooms.js";
+import { composeItemName, resolveItemName } from "../utils/itemNaming.js";
+import { findSimilarProducts } from "../utils/duplicateCheck.js";
 
 // @desc    Get all products with search and filtering
 // @route   GET /api/products
@@ -109,6 +111,167 @@ export const getSubCategories = async (req, res) => {
 };
 
 // ==========================================
+// INTAKE: naming, duplicates and the SAP hand-off
+//
+// The three checks that sit in front of "Add New Item". None of them writes
+// anything — they answer a question the form asks while it is being filled in,
+// and the same checks run again for real inside createProduct.
+// ==========================================
+
+// @desc    Build the SOI1/SOP1 name from the captured fields, and validate it
+// @route   POST /api/products/name-preview
+// @access  Private (Admin, Supervisor)
+//
+// Both clients call this as the form is typed rather than reimplementing the
+// convention. Sending `name` validates that name as-is; sending only `naming`
+// composes one from the parts.
+export const previewItemName = async (req, res) => {
+  try {
+    const { name, naming } = req.body || {};
+
+    // A typed name is checked as it stands; with no name, the parts are
+    // composed into one. `resolveItemName` picks between them the same way the
+    // save path does, so the preview cannot disagree with the outcome.
+    const result = name === undefined ? composeItemName(naming || {}) : resolveItemName({ name, naming });
+
+    res.json({
+      name: result.name,
+      naming: result.naming,
+      compliant: result.compliant,
+      issues: result.issues,
+    });
+  } catch (error) {
+    console.error("Error previewing item name:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Products that look like the one being created (ST-14)
+// @route   GET /api/products/duplicates?name=&code=&brand=&category=&excludeId=
+// @access  Private (Admin, Supervisor)
+export const checkDuplicates = async (req, res) => {
+  try {
+    const { name = "", code = "", brand = "", category = "", excludeId = "" } = req.query;
+
+    const matches = await findSimilarProducts({
+      name,
+      code,
+      brand,
+      category,
+      excludeId: excludeId || null,
+    });
+
+    res.json({
+      matches,
+      // An exact hit is the store almost certainly re-entering something it
+      // already owns, and is what createProduct refuses without an override.
+      blocking: matches.some((match) => match.exact),
+    });
+  } catch (error) {
+    console.error("Error checking for duplicate products:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/** The columns the Plant Manager needs in order to create the item in SAP. */
+const SAP_COLUMNS = [
+  ["Product Name", (p) => p.name],
+  ["Product Code", (p) => p.code],
+  ["Item Code", (p) => p.naming?.itemCode || ""],
+  ["Main Category", (p) => p.category],
+  ["Sub-Category", (p) => p.subCategory || ""],
+  ["Brand", (p) => p.brand || ""],
+  ["Material", (p) => p.naming?.material || ""],
+  ["UOM", (p) => p.unit],
+  ["Unit Cost", (p) => p.unitCost ?? 0],
+  ["Plant / Store Room", (p) => p.storeRoom],
+  ["Rack", (p) => p.rackNumber || ""],
+  ["Stock", (p) => p.quantity ?? 0],
+  ["Added On", (p) => new Date(p.createdAt).toISOString().slice(0, 10)],
+];
+
+/** Quotes a CSV cell, doubling any quote inside it. */
+const csvCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+
+// @desc    Items named but not yet created in SAP (ST-13)
+// @route   GET /api/products/sap-pending?format=csv&storeRoom=
+// @access  Private (Admin, Supervisor)
+//
+// The hand-off report. `format=csv` returns the same rows as a download, which
+// is how the list actually reaches the Plant Manager.
+export const getSapPending = async (req, res) => {
+  try {
+    const { format, storeRoom } = req.query;
+
+    const filter = { "sap.status": "Pending" };
+    if (storeRoom) filter.storeRoom = storeRoom;
+
+    const products = await Product.find(filter).sort({ createdAt: 1 }).lean();
+
+    if (format === "csv") {
+      const rows = [
+        SAP_COLUMNS.map(([heading]) => csvCell(heading)).join(","),
+        ...products.map((product) =>
+          SAP_COLUMNS.map(([, read]) => csvCell(read(product))).join(","),
+        ),
+      ];
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="sap-pending-${new Date().toISOString().slice(0, 10)}.csv"`,
+      );
+      // A BOM, so Excel opens the ” and ¼ in the item names as UTF-8 instead of
+      // as mojibake. Spelled as an escape rather than pasted in, so it survives
+      // an editor that strips invisible characters.
+      return res.send(`\uFEFF${rows.join("\r\n")}`);
+    }
+
+    res.json(products);
+  } catch (error) {
+    console.error("Error loading the SAP hand-off list:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Record what SAP did with an item (ST-13)
+// @route   PUT /api/products/:id/sap
+// @access  Private (Admin)
+export const updateSapStatus = async (req, res) => {
+  try {
+    const { status, code = "", note = "" } = req.body || {};
+
+    if (!["Pending", "Created", "Not Required"].includes(status)) {
+      return res
+        .status(400)
+        .json({ message: "Status must be Pending, Created or Not Required" });
+    }
+
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    product.sap = {
+      status,
+      code: String(code).trim(),
+      note: String(note).trim(),
+      // Only a real creation is stamped; moving back to Pending clears it, so
+      // the date never outlives the fact it recorded.
+      createdAt: status === "Created" ? new Date() : null,
+      createdBy: status === "Created" ? req.user._id : null,
+    };
+
+    await product.save();
+
+    res.json(await Product.findById(product._id));
+  } catch (error) {
+    console.error("Error updating SAP status:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ==========================================
 // ADMIN: direct catalog management
 //
 // Supervisors change the catalog by raising ADD/EDIT requests. An Admin edits
@@ -118,9 +281,11 @@ export const getSubCategories = async (req, res) => {
 
 const generateProductCode = () => `PRD-${Math.floor(100000 + Math.random() * 900000)}`;
 
-/** Fields an Admin may set directly. `quantity` is handled separately. */
+/**
+ * Fields an Admin may set directly. `quantity` is handled separately, and so
+ * is `name` — it goes through the naming convention rather than straight in.
+ */
 const EDITABLE_FIELDS = [
-  "name",
   "category",
   "subCategory",
   "brand",
@@ -139,15 +304,66 @@ const EDITABLE_FIELDS = [
 // @access  Private (Admin)
 export const createProduct = async (req, res) => {
   try {
-    const { code, quantity = 0, storeRoom, ...rest } = req.body;
+    const {
+      code,
+      quantity = 0,
+      storeRoom,
+      name,
+      naming,
+      // The two intake checks below are advisory, not absolute — the store has
+      // to be able to enter an item the rules did not anticipate. Each is
+      // overridden by the caller confirming it, which is what "flag before
+      // saving" (ST-10) means in practice.
+      acknowledgeNaming = false,
+      allowDuplicate = false,
+      ...rest
+    } = req.body;
 
     if (!storeRoom || !String(storeRoom).trim()) {
       return res.status(400).json({ message: "Store Room is required" });
     }
 
+    // ST-09 / ST-10 — compose the standardized name from the captured fields
+    // when none was typed, then hold it against the convention.
+    const named = resolveItemName({ name, naming });
+    if (!named.name) {
+      return res.status(400).json({ message: "Product name is required" });
+    }
+    if (!named.compliant && !acknowledgeNaming) {
+      return res.status(422).json({
+        code: "NAME_NOT_COMPLIANT",
+        message: `"${named.name}" does not follow the SOI1/SOP1 naming convention`,
+        name: named.name,
+        issues: named.issues,
+      });
+    }
+
     const productCode = code?.trim() || generateProductCode();
     if (await Product.findOne({ code: productCode })) {
       return res.status(400).json({ message: `Product code ${productCode} already exists` });
+    }
+
+    // ST-14 — say so before a second copy of an item the store already holds
+    // is created.
+    if (!allowDuplicate) {
+      const matches = await findSimilarProducts({
+        name: named.name,
+        code: productCode,
+        brand: rest.brand,
+        category: rest.category,
+      });
+
+      if (matches.length) {
+        return res.status(409).json({
+          code: "POSSIBLE_DUPLICATE",
+          message:
+            matches.length === 1
+              ? `"${matches[0].name}" is already in the catalog`
+              : `${matches.length} similar items are already in the catalog`,
+          matches,
+          blocking: matches.some((match) => match.exact),
+        });
+      }
     }
 
     const openingQuantity = Number(quantity) || 0;
@@ -159,9 +375,15 @@ export const createProduct = async (req, res) => {
     // by the same path as every other stock movement.
     const product = await Product.create({
       ...rest,
+      name: named.name,
+      naming: named.naming,
+      nameCompliant: named.compliant,
       code: productCode,
       storeRoom: String(storeRoom).trim(),
       quantity: 0,
+      // Every item that comes in through intake owes the Plant Manager a SAP
+      // record (ST-13). The imported catalog does not — see models/Product.js.
+      sap: { status: "Pending" },
     });
 
     if (openingQuantity > 0) {
@@ -200,7 +422,8 @@ export const updateProduct = async (req, res) => {
       return res.status(404).json({ message: "Product not found" });
     }
 
-    const { code, quantity, storeRoom } = req.body;
+    const { code, quantity, storeRoom, acknowledgeNaming = false, allowDuplicate = false } =
+      req.body;
 
     // Product code is user-facing and must stay unique.
     if (code && code.trim() && code.trim() !== product.code) {
@@ -208,6 +431,54 @@ export const updateProduct = async (req, res) => {
         return res.status(400).json({ message: `Product code ${code.trim()} is already taken` });
       }
       product.code = code.trim();
+    }
+
+    // The name is re-derived and re-checked only when it, or the fields it is
+    // built from, actually change. Editing a rack number must not stamp a
+    // verdict on a name nobody touched — the imported rows stay `null`
+    // ("never checked") until somebody deliberately renames them.
+    const nameTouched = req.body.name !== undefined || req.body.naming !== undefined;
+    if (nameTouched) {
+      const named = resolveItemName({
+        name: req.body.name !== undefined ? req.body.name : product.name,
+        naming: req.body.naming !== undefined ? req.body.naming : product.naming,
+      });
+
+      if (!named.name) {
+        return res.status(400).json({ message: "Product name is required" });
+      }
+      if (!named.compliant && !acknowledgeNaming) {
+        return res.status(422).json({
+          code: "NAME_NOT_COMPLIANT",
+          message: `"${named.name}" does not follow the SOI1/SOP1 naming convention`,
+          name: named.name,
+          issues: named.issues,
+        });
+      }
+
+      // A rename can collide with something already on the shelf just as an
+      // intake can, so it gets the same warning (ST-14).
+      if (!allowDuplicate && named.name !== product.name) {
+        const matches = await findSimilarProducts({
+          name: named.name,
+          brand: req.body.brand ?? product.brand,
+          category: req.body.category ?? product.category,
+          excludeId: product._id,
+        });
+
+        if (matches.length) {
+          return res.status(409).json({
+            code: "POSSIBLE_DUPLICATE",
+            message: `"${named.name}" looks like an item already in the catalog`,
+            matches,
+            blocking: matches.some((match) => match.exact),
+          });
+        }
+      }
+
+      product.name = named.name;
+      if (named.naming) product.naming = named.naming;
+      product.nameCompliant = named.compliant;
     }
 
     for (const field of EDITABLE_FIELDS) {

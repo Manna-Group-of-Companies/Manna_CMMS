@@ -152,6 +152,15 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                                 SoftChip(p.storeRoom),
                                 if (p.status.isNotEmpty)
                                   SoftChip(p.status, color: statusColor(p.status)),
+                                // The two intake flags. A null nameCompliant
+                                // means "never checked", which is not a
+                                // finding and stays silent.
+                                if (p.nameCompliant == false)
+                                  SoftChip('Name not SOI1/SOP1', color: AppColors.warning),
+                                if (p.sap.isPending)
+                                  SoftChip('Pending SAP', color: AppColors.accent),
+                                if (p.sap.isCreated && p.sap.code.isNotEmpty)
+                                  SoftChip('SAP ${p.sap.code}', color: AppColors.success),
                               ],
                             ),
                           ],

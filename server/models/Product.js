@@ -1,5 +1,66 @@
 import mongoose from "mongoose";
 
+/**
+ * One physical size and its unit, e.g. `{ value: "50", uom: "SQMM" }`, which
+ * renders as `50SQMM` inside the standardized name.
+ */
+const dimensionSchema = new mongoose.Schema(
+  {
+    value: { type: String, default: "", trim: true },
+    uom: { type: String, default: "", trim: true, uppercase: true },
+  },
+  { _id: false },
+);
+
+/**
+ * The fields the SOI1/SOP1 name was built from (ST-09).
+ *
+ * Kept alongside the finished `name` rather than parsed back out of it: the
+ * name is what everyone reads, but only the parts can be edited safely, and
+ * the Plant Manager needs them broken out for the SAP record.
+ */
+export const namingSchema = new mongoose.Schema(
+  {
+    dimensions: { type: [dimensionSchema], default: [] },
+    electricalRating: { type: String, default: "", trim: true },
+    electricalUom: { type: String, default: "", trim: true, uppercase: true },
+    itemName: { type: String, default: "", trim: true },
+    type: { type: String, default: "", trim: true },
+    material: { type: String, default: "", trim: true, uppercase: true },
+    itemCode: { type: String, default: "", trim: true, uppercase: true },
+  },
+  { _id: false },
+);
+
+/**
+ * The SAP hand-off (ST-13).
+ *
+ * Module 1 does not talk to SAP. It only tracks whether the finalized name has
+ * been handed to the Plant Manager and created there, so nothing gets stocked
+ * under a name SAP has never heard of.
+ *
+ * The default is "Not Required" on purpose: the catalog that predates this
+ * field was imported wholesale, and defaulting it to "Pending" would drop
+ * several thousand historic rows into the Plant Manager's queue on the first
+ * deploy. Items created through the intake flow are stamped "Pending"
+ * explicitly instead.
+ */
+const sapSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ["Pending", "Created", "Not Required"],
+      default: "Not Required",
+    },
+    /** The code SAP assigned, once the Plant Manager reports back. */
+    code: { type: String, default: "", trim: true },
+    createdAt: { type: Date, default: null },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    note: { type: String, default: "", trim: true },
+  },
+  { _id: false },
+);
+
 const productSchema = new mongoose.Schema(
   {
     code: {
@@ -103,11 +164,34 @@ const productSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    naming: {
+      type: namingSchema,
+      default: null,
+    },
+    /**
+     * Whether `name` passes the SOI1/SOP1 rules (ST-10).
+     *
+     * Null means "never checked" — the imported catalog, which was named long
+     * before the convention was written down. Only false is a finding; null is
+     * a gap, and the two must not be shown the same way.
+     */
+    nameCompliant: {
+      type: Boolean,
+      default: null,
+    },
+    sap: {
+      type: sapSchema,
+      default: () => ({}),
+    },
   },
   {
     timestamps: true,
   }
 );
+
+// Drives the Plant Manager's pending-SAP queue, which is the only read that
+// filters on this field.
+productSchema.index({ "sap.status": 1, createdAt: -1 });
 
 const Product = mongoose.model("Product", productSchema);
 export default Product;

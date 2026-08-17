@@ -8,6 +8,7 @@ import 'screens/login_screen.dart';
 import 'screens/supervisor/branch_approvals_screen.dart';
 import 'screens/supervisor/my_requests_screen.dart';
 import 'screens/supervisor/my_returns_screen.dart';
+import 'screens/supervisor/sap_handoff_screen.dart';
 import 'screens/supervisor/settings_screen.dart';
 import 'screens/supervisor/supervisor_issue_history_screen.dart';
 import 'screens/supervisor/supervisor_product_list_screen.dart';
@@ -49,6 +50,10 @@ GoRouter buildRouter(AuthProvider auth) {
       ),
       // Also carries Stock by Room, which no longer has a page of its own.
       GoRoute(path: '/supervisor/returns', builder: (_, _) => const MyReturnsScreen()),
+      // Items named in the store and waiting for the Plant Manager to create
+      // them in SAP. Reached from the catalog rather than the bottom bar — it
+      // belongs to intake, and the bar is full.
+      GoRoute(path: '/supervisor/sap-handoff', builder: (_, _) => const SapHandoffScreen()),
       // Profile details and sign-out both live here.
       GoRoute(path: '/supervisor/settings', builder: (_, _) => const SettingsScreen()),
       // Stage two of the branch workflow is decided here.

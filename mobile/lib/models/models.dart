@@ -46,6 +46,201 @@ class AppUser {
       };
 }
 
+/// One physical size and its unit — `50` + `SQMM`, which becomes `50SQMM`
+/// inside the standardized name.
+class ItemDimension {
+  const ItemDimension({this.value = '', this.uom = ''});
+
+  final String value;
+  final String uom;
+
+  bool get isEmpty => value.trim().isEmpty;
+
+  ItemDimension copyWith({String? value, String? uom}) =>
+      ItemDimension(value: value ?? this.value, uom: uom ?? this.uom);
+
+  factory ItemDimension.fromJson(Map<String, dynamic> json) => ItemDimension(
+        value: asString(json['value']),
+        uom: asString(json['uom']),
+      );
+
+  Map<String, dynamic> toJson() => {'value': value, 'uom': uom};
+}
+
+/// The SOI1/SOP1 fields an item name is built from (ST-09).
+///
+/// Mutable, because this is what the intake form edits directly. The name
+/// itself is never composed here — `POST /products/name-preview` does that, so
+/// the convention lives in exactly one place.
+class NamingParts {
+  NamingParts({
+    List<ItemDimension>? dimensions,
+    this.electricalRating = '',
+    this.electricalUom = '',
+    this.itemName = '',
+    this.type = '',
+    this.material = '',
+    this.itemCode = '',
+  }) : dimensions = dimensions ?? [const ItemDimension()];
+
+  final List<ItemDimension> dimensions;
+  String electricalRating;
+  String electricalUom;
+  String itemName;
+  String type;
+  String material;
+  String itemCode;
+
+  /// Nothing worth composing a name out of yet.
+  bool get isBlank =>
+      itemName.trim().isEmpty &&
+      itemCode.trim().isEmpty &&
+      electricalRating.trim().isEmpty &&
+      dimensions.every((dimension) => dimension.isEmpty);
+
+  factory NamingParts.fromJson(Map<String, dynamic> json) {
+    final raw = (json['dimensions'] as List? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(ItemDimension.fromJson)
+        .toList();
+
+    return NamingParts(
+      // Always leave one row so the form never renders an empty section.
+      dimensions: raw.isEmpty ? [const ItemDimension()] : raw,
+      electricalRating: asString(json['electricalRating']),
+      electricalUom: asString(json['electricalUom']),
+      itemName: asString(json['itemName']),
+      type: asString(json['type']),
+      material: asString(json['material']),
+      itemCode: asString(json['itemCode']),
+    );
+  }
+
+  static NamingParts? maybe(dynamic json) =>
+      json is Map<String, dynamic> ? NamingParts.fromJson(json) : null;
+
+  Map<String, dynamic> toJson() => {
+        'dimensions':
+            dimensions.where((d) => !d.isEmpty).map((d) => d.toJson()).toList(),
+        'electricalRating': electricalRating,
+        'electricalUom': electricalUom,
+        'itemName': itemName,
+        'type': type,
+        'material': material,
+        'itemCode': itemCode,
+      };
+}
+
+/// One way a name breaks the convention. [code] is stable; [message] is written
+/// for the person at the counter.
+class NamingIssue {
+  const NamingIssue({required this.code, required this.message});
+
+  final String code;
+  final String message;
+
+  factory NamingIssue.fromJson(Map<String, dynamic> json) => NamingIssue(
+        code: asString(json['code']),
+        message: asString(json['message']),
+      );
+}
+
+/// The server's verdict on a name (ST-10), with the name it composed.
+class NameCheck {
+  const NameCheck({
+    required this.name,
+    required this.compliant,
+    required this.issues,
+    this.naming,
+  });
+
+  final String name;
+  final bool compliant;
+  final List<NamingIssue> issues;
+
+  /// The cleaned fields the name was built from — uppercased UOMs and all.
+  final NamingParts? naming;
+
+  factory NameCheck.fromJson(Map<String, dynamic> json) => NameCheck(
+        name: asString(json['name']),
+        compliant: json['compliant'] == true,
+        issues: (json['issues'] as List? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(NamingIssue.fromJson)
+            .toList(),
+        naming: NamingParts.maybe(json['naming']),
+      );
+}
+
+/// A catalog item that looks like the one being created (ST-14).
+class DuplicateMatch {
+  const DuplicateMatch({
+    required this.id,
+    required this.name,
+    required this.code,
+    required this.storeRoom,
+    required this.rackNumber,
+    required this.quantity,
+    required this.unit,
+    required this.reason,
+    required this.exact,
+    required this.score,
+  });
+
+  final String id;
+  final String name;
+  final String code;
+  final String storeRoom;
+  final String rackNumber;
+  final int quantity;
+  final String unit;
+
+  /// Why it matched — "Same product code", "Similar name", and so on.
+  final String reason;
+
+  /// The store almost certainly already owns this one, rather than something
+  /// merely similar.
+  final bool exact;
+  final num score;
+
+  factory DuplicateMatch.fromJson(Map<String, dynamic> json) => DuplicateMatch(
+        id: asString(json['_id']),
+        name: asString(json['name']),
+        code: asString(json['code']),
+        storeRoom: asString(json['storeRoom']),
+        rackNumber: asString(json['rackNumber']),
+        quantity: asInt(json['quantity']),
+        unit: asString(json['unit']),
+        reason: asString(json['reason']),
+        exact: json['exact'] == true,
+        score: json['score'] is num ? json['score'] as num : 0,
+      );
+}
+
+/// Where an item stands with the Plant Manager's SAP record (ST-13).
+class SapInfo {
+  const SapInfo({this.status = 'Not Required', this.code = '', this.createdAt});
+
+  /// `Pending`, `Created` or `Not Required`.
+  final String status;
+
+  /// The material code SAP assigned, once it exists.
+  final String code;
+  final DateTime? createdAt;
+
+  bool get isPending => status == 'Pending';
+  bool get isCreated => status == 'Created';
+
+  factory SapInfo.fromJson(Map<String, dynamic> json) => SapInfo(
+        status: asString(json['status'], 'Not Required'),
+        code: asString(json['code']),
+        createdAt: parseDate(json['createdAt']),
+      );
+
+  static SapInfo maybe(dynamic json) =>
+      json is Map<String, dynamic> ? SapInfo.fromJson(json) : const SapInfo();
+}
+
 /// A product record. Several endpoints populate only a subset of fields
 /// (`name code unit storeRoom image`), so every field has a safe default and
 /// [isPartial] tells the UI whether the full document is available.
@@ -68,6 +263,9 @@ class Product {
     this.brand = '',
     this.status = '',
     this.unitCost = 0,
+    this.naming,
+    this.nameCompliant,
+    this.sap = const SapInfo(),
   });
 
   final String id;
@@ -97,6 +295,17 @@ class Product {
   final String image;
   final bool isPartial;
 
+  /// The SOI1/SOP1 fields this name was built from (ST-09). Null on the
+  /// imported catalog, which was named before the convention was captured.
+  final NamingParts? naming;
+
+  /// Whether [name] passes the convention (ST-10). Null means never checked —
+  /// a gap, not a finding, and shown differently from false.
+  final bool? nameCompliant;
+
+  /// Where the item stands with SAP (ST-13).
+  final SapInfo sap;
+
   bool get isOutOfStock => quantity == 0;
   bool get isLowStock => quantity <= minStock;
 
@@ -117,6 +326,9 @@ class Product {
         storeRoom: asString(json['storeRoom']),
         description: asString(json['description']),
         image: asString(json['image']),
+        naming: NamingParts.maybe(json['naming']),
+        nameCompliant: json['nameCompliant'] is bool ? json['nameCompliant'] as bool : null,
+        sap: SapInfo.maybe(json['sap']),
         isPartial: !json.containsKey('category') || !json.containsKey('quantity'),
       );
 
@@ -138,7 +350,8 @@ class ProductDraft {
     this.storeRoom = 'Engineer Room',
     this.description = '',
     this.image = '',
-  });
+    NamingParts? naming,
+  }) : naming = naming ?? NamingParts();
 
   String name;
   String category;
@@ -157,6 +370,10 @@ class ProductDraft {
   String description;
   String image;
 
+  /// The SOI1/SOP1 fields the name is composed from (ST-09). Always present so
+  /// the builder has something to bind to; blank until it is filled in.
+  final NamingParts naming;
+
   factory ProductDraft.fromProduct(Product product) => ProductDraft(
         name: product.name,
         category: product.category,
@@ -169,6 +386,9 @@ class ProductDraft {
         storeRoom: product.storeRoom,
         description: product.description,
         image: product.image,
+        // Editing a product created with the builder starts from its own parts
+        // rather than from an empty form.
+        naming: product.naming,
       );
 
   factory ProductDraft.fromJson(Map<String, dynamic> json) => ProductDraft(
@@ -183,6 +403,7 @@ class ProductDraft {
         storeRoom: asString(json['storeRoom'], 'Engineer Room'),
         description: asString(json['description']),
         image: asString(json['image']),
+        naming: NamingParts.maybe(json['naming']),
       );
 
   Map<String, dynamic> toJson() => {
@@ -197,6 +418,9 @@ class ProductDraft {
         'storeRoom': storeRoom,
         'description': description,
         'image': image,
+        // Omitted when empty: sending a blank sub-document on an EDIT would
+        // clear the naming fields of a product that has them.
+        if (!naming.isBlank) 'naming': naming.toJson(),
       };
 }
 

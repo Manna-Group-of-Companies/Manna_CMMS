@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { namingSchema } from "./Product.js";
 
 const productRequestSchema = new mongoose.Schema(
   {
@@ -40,6 +41,14 @@ const productRequestSchema = new mongoose.Schema(
       storeRoom: { type: String, required: true, trim: true },
       description: String,
       image: String,
+      // The SOI1/SOP1 fields the name was built from (ST-09), carried through
+      // approval so the product is created with them rather than with a name
+      // whose parts have been thrown away. Null on requests raised before the
+      // naming builder existed, and on names typed out by hand.
+      naming: { type: namingSchema, default: null },
+      // Whether the requested name passed the convention (ST-10). Null means
+      // it was never checked — see models/Product.js.
+      nameCompliant: { type: Boolean, default: null },
     },
     status: {
       type: String,

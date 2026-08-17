@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import '../../core/toast.dart';
 import '../../data/repository.dart';
 import '../../models/models.dart';
 import '../../widgets/common.dart';
+import '../../widgets/item_name_builder.dart';
 import '../../widgets/product_details_sheet.dart' show SheetGrabber;
 
 /// Photos are stored inline on the product record as a base64 `data:` URI, so
@@ -379,6 +381,106 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
 
   bool get _isInlinePhoto => _draft.image.startsWith('data:');
 
+  // ---------------------------------------------------- intake checks (ST-09→14)
+
+  /// Open by default on a new item, and on an existing one that was named with
+  /// the builder — so its parts are visible rather than hidden.
+  late bool _showBuilder = !_isEdit || widget.product?.naming != null;
+
+  /// Debounced checks against the name as it is typed. Both run on the same
+  /// timer so a keystroke costs one round of requests, not two.
+  Timer? _nameTimer;
+  int _nameTicket = 0;
+  NameCheck? _nameCheck;
+  List<DuplicateMatch> _duplicates = const [];
+
+  /// What the API refused, and the confirmation that answers it.
+  ///
+  /// Neither check is absolute: 422 says the name breaks SOI1/SOP1 and 409 says
+  /// something similar already exists, and re-sending with the matching flag
+  /// goes ahead deliberately. Holding the refusal here is what lets the sheet
+  /// explain itself instead of just failing.
+  List<NamingIssue>? _refusedName;
+  List<DuplicateMatch>? _refusedDuplicates;
+  String _refusedDuplicateMessage = '';
+  bool _acknowledgeNaming = false;
+  bool _allowDuplicate = false;
+
+  bool get _awaitingConfirmation =>
+      (_refusedName != null && !_acknowledgeNaming) ||
+      (_refusedDuplicates != null && !_allowDuplicate);
+
+  @override
+  void initState() {
+    super.initState();
+    // A listener rather than onChanged: the builder's "Use this name" writes
+    // straight to the controller, and that has to be checked too.
+    _name.addListener(_onNameChanged);
+    if (_name.text.trim().isNotEmpty) _scheduleNameChecks();
+  }
+
+  void _onNameChanged() {
+    // A different name invalidates confirmations given about the previous one.
+    if (_refusedName != null || _refusedDuplicates != null) {
+      setState(() {
+        _refusedName = null;
+        _refusedDuplicates = null;
+        _acknowledgeNaming = false;
+        _allowDuplicate = false;
+      });
+    }
+    _scheduleNameChecks();
+  }
+
+  void _scheduleNameChecks() {
+    _nameTimer?.cancel();
+
+    final name = _name.text.trim();
+    // Below a few characters a name is too vague to check usefully, and an
+    // untouched form should not open covered in warnings.
+    if (name.length < 3) {
+      if (_nameCheck != null || _duplicates.isNotEmpty) {
+        setState(() {
+          _nameCheck = null;
+          _duplicates = const [];
+        });
+      }
+      return;
+    }
+
+    final ticket = ++_nameTicket;
+    _nameTimer = Timer(const Duration(milliseconds: 450), () async {
+      final repository = context.read<StockRepository>();
+      try {
+        final check = await repository.checkItemName(name: name);
+
+        // Reopening a product must not accuse it of duplicating itself, so the
+        // check only runs once the name has actually changed.
+        final matches = _isEdit && name == widget.product!.name
+            ? const <DuplicateMatch>[]
+            : await repository.findDuplicates(
+                name: name,
+                category: _category.text.trim(),
+                excludeId: widget.product?.id,
+              );
+
+        if (!mounted || ticket != _nameTicket) return;
+        setState(() {
+          _nameCheck = check;
+          _duplicates = matches;
+        });
+      } catch (_) {
+        // A failed check must not block the sheet — both run again on submit,
+        // where they can actually be acted on.
+        if (!mounted || ticket != _nameTicket) return;
+        setState(() {
+          _nameCheck = null;
+          _duplicates = const [];
+        });
+      }
+    });
+  }
+
   /// The standard conditions, plus whatever this product already carries.
   ///
   /// The catalog holds a handful of one-off phrasings ("BreakDown on High
@@ -396,6 +498,7 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
 
   @override
   void dispose() {
+    _nameTimer?.cancel();
     for (final controller in [
       _name,
       _category,
@@ -433,13 +536,36 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
             requestType: _isEdit ? 'EDIT' : 'ADD',
             productId: widget.product?.id,
             details: _draft,
+            acknowledgeNaming: _acknowledgeNaming,
+            allowDuplicate: _allowDuplicate,
           );
       Toast.success(
         'Product ${_isEdit ? 'EDIT' : 'ADD'} request submitted successfully!',
       );
       if (mounted) Navigator.of(context).pop(true);
     } on ApiException catch (error) {
-      Toast.error(error.message);
+      // 422 and 409 are the two intake checks asking for confirmation (ST-10,
+      // ST-14), not failures. Show what was found and let the supervisor decide.
+      if (error.statusCode == 422 && error.code == 'NAME_NOT_COMPLIANT' && mounted) {
+        setState(() {
+          _refusedName = (error.body?['issues'] as List? ?? [])
+              .whereType<Map<String, dynamic>>()
+              .map(NamingIssue.fromJson)
+              .toList();
+        });
+        Toast.error('Check the product name before submitting');
+      } else if (error.statusCode == 409 && error.code == 'POSSIBLE_DUPLICATE' && mounted) {
+        setState(() {
+          _refusedDuplicates = (error.body?['matches'] as List? ?? [])
+              .whereType<Map<String, dynamic>>()
+              .map(DuplicateMatch.fromJson)
+              .toList();
+          _refusedDuplicateMessage = error.message;
+        });
+        Toast.error(error.message);
+      } else {
+        Toast.error(error.message);
+      }
     } catch (_) {
       Toast.error('Failed to submit request');
     } finally {
@@ -511,17 +637,66 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
             : 'Request Add New Product',
         submitLabel: 'Submit Request',
         submitting: _submitting,
+        canSubmit: !_awaitingConfirmation,
         onSubmit: _submit,
         children: [
+          // The naming convention comes first: the name it produces is what
+          // every other field on this form hangs off.
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _submitting
+                  ? null
+                  : () => setState(() => _showBuilder = !_showBuilder),
+              icon: Icon(
+                _showBuilder ? Icons.expand_less : Icons.auto_fix_high_outlined,
+                size: 17,
+              ),
+              label: Text(
+                '${_showBuilder ? 'Hide' : 'Show'} standard name builder (SOI1/SOP1)',
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primaryDeep,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
+          if (_showBuilder) ...[
+            const SizedBox(height: 12),
+            ItemNameBuilderCard(
+              naming: _draft.naming,
+              enabled: !_submitting,
+              onApply: (name) => _name.text = name,
+            ),
+          ],
+          const SizedBox(height: 18),
           _Field(
             label: 'Product Name',
             required: true,
-            child: TextFormField(
-              controller: _name,
-              validator: _requiredValidator,
-              decoration: const InputDecoration(hintText: 'e.g. MX Master 3S'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _name,
+                  validator: _requiredValidator,
+                  decoration: const InputDecoration(hintText: 'e.g. 25MM Bearing Deep Groove'),
+                ),
+                // ST-10 — the verdict on the name as it currently stands.
+                if (_nameCheck != null) ...[
+                  const SizedBox(height: 8),
+                  NameComplianceHint(check: _nameCheck!),
+                ],
+              ],
             ),
           ),
+          // ST-14 — what the catalog already holds that looks like this.
+          if (_refusedDuplicates == null && _duplicates.isNotEmpty) ...[
+            DuplicateMatchesCard(matches: _duplicates),
+            const SizedBox(height: 16),
+          ],
           _Field(
             label: 'Category',
             required: true,
@@ -752,6 +927,80 @@ class _ProductRequestFormState extends State<_ProductRequestForm> {
               ),
             ),
           ),
+
+          // The two refusals, each with the tick that answers it. Submit stays
+          // disabled until it is answered, so the same payload is never
+          // re-sent unchanged.
+          if (_refusedDuplicates != null) ...[
+            DuplicateMatchesCard(
+              matches: _refusedDuplicates!,
+              heading: _refusedDuplicateMessage,
+            ),
+            const SizedBox(height: 6),
+            ConfirmOverride(
+              value: _allowDuplicate,
+              tone: AppColors.danger,
+              onChanged: (value) => setState(() => _allowDuplicate = value),
+              label: 'This is a different item from the ones above — submit anyway.',
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          if (_refusedName != null) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.warning.withValues(alpha: 0.22)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.rule_outlined,
+                        size: 15,
+                        color: AppColors.warningDeep,
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          '"${_name.text.trim()}" does not follow SOI1/SOP1',
+                          style: const TextStyle(
+                            color: AppColors.warningDeep,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            height: 1.3,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  for (final issue in _refusedName!)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 5, left: 22),
+                      child: Text(
+                        '• ${issue.message}',
+                        style: const TextStyle(
+                          color: AppColors.warningDeep,
+                          fontSize: 10.5,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            ConfirmOverride(
+              value: _acknowledgeNaming,
+              onChanged: (value) => setState(() => _acknowledgeNaming = value),
+              label: 'Submit with this name anyway — it will be marked non-compliant '
+                  'in the catalog.',
+            ),
+          ],
         ],
       ),
     );

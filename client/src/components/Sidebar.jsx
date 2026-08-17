@@ -14,6 +14,7 @@ import {
   ClipboardCheck,
   KeyRound,
   TrendingDown,
+  ArrowRightLeft,
   X,
 } from "lucide-react";
 
@@ -56,6 +57,11 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
       name: "Scrap & Consumption",
       path: "/admin/scrap",
       icon: TrendingDown,
+    },
+    {
+      name: "SAP Hand-off",
+      path: "/admin/sap-handoff",
+      icon: ArrowRightLeft,
     },
     {
       name: "Branch Requests",

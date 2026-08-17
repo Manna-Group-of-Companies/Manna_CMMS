@@ -45,6 +45,67 @@ class StockRepository {
     return Product.fromJson(data as Map<String, dynamic>);
   }
 
+  // ------------------------------------------------------- intake and naming
+
+  /// Composes and checks a name against SOI1/SOP1 (ST-09, ST-10).
+  ///
+  /// The convention itself lives on the server, in `utils/itemNaming.js`. The
+  /// app asks rather than reimplementing it, because a rule that drifts between
+  /// the phone, the web console and the API is worse than a round trip.
+  ///
+  /// Pass [naming] alone to build a name from its parts; pass [name] to check a
+  /// name that was typed out by hand.
+  Future<NameCheck> checkItemName({String? name, NamingParts? naming}) async {
+    final data = await _api.post('/products/name-preview', {
+      'name': ?name,
+      'naming': ?naming?.toJson(),
+    });
+    return NameCheck.fromJson(Map<String, dynamic>.from(data as Map));
+  }
+
+  /// Catalog items that look like the one being created (ST-14).
+  ///
+  /// [excludeId] leaves a product out of its own results, for the edit case.
+  Future<List<DuplicateMatch>> findDuplicates({
+    required String name,
+    String code = '',
+    String brand = '',
+    String category = '',
+    String? excludeId,
+  }) async {
+    final data = await _api.get('/products/duplicates', query: {
+      'name': name,
+      'code': code,
+      'brand': brand,
+      'category': category,
+      'excludeId': excludeId,
+    });
+    final json = Map<String, dynamic>.from(data as Map);
+    return _list(json['matches'], DuplicateMatch.fromJson);
+  }
+
+  /// Items named in the store and still waiting to be created in SAP (ST-13).
+  Future<List<Product>> sapPending({String? storeRoom}) async {
+    final data = await _api.get('/products/sap-pending', query: {'storeRoom': storeRoom});
+    return _list(data, Product.fromJson);
+  }
+
+  /// Records what SAP did with an item. [status] is `Created`, `Pending` or
+  /// `Not Required`. Admin only.
+  Future<Product> setSapStatus({
+    required String productId,
+    required String status,
+    String code = '',
+    String note = '',
+  }) async {
+    final data = await _api.put('/products/$productId/sap', {
+      'status': status,
+      'code': code,
+      'note': note,
+    });
+    return Product.fromJson(Map<String, dynamic>.from(data as Map));
+  }
+
   // --------------------------------------------------------------- dashboard
 
   Future<AdminDashboard> adminDashboard() async {
@@ -133,15 +194,25 @@ class StockRepository {
   }) =>
       _api.put('/requests/$rawType/$id/$action', {'adminComments': adminComments});
 
+  /// Raises an ADD or EDIT request against the catalog.
+  ///
+  /// The API applies the two intake checks first and refuses with 422 (the name
+  /// breaks SOI1/SOP1) or 409 (an item like this already exists). Both are
+  /// answerable rather than final: set [acknowledgeNaming] or [allowDuplicate]
+  /// and send the same draft again to go ahead deliberately.
   Future<void> createProductRequest({
     required String requestType, // ADD | EDIT
     String? productId,
     required ProductDraft details,
+    bool acknowledgeNaming = false,
+    bool allowDuplicate = false,
   }) =>
       _api.post('/requests/product', {
         'requestType': requestType,
         'productId': ?productId,
         'details': details.toJson(),
+        'acknowledgeNaming': acknowledgeNaming,
+        'allowDuplicate': allowDuplicate,
       });
 
   /// [kind] is one of `stockin`, `stockout`, `stockreturn`.
