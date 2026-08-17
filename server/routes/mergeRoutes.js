@@ -3,6 +3,7 @@ import {
   createMergeRequest,
   createWeeklyMergeRequest,
   createSupervisorMergeRequest,
+  confirmSupervisorMerge,
   getMyMergeRequests,
   getWeeklyMergeStatus,
   getMergeRequests,
@@ -16,13 +17,16 @@ const router = express.Router();
 
 router.use(protect);
 
-// A Supervisor may merge only their own returns. That merge is applied directly
-// to the main store room. Registered before the Admin guard, and before "/:id"
-// so "mine" is not read as an id.
+// A Supervisor may merge only their own returns. That merge shows a confirmation
+// prompt first, then is applied directly to the main store room. Registered
+// before the Admin guard, and before "/:id" so "mine" is not read as an id.
 router
   .route("/mine")
   .post(authorizeRoles("Supervisor"), createSupervisorMergeRequest)
   .get(authorizeRoles("Supervisor"), getMyMergeRequests);
+
+// Supervisor confirms their merge with the confirmation prompt
+router.post("/:id/confirm", authorizeRoles("Supervisor"), confirmSupervisorMerge);
 
 // Every other merge operation is Admin-only.
 router.use(authorizeRoles("Admin"));

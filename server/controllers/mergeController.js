@@ -52,14 +52,13 @@ export const createWeeklyMergeRequest = async (req, res) => {
 };
 
 /**
- * @desc    Supervisor merges their own Red Stock back into the store rooms
+ * @desc    Supervisor initiates a merge of their own Red Stock back into the store
  * @route   POST /api/merge-requests/mine
  * @access  Private (Supervisor)
  *
- * Applied immediately, and never handed to the Admin. A supervisor is returning
- * stock they issued themselves, to the room it came from, so there was nothing
- * for an approval to decide — the quantity is on the shelf and countable by the
- * time this responds.
+ * Creates the merge request and shows a confirmation prompt. Does NOT wait for
+ * Admin approval — supervisors can confirm directly. Confirmation endpoint will
+ * apply the merge immediately to the main store room.
  *
  * Every line goes straight to the main store room. The MergeRequest is still
  * written and closed as Approved, so the merge keeps its request id, its
@@ -105,9 +104,75 @@ export const createSupervisorMergeRequest = async (req, res) => {
       });
     }
 
-    // Re-read as a document: requestSupervisorMerge returns a populated copy,
-    // and applyMerge saves what it is given.
-    const request = await MergeRequest.findById(result.mergeRequest._id);
+    const populated = await MergeRequest.findById(result.mergeRequest._id)
+      .populate("requestedBy", "name email role")
+      .populate("items.product", "name code unit storeRoom image");
+
+    const quantity = result.mergeRequest.totalQuantity;
+
+    // Return the merge request with a confirmation prompt
+    res.status(200).json({
+      message: `Ready to merge ${quantity} pcs from Red Stock into ${mainStoreRoom.name}. Please confirm.`,
+      mergeRequest: populated,
+      requiresConfirmation: true,
+      destinationRoom: mainStoreRoom.name,
+      prompt: {
+        title: "Confirm Merge to Main Store",
+        message: `You are about to merge ${quantity} pcs across ${result.mergeRequest.itemCount} item(s) into ${mainStoreRoom.name}. This action cannot be undone.`,
+        confirmText: "Yes, Merge Now",
+        cancelText: "Cancel",
+        type: "warning"
+      }
+    });
+  } catch (error) {
+    console.error("Error creating supervisor merge request:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/**
+ * @desc    Supervisor confirms and applies their merge to the main store
+ * @route   POST /api/merge-requests/:id/confirm
+ * @access  Private (Supervisor)
+ *
+ * Applies the pending supervisor merge to the main store room. This is called
+ * after the supervisor confirms the prompt from createSupervisorMergeRequest.
+ */
+export const confirmSupervisorMerge = async (req, res) => {
+  try {
+    const request = await MergeRequest.findById(req.params.id);
+    
+    if (!request) {
+      return res.status(404).json({ message: "Merge request not found" });
+    }
+
+    // Verify this is a supervisor merge
+    if (request.createdVia !== "Supervisor") {
+      return res.status(403).json({ message: "Only supervisor merges can be confirmed this way" });
+    }
+
+    // Verify the requesting user is the one who created this merge
+    if (String(request.requestedBy) !== String(req.user._id)) {
+      return res.status(403).json({ message: "You can only confirm your own merges" });
+    }
+
+    // Find the main store room
+    const mainStoreRoom =
+      (await StockRoom.findOne({
+        name: StockRoom.DEFAULT_ROOMS[0],
+        isActive: true,
+      })) || (await StockRoom.findOne({ isActive: true }).sort({ createdAt: 1 }));
+
+    if (!mainStoreRoom) {
+      await withdrawMerge(request);
+      return res.status(409).json({
+        message:
+          "There is no active main store room. Ask the Admin to add one, then merge again — " +
+          "your stock is still in Red Stock.",
+      });
+    }
+
+    // Apply the merge
     const { merged, skipped, closed } = await applyMerge({
       request,
       defaultRoom: mainStoreRoom,
@@ -119,14 +184,8 @@ export const createSupervisorMergeRequest = async (req, res) => {
     const rooms = [...new Set(merged.map((entry) => entry.destinationRoom))];
     const quantity = merged.reduce((sum, entry) => sum + entry.quantity, 0);
 
-    // Nothing could be placed, which now means one thing only: the install has
-    // no active store room to place it in. There is no destination an approval
-    // could pick either, so the request is withdrawn rather than parked on the
-    // Admin's desk — the stock stays in Red Stock, mergeable again the moment a
-    // room exists.
     if (!closed) {
       await withdrawMerge(request);
-
       return res.status(409).json({
         message:
           "There is no active store room to merge into. Ask the Admin to add one, " +
@@ -138,12 +197,7 @@ export const createSupervisorMergeRequest = async (req, res) => {
     await Notification.create({
       message:
         `${req.user.name} merged ${quantity} pcs across ${merged.length} returned ` +
-        `item(s) from Red Stock into ${rooms.join(", ")} (${request.requestId})` +
-        // The weekly merge had claimed some of this, so say so: the Admin's
-        // pending request is smaller than when they last looked at it.
-        (result.reclaimedFrom?.length
-          ? `, taken back out of ${result.reclaimedFrom.join(", ")}`
-          : ""),
+        `item(s) from Red Stock into ${rooms.join(", ")} (${request.requestId})`,
       type: "MERGE_APPROVED",
     });
 
@@ -163,7 +217,7 @@ export const createSupervisorMergeRequest = async (req, res) => {
 
     res.status(201).json({ message, mergeRequest: populated, merged, skipped });
   } catch (error) {
-    console.error("Error merging supervisor Red Stock:", error);
+    console.error("Error confirming supervisor merge:", error);
     res.status(500).json({ message: error.message });
   }
 };
