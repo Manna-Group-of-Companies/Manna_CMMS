@@ -409,8 +409,8 @@ class StockRepository {
   // --------------------------------------------------------------- red stock
 
   /// Hands issued stock back into the Red Stock Room. No Admin approval is
-  /// involved: the stock is in Red Stock as soon as this returns. It reaches a
-  /// store room only when an Admin approves the weekly merge.
+  /// involved: the stock is in Red Stock as soon as this returns, and reaches a
+  /// store room when the supervisor merges it — see [requestMerge].
   ///
   /// [quantity] defaults to everything still outstanding when null.
   Future<String> returnIssuedStock({
@@ -446,18 +446,21 @@ class StockRepository {
 
   // ------------------------------------------------------------------ merges
 
-  /// Asks the Admin to merge this supervisor's Red Stock into a store room
-  /// rather than waiting for the weekly run. Nothing moves until the Admin
-  /// approves it.
+  /// Merges this supervisor's Red Stock back into the store rooms, applied
+  /// immediately — it no longer waits on the Admin. Each item returns to its
+  /// own store room, since nobody is asked to name a destination.
   ///
-  /// [restockItemIds] narrows the request to specific returns; omit it to send
+  /// The Admin's weekly merge still needs approval: it sweeps every
+  /// supervisor's returns at once, and that one does need a decision.
+  ///
+  /// [restockItemIds] narrows the merge to specific returns; omit it to take
   /// everything the supervisor has sitting in Red Stock.
   Future<String> requestMerge({List<String>? restockItemIds, String comment = ''}) async {
     final data = await _api.post('/merge-requests/mine', {
       'restockItemIds': ?restockItemIds,
       'comment': comment,
     });
-    return _message(data, 'Merge request sent to the Admin');
+    return _message(data, 'Merged out of Red Stock');
   }
 
   /// The merges this supervisor has raised, newest first.

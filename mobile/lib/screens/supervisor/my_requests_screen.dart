@@ -487,7 +487,7 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
                     if (_picksRoom && _rooms.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       const Text(
-                        'Preferred Stock Room',
+                        'Preferred Company',
                         style: TextStyle(
                           color: AppColors.textSecondary,
                           fontSize: 11.5,

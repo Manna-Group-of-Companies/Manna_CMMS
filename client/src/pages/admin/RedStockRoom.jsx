@@ -127,7 +127,7 @@ const RedStockRoom = () => {
       classes: "bg-indigo-500/10 border-indigo-500/20 text-indigo-600",
     },
     {
-      label: "Moved to Stock Rooms",
+      label: "Moved to Companies",
       value: summary?.["Moved to Stock Room"],
       classes: "bg-emerald-500/10 border-emerald-500/20 text-emerald-600",
     },

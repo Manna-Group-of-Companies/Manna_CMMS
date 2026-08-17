@@ -345,7 +345,7 @@ const Users = () => {
                   </div>
                   {form.role === "Branch" && (
                     <div>
-                      <label className="field-label">Stock Room *</label>
+                      <label className="field-label">Company *</label>
                       <select
                         value={form.stockRoom}
                         onChange={(e) => setForm({ ...form, stockRoom: e.target.value })}

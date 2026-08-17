@@ -44,7 +44,7 @@ const EMPTY = {
  * SOI1/SOP1 builder.
  *
  * Everything else is read-only here because it has a proper home elsewhere:
- * quantity and store room move real stock (Stock Rooms page), and code, unit,
+ * quantity and company move real stock (Companies page), and code, unit,
  * min stock and cost are identity and purchasing figures that should not drift
  * from a form somebody opened to fix a shelf label.
  */
@@ -201,7 +201,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
 
     const quantity = Number(form.quantity);
     if (!isEdit) {
-      if (!form.storeRoom) return showToast("Select a store room", "error");
+      if (!form.storeRoom) return showToast("Select a company", "error");
       if (!Number.isInteger(quantity) || quantity < 0) {
         return showToast("Quantity must be a whole number of 0 or more", "error");
       }
@@ -424,14 +424,14 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                 />
               </div>
               <div>
-                <label className={label}>Home Store Room *</label>
+                <label className={label}>Home Company *</label>
                 <select
                   value={form.storeRoom}
                   onChange={set("storeRoom")}
                   required
                   className={`${field} cursor-pointer`}
                 >
-                  <option value="">Select a store room…</option>
+                  <option value="">Select a company…</option>
                   {rooms.map((room) => (
                     <option key={room._id} value={room.name}>
                       {room.name}
@@ -494,9 +494,9 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                 [
                   "Total Quantity",
                   `${product.quantity} ${product.unit}`,
-                  "moves on Stock Rooms",
+                  "moves on Companies",
                 ],
-                ["Home Store Room", product.storeRoom, "moves on Stock Rooms"],
+                ["Home Company", product.storeRoom, "moves on Companies"],
                 ["Min Stock", `${product.minStock} ${product.unit}`, "purchasing figure"],
               ].map(([term, value, why]) => (
                 <div key={term} className="min-w-0">

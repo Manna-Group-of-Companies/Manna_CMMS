@@ -108,7 +108,7 @@ const RequestManagement = () => {
     // A merge is the only decision that moves stock between rooms, so it needs
     // a destination before it can be approved.
     if (request.rawType === "merge" && type === "approve" && !room) {
-      showToast("Choose the store room this stock goes into", "error");
+      showToast("Choose the company this stock goes into", "error");
       return;
     }
 
@@ -299,7 +299,7 @@ const RequestManagement = () => {
                       <div className="min-w-[160px]">
                         {req.rawType === "merge" ? (
                           <>
-                            <div className="cell-title">Red Stock → Store Room</div>
+                            <div className="cell-title">Red Stock → Company</div>
                             <span className="text-[11px] text-slate-500">
                               <strong>{req.merge.totalQuantity} pcs</strong> across{" "}
                               {req.merge.itemCount} returned item(s)
@@ -412,7 +412,7 @@ const RequestManagement = () => {
                       <div className="note note-brand flex-col sm:flex-row sm:items-center gap-3 sm:justify-between">
                         <div>
                           <strong className="text-brand-700 flex items-center gap-1.5">
-                            <Building2 className="h-4 w-4" /> Destination Store Room
+                            <Building2 className="h-4 w-4" /> Destination Company
                           </strong>
                           Every line below is credited to this room on approval.
                         </div>
@@ -420,9 +420,9 @@ const RequestManagement = () => {
                           value={destinationRoom}
                           onChange={(e) => setDestinationRoom(e.target.value)}
                           className="field field-sm sm:w-52 shrink-0 cursor-pointer"
-                          aria-label="Destination store room"
+                          aria-label="Destination company"
                         >
-                          {rooms.length === 0 && <option value="">No stock rooms found</option>}
+                          {rooms.length === 0 && <option value="">No companies found</option>}
                           {rooms.map((room) => (
                             <option key={room._id} value={room.name}>
                               {room.name}
@@ -545,7 +545,7 @@ const RequestManagement = () => {
                           <span className="kv-value text-slate-600">{selectedRequest.product?.category}</span>
                         </div>
                         <div>
-                          <span className="kv-label">Store Room</span>
+                          <span className="kv-label">Company</span>
                           <span className="kv-value text-slate-600">{selectedRequest.product?.storeRoom}</span>
                         </div>
                         <div>
@@ -578,7 +578,7 @@ const RequestManagement = () => {
                           </span>
                         </div>
                         <div>
-                          <span className="kv-label">Store Room</span>
+                          <span className="kv-label">Company</span>
                           <span className={`kv-value ${selectedRequest.product?.storeRoom !== selectedRequest.details.storeRoom ? "text-brand-700" : "text-slate-700"}`}>
                             {selectedRequest.details.storeRoom}
                           </span>

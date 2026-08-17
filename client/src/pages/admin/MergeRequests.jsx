@@ -157,7 +157,7 @@ const MergeRequests = () => {
       return;
     }
     if (actionType === "approve" && !destinationRoom) {
-      showToast("Choose the destination store room", "error");
+      showToast("Choose the destination company", "error");
       return;
     }
 
@@ -219,7 +219,7 @@ const MergeRequests = () => {
           <div>
             <h3 className="text-lg font-bold text-slate-900">Merge Review</h3>
             <p className="text-xs text-slate-500">
-              Approve to move Red Stock into Store Room 1 or Store Room 2
+              Approve to move Red Stock into a company
             </p>
           </div>
         </div>
@@ -387,7 +387,7 @@ const MergeRequests = () => {
                 {actionType === "approve" && (
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                      Destination Store Room *
+                      Destination Company *
                     </label>
                     <select
                       value={destinationRoom}
@@ -502,7 +502,7 @@ const MergeRequests = () => {
                       <strong className="text-brand-700 flex items-center gap-1.5">
                         <Building2 className="h-3.5 w-3.5" /> Destination
                       </strong>
-                      Approved quantities move into this store room. Override any single line
+                      Approved quantities move into this company. Override any single line
                       below to split the merge.
                     </div>
                     <select

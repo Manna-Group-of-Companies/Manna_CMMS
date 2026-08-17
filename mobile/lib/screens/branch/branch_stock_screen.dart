@@ -52,7 +52,7 @@ class _BranchStockScreenState extends State<BranchStockScreen>
       if (mounted) setState(() => _stock = stock);
     } catch (error) {
       debugPrint('Error fetching branch stock: $error');
-      if (!silent) Toast.error('Failed to load your stock room');
+      if (!silent) Toast.error('Failed to load your company');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -93,7 +93,7 @@ class _BranchStockScreenState extends State<BranchStockScreen>
     return AppShell(
       title: stock == null ? 'Branch Stock' : '${stock.roomName} Stock',
       child: _loading && stock == null
-          ? const LoadingView(message: 'Loading stock room...')
+          ? const LoadingView(message: 'Loading company...')
           : Column(
               children: [
                 if (stock != null)
@@ -113,7 +113,7 @@ class _BranchStockScreenState extends State<BranchStockScreen>
                             children: const [
                               EmptyState(
                                 title: 'Stock unavailable',
-                                message: 'Pull down to try loading your room again.',
+                                message: 'Pull down to try loading your company again.',
                                 icon: Icons.cloud_off_outlined,
                               ),
                             ],
@@ -124,10 +124,10 @@ class _BranchStockScreenState extends State<BranchStockScreen>
                                 children: [
                                   EmptyState(
                                     title: stock.items.isEmpty
-                                        ? 'No stock in this room yet'
+                                        ? 'No stock in this company yet'
                                         : 'No items match',
                                     message: stock.items.isEmpty
-                                        ? 'Items placed in your room will appear here.'
+                                        ? 'Items placed in your company will appear here.'
                                         : 'Try a different search or filter.',
                                     icon: Icons.inventory_2_outlined,
                                     dashed: true,
@@ -233,7 +233,7 @@ class _BranchStockTable extends StatelessWidget {
           lines: [
             TableDetailLine(label: 'Code', value: item.code),
             TableDetailLine(label: 'Category', value: item.category),
-            TableDetailLine(label: 'In room', value: '${item.quantity} ${item.unit}'),
+            TableDetailLine(label: 'In company', value: '${item.quantity} ${item.unit}'),
             TableDetailLine(label: 'Minimum', value: '${item.minStock} ${item.unit}'),
             TableDetailLine(label: 'Status', value: label, valueColor: color),
           ],

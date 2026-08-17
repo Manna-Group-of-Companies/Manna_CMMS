@@ -104,7 +104,7 @@ const StockRequestsPanel = () => {
         return;
       }
       if (!form.stockRoomId) {
-        showToast("Select the stock room to credit", "error");
+        showToast("Select the company to credit", "error");
         return;
       }
     }
@@ -173,7 +173,7 @@ const StockRequestsPanel = () => {
         <div>
           <h3 className="text-lg font-bold text-slate-900">Supervisor Stock Requests</h3>
           <p className="text-xs text-slate-500">
-            {pendingCount} pending • accepting credits one stock room only
+            {pendingCount} pending • accepting credits one company only
           </p>
         </div>
 
@@ -218,7 +218,7 @@ const StockRequestsPanel = () => {
                   <th className="py-4 px-6">Product</th>
                   <th className="py-4 px-6 text-center">Requested</th>
                   <th className="py-4 px-6 text-center">Current Stock</th>
-                  <th className="py-4 px-6">Requested Room</th>
+                  <th className="py-4 px-6">Requested Company</th>
                   <th className="py-4 px-6">Date</th>
                   <th className="py-4 px-6 text-center">Status</th>
                   <th className="py-4 px-6 text-right">Actions</th>
@@ -435,7 +435,7 @@ const StockRequestsPanel = () => {
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                      Credit to Stock Room *
+                      Credit to Company *
                     </label>
                     <select
                       value={form.stockRoomId}
@@ -443,7 +443,7 @@ const StockRequestsPanel = () => {
                       required
                       className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
                     >
-                      <option value="">Select a stock room…</option>
+                      <option value="">Select a company…</option>
                       {rooms.map((room) => (
                         <option key={room._id} value={room._id}>
                           {room.name}
@@ -463,7 +463,7 @@ const StockRequestsPanel = () => {
                 </>
               ) : (
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-500/20 text-[11px] text-rose-900 leading-relaxed">
-                  No stock will be added. Every stock room keeps its current quantity and the
+                  No stock will be added. Every company keeps its current quantity and the
                   product total is unchanged.
                 </div>
               )}

@@ -49,16 +49,19 @@ const MyReturns = () => {
     }
   };
 
-  /** Puts the request on the Admin's desk. Nothing moves until they approve. */
+  /**
+   * Merges this supervisor's Red Stock back into the store rooms, applied
+   * immediately — each item returns to its own store room.
+   */
   const requestMerge = async () => {
     try {
       setMerging(true);
       const { data } = await API.post("/merge-requests/mine", {});
-      showToast(data.message || "Merge request sent to the Admin", "success");
+      showToast(data.message || "Merged out of Red Stock", "success");
       fetchItems();
     } catch (error) {
-      console.error("Error requesting merge:", error);
-      showToast(error.response?.data?.message || "Could not send the merge request", "error");
+      console.error("Error merging Red Stock:", error);
+      showToast(error.response?.data?.message || "Could not merge the Red Stock", "error");
     } finally {
       setMerging(false);
     }
@@ -68,7 +71,8 @@ const MyReturns = () => {
     fetchItems();
   }, []);
 
-  // An Admin merge decision happens on their console, so re-read on a timer.
+  // The Admin's weekly merge, or another supervisor's, can move this room's
+  // stock from elsewhere, so re-read on a timer.
   useAutoRefresh(() => fetchItems({ silent: true }));
 
   const getStatusBadge = (status) => {
@@ -119,21 +123,24 @@ const MyReturns = () => {
   const awaiting = items.filter((item) => item.isMine && item.status === "In Red Stock");
   const awaitingQuantity = awaiting.reduce((sum, item) => sum + item.quantity, 0);
 
-  // The merge still on the Admin's desk, or the outcome of the last one.
+  // A supervisor's own merge applies on the spot, so this is normally just the
+  // last one. Pending is still possible: a product with no home store room has
+  // nowhere to go, and that merge does fall back to the Admin.
   const latestMerge = merges.find((merge) => merge.status === "Pending Approval") || merges[0];
 
   const mergeSummary = (merge) => {
     if (merge.status === "Approved") {
       return merge.destinationRoom
-        ? `Approved — moved into ${merge.destinationRoom}`
-        : "Approved — moved into a store room";
+        ? `Merged into ${merge.destinationRoom}`
+        : "Merged into a store room";
     }
     if (merge.status === "Rejected") {
       return merge.rejectionReason
         ? `Rejected: ${merge.rejectionReason}`
         : "Rejected — your stock stays in Red Stock";
     }
-    return "Waiting for the Admin to approve";
+    // Only reached when no home store room could be found for a product.
+    return "Waiting for the Admin to choose a store room";
   };
 
   const mergeTone = (status) => {
@@ -185,7 +192,7 @@ const MyReturns = () => {
             title={
               awaiting.length === 0
                 ? "Nothing of yours is sitting in Red Stock"
-                : "Ask the Admin to merge your Red Stock into a store room"
+                : "Merge your Red Stock back into the store rooms"
             }
             className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed inline-flex items-center gap-2 cursor-pointer shadow active:scale-98 transition-all"
           >
@@ -196,7 +203,7 @@ const MyReturns = () => {
             )}
             {awaiting.length === 0
               ? "Nothing to merge"
-              : `Merge ${awaitingQuantity} pcs to Store Rooms`}
+              : `Merge ${awaitingQuantity} pcs to Companies`}
           </button>
 
           <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-xl border border-slate-200">

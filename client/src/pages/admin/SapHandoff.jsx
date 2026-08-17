@@ -162,7 +162,7 @@ const SapHandoff = () => {
             onChange={(e) => setRoom(e.target.value)}
             className="field field-sm w-auto cursor-pointer"
           >
-            <option value="">All store rooms</option>
+            <option value="">All companies</option>
             {rooms.map((option) => (
               <option key={option._id} value={option.name}>
                 {option.name}

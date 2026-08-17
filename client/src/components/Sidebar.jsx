@@ -111,7 +111,7 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
   // A branch sees its own room's stock, and the requests it has raised on it.
   const branchLinks = [
     {
-      name: user?.stockRoom?.name ? `${user.stockRoom.name} Stock` : "Room Stock",
+      name: user?.stockRoom?.name ? `${user.stockRoom.name} Stock` : "Company Stock",
       path: "/branch/stock",
       icon: Warehouse,
     },

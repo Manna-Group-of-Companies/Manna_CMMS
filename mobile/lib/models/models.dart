@@ -1211,8 +1211,8 @@ class MergeRequestSummary {
   /// What the supervisor needs to read off the card in one line.
   String get summary => switch (status) {
         'Approved' => destinationRoom.isEmpty
-            ? 'Approved — moved into a store room'
-            : 'Approved — moved into $destinationRoom',
+            ? 'Merged into a company'
+            : 'Merged into $destinationRoom',
         'Rejected' => rejectionReason.isEmpty
             ? 'Rejected — your stock stays in Red Stock'
             : 'Rejected: $rejectionReason',

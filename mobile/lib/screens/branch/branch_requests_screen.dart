@@ -171,7 +171,7 @@ class _BranchRequestsScreenState extends State<BranchRequestsScreen>
                                     ? 'No requests yet'
                                     : 'Nothing matches this filter',
                                 message: _requests.isEmpty
-                                    ? 'Tap New Request to apply for stock from your room.'
+                                    ? 'Tap New Request to apply for stock from your company.'
                                     : 'Try another status filter.',
                                 icon: Icons.assignment_outlined,
                               ),

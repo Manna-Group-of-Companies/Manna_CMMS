@@ -46,13 +46,21 @@ export const createWeeklyMergeRequest = async (req, res) => {
 };
 
 /**
- * @desc    Supervisor asks for their own Red Stock to be merged into a store
- *          room, instead of waiting for the weekly run
+ * @desc    Supervisor merges their own Red Stock back into the store rooms
  * @route   POST /api/merge-requests/mine
  * @access  Private (Supervisor)
  *
- * Nothing moves here: this puts the request on the Admin's desk, and the
- * supervisor follows it from their Red Stock Room screen.
+ * Applied immediately — this no longer waits on the Admin. A supervisor is
+ * returning stock they issued themselves, to the room it came from, so there
+ * was nothing for an approval to decide.
+ *
+ * Each line goes to its product's home room, since no one is asked to name a
+ * destination. The MergeRequest is still written and closed as Approved, so the
+ * merge keeps its request id, its ledger entries and its place in the Admin's
+ * history — the record is unchanged, only the waiting is gone.
+ *
+ * The Admin's weekly merge is untouched and still needs approval: it sweeps
+ * every supervisor's returns at once, and that one does need a decision.
  */
 export const createSupervisorMergeRequest = async (req, res) => {
   const { comment, restockItemIds } = req.body || {};
@@ -69,9 +77,65 @@ export const createSupervisorMergeRequest = async (req, res) => {
       return res.status(409).json({ message: result.reason, mergeRequest: result.mergeRequest });
     }
 
-    res.status(201).json({ message: result.reason, mergeRequest: result.mergeRequest });
+    // Re-read as a document: requestSupervisorMerge returns a populated copy,
+    // and applyMerge saves what it is given.
+    const request = await MergeRequest.findById(result.mergeRequest._id);
+    const { merged, skipped, closed } = await applyMerge({
+      request,
+      performedBy: req.user,
+      noteFor: (restockItem, room) =>
+        `${req.user.name} merged ${restockItem.restockNumber} from Red Stock into ${room.name}`,
+    });
+
+    const rooms = [...new Set(merged.map((entry) => entry.destinationRoom))];
+    const quantity = merged.reduce((sum, entry) => sum + entry.quantity, 0);
+
+    // Nothing could be placed, so the merge stays on the Admin's desk after all
+    // — they can name a room the products themselves do not carry.
+    if (!closed) {
+      await Notification.create({
+        message:
+          `${req.user.name} asked to merge ${request.totalQuantity} pcs from Red Stock, ` +
+          `but no home store room is set on ${skipped
+            .map((entry) => entry.productName)
+            .join(", ")} — choose a destination (${request.requestId})`,
+        type: "MERGE_REQUESTED",
+      });
+
+      return res.status(201).json({
+        message:
+          `No home store room is set on ${skipped
+            .map((entry) => entry.productName)
+            .join(", ")}, so ${request.requestId} was sent to the Admin to place.`,
+        mergeRequest: result.mergeRequest,
+        merged,
+        skipped,
+      });
+    }
+
+    await Notification.create({
+      message:
+        `${req.user.name} merged ${quantity} pcs across ${merged.length} returned ` +
+        `item(s) from Red Stock into ${rooms.join(", ")} (${request.requestId})`,
+      type: "MERGE_APPROVED",
+    });
+
+    const populated = await MergeRequest.findById(request._id)
+      .populate("requestedBy", "name email role")
+      .populate("reviewedBy", "name email role")
+      .populate("items.product", "name code unit storeRoom image");
+
+    // Partial: say what was left behind rather than reporting a clean merge over
+    // stock that never moved.
+    const message = skipped.length
+      ? `Merged ${quantity} pcs into ${rooms.join(", ")}. ${skipped.length} item(s) ` +
+        `left in Red Stock — no home store room set on ` +
+        `${skipped.map((entry) => entry.productName).join(", ")}.`
+      : `Merged ${quantity} pcs across ${merged.length} item(s) into ${rooms.join(", ")}.`;
+
+    res.status(201).json({ message, mergeRequest: populated, merged, skipped });
   } catch (error) {
-    console.error("Error creating supervisor merge request:", error);
+    console.error("Error merging supervisor Red Stock:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -254,8 +318,118 @@ export const getMergeRequestById = async (req, res) => {
 };
 
 /**
- * @desc    Approve the weekly merge — the only path out of Red Stock and into
- *          a store room. The Admin names the destination here.
+ * Credits every not-yet-moved line of [request] into a store room, writes the
+ * ledger entries, and closes the request as Approved.
+ *
+ * Shared by the Admin's approval of the weekly merge and the Supervisor's
+ * direct merge of their own returns, so the two cannot drift apart — the same
+ * idempotency guard, the same movements, the same destination rules.
+ *
+ * A line's destination is the first of: an explicit per-line override,
+ * [defaultRoom], or the product's own home room. That last fallback is what
+ * lets a merge run without anyone naming a room, which is how the Supervisor's
+ * direct path works — there is no Admin to ask.
+ */
+const applyMerge = async ({
+  request,
+  defaultRoom = null,
+  lineDestinations = null,
+  performedBy,
+  noteFor,
+}) => {
+  const merged = [];
+  const skipped = [];
+
+  for (const line of request.items) {
+    // A line is only ever credited once, however often this is retried.
+    if (line.moved) continue;
+
+    const restockItem = await RestockItem.findById(line.restockItem);
+    if (!restockItem || restockItem.status !== "Weekly Merge Pending") continue;
+
+    const product = await Product.findById(line.product);
+    if (!product) {
+      console.warn(
+        `Merge ${request.requestId}: product ${line.product} missing, skipping line`
+      );
+      continue;
+    }
+
+    // Per-line overrides let a merge split across both store rooms.
+    const override = lineDestinations?.[String(line.restockItem)];
+    const room =
+      (override ? await resolveRoom(override) : null) ||
+      defaultRoom ||
+      (await resolveRoom(product.storeRoom));
+
+    // Nowhere to put it: leave the line claimed rather than crediting a room
+    // nobody chose, and report it so the caller can say what was left behind.
+    if (!room) {
+      skipped.push({ productName: product.name, quantity: line.quantity });
+      continue;
+    }
+
+    const { roomQuantity } = await creditRoom({
+      product,
+      room,
+      quantity: line.quantity,
+    });
+
+    restockItem.status = "Moved to Stock Room";
+    restockItem.destinationRoom = room.name;
+    restockItem.mergedAt = new Date();
+    await restockItem.save();
+
+    line.destinationRoom = room.name;
+    line.moved = true;
+
+    await recordMovement({
+      product,
+      type: "MERGE_IN",
+      direction: "IN",
+      quantity: line.quantity,
+      reference: request.requestId,
+      performedBy: performedBy._id,
+      note: noteFor(restockItem, room),
+      fromRoom: "Red Stock Room",
+      toRoom: room.name,
+    });
+
+    merged.push({
+      restockNumber: restockItem.restockNumber,
+      productName: product.name,
+      quantity: line.quantity,
+      destinationRoom: room.name,
+      roomQuantity,
+      newBalance: product.quantity,
+      returnedBy: restockItem.returnedBy,
+    });
+  }
+
+  // Nothing moved and stock is still claimed: leave the request open so an
+  // Admin can name a destination, rather than closing it over stock that never
+  // left Red Stock.
+  if (merged.length === 0 && skipped.length > 0) {
+    return { merged, skipped, closed: false };
+  }
+
+  request.status = "Approved";
+  // Named room when one was chosen; otherwise whichever home rooms the lines
+  // actually landed in, which may be more than one.
+  request.destinationRoom =
+    defaultRoom?.name ||
+    [...new Set(merged.map((entry) => entry.destinationRoom))].join(", ");
+  request.reviewedBy = performedBy._id;
+  request.reviewedAt = new Date();
+  request.rejectionReason = "";
+  await request.save();
+
+  return { merged, skipped, closed: true };
+};
+
+/**
+ * @desc    Approve the weekly merge and move its stock into a store room. The
+ *          Admin names the destination here.
  * @route   PUT /api/merge-requests/:id/approve
  * @access  Private (Admin)
  */
@@ -284,70 +458,16 @@ export const approveMergeRequest = async (req, res) => {
       return res.status(404).json({ message: "Destination store room not found" });
     }
 
-    const merged = [];
-
-    for (const line of request.items) {
-      // A line is only ever credited once, however often approval is retried.
-      if (line.moved) continue;
-
-      const restockItem = await RestockItem.findById(line.restockItem);
-      if (!restockItem || restockItem.status !== "Weekly Merge Pending") continue;
-
-      const product = await Product.findById(line.product);
-      if (!product) {
-        console.warn(`Merge ${request.requestId}: product ${line.product} missing, skipping line`);
-        continue;
-      }
-
-      // Per-line overrides let a merge split across both store rooms; without
-      // one the whole merge lands in the room chosen for the request.
-      const override = lineDestinations?.[String(line.restockItem)];
-      const room = override ? (await resolveRoom(override)) || defaultRoom : defaultRoom;
-
-      const { roomQuantity } = await creditRoom({
-        product,
-        room,
-        quantity: line.quantity,
-      });
-
-      restockItem.status = "Moved to Stock Room";
-      restockItem.destinationRoom = room.name;
-      restockItem.mergedAt = new Date();
-      await restockItem.save();
-
-      line.destinationRoom = room.name;
-      line.moved = true;
-
-      await recordMovement({
-        product,
-        type: "MERGE_IN",
-        direction: "IN",
-        quantity: line.quantity,
-        reference: request.requestId,
-        performedBy: req.user._id,
-        note: `Weekly merge of ${restockItem.restockNumber} from Red Stock into ${room.name}`,
-        fromRoom: "Red Stock Room",
-        toRoom: room.name,
-      });
-
-      merged.push({
-        restockNumber: restockItem.restockNumber,
-        productName: product.name,
-        quantity: line.quantity,
-        destinationRoom: room.name,
-        roomQuantity,
-        newBalance: product.quantity,
-        returnedBy: restockItem.returnedBy,
-      });
-    }
-
-    request.status = "Approved";
-    request.destinationRoom = defaultRoom.name;
-    request.reviewedBy = req.user._id;
-    request.reviewedAt = new Date();
-    request.rejectionReason = "";
     if (comment && comment.trim()) request.comment = comment.trim();
-    await request.save();
+
+    const { merged } = await applyMerge({
+      request,
+      defaultRoom,
+      lineDestinations,
+      performedBy: req.user,
+      noteFor: (restockItem, room) =>
+        `Weekly merge of ${restockItem.restockNumber} from Red Stock into ${room.name}`,
+    });
 
     // Tell each supervisor whose returns reached a store room.
     const supervisorIds = [...new Set(merged.map((entry) => String(entry.returnedBy)))];

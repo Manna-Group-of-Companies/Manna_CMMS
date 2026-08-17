@@ -169,14 +169,14 @@ const ProductList = () => {
               ))}
             </select>
 
-            {/* Store Room Select */}
+            {/* Company Select */}
             <select
               value={selectedStoreRoom}
               onChange={(e) => setSelectedStoreRoom(e.target.value)}
               className="field field-sm w-full sm:w-auto cursor-pointer"
-              aria-label="Filter by store room"
+              aria-label="Filter by company"
             >
-              <option value="">All Rooms</option>
+              <option value="">All Companies</option>
               <option value="Manna Rubber Park">Manna Rubber Park</option>
               <option value="Consumables Room">Consumables Room</option>
             </select>
@@ -228,7 +228,7 @@ const ProductList = () => {
                   <th>Category</th>
                   <th>Condition</th>
                   <th>Rack</th>
-                  <th>Store Room</th>
+                  <th>Company</th>
                   <th className="text-center">Stock</th>
                   <th className="text-right">Actions</th>
                 </tr>
@@ -388,7 +388,7 @@ const ProductList = () => {
                   <AlertCircle className="h-4 w-4 shrink-0 mt-px" />
                   <span>
                     This removes the product and its {selectedProduct.quantity}{" "}
-                    {selectedProduct.unit} from every stock room, and it disappears from the
+                    {selectedProduct.unit} from every company, and it disappears from the
                     Supervisor catalog. Issue history and past requests are kept for the
                     record. This cannot be undone.
                   </span>

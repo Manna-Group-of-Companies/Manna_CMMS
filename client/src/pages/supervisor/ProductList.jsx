@@ -346,6 +346,8 @@ const ProductList = () => {
       description: "",
       image: "",
     });
+    setNaming(EMPTY_NAMING);
+    setShowBuilder(true);
   };
 
   /**
@@ -415,13 +417,13 @@ const ProductList = () => {
               ))}
             </select>
 
-            {/* Store Room Select */}
+            {/* Company Select */}
             <select
               value={selectedStoreRoom}
               onChange={(e) => setSelectedStoreRoom(e.target.value)}
               className="px-3 py-2 text-xs rounded-xl bg-white border border-slate-200 text-slate-700 focus:outline-none focus:border-brand-500"
             >
-              <option value="">All Rooms</option>
+              <option value="">All Companies</option>
               <option value="Manna Rubber Park">Manna Rubber Park</option>
               <option value="Consumables Room">Consumables Room</option>
             </select>
@@ -475,7 +477,7 @@ const ProductList = () => {
                   <th className="py-4 px-6">Category</th>
                   <th className="py-4 px-6">Condition</th>
                   <th className="py-4 px-6">Rack</th>
-                  <th className="py-4 px-6">Store Room</th>
+                  <th className="py-4 px-6">Company</th>
                   <th className="py-4 px-6 text-center">Stock Quantity</th>
                   <th className="py-4 px-6 text-right">Actions</th>
                 </tr>
@@ -683,9 +685,31 @@ const ProductList = () => {
               </div>
 
               <form onSubmit={activeModal === "add" ? handleAddRequest : handleEditProduct} className="p-6 space-y-4">
+                {/* The naming convention comes first: the name it produces is
+                    what every other field on this form hangs off. Offered on an
+                    edit too — bringing a legacy name up to the standard is the
+                    main reason to open it. */}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowBuilder((open) => !open)}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer"
+                  >
+                    {showBuilder ? "Hide" : "Show"} standard name builder (SOI1/SOP1)
+                  </button>
+                </div>
+
+                {showBuilder && (
+                  <ItemNameBuilder
+                    value={naming}
+                    onChange={setNaming}
+                    onApply={(name) => setProductForm((prev) => ({ ...prev, name }))}
+                  />
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Name */}
-                  <div>
+                  <div className="md:col-span-2">
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Product Name *</label>
                     <input
                       type="text"
@@ -693,9 +717,21 @@ const ProductList = () => {
                       value={productForm.name}
                       onChange={handleFormChange}
                       required
-                      placeholder="e.g. MX Master 3S"
+                      placeholder="e.g. 25MM Bearing Deep Groove SS304"
                       className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
                     />
+                    {/* ST-10. Held back on an edit that has not renamed
+                        anything: the API does not hold an unchanged legacy name
+                        to the convention, so flagging it here would be a
+                        telling-off about something this save will not touch. */}
+                    {(activeModal === "add" || renamed) && (
+                      <NameComplianceNotice name={productForm.name} />
+                    )}
+                    {renamed && (
+                      <p className="mt-1.5 text-[11px] font-semibold text-brand-700">
+                        Renamed from "{selectedProduct?.name}" — saving applies it.
+                      </p>
+                    )}
                   </div>
 
                   {/* Category — a dropdown over what the store already uses,
@@ -809,7 +845,7 @@ const ProductList = () => {
                       </div>
 
                       <div>
-                        <label className="block text-xs font-semibold text-slate-600 mb-1">Store Room *</label>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">Company *</label>
                         <select
                           name="storeRoom"
                           value={productForm.storeRoom}
@@ -850,6 +886,11 @@ const ProductList = () => {
                   </div>
                 </div>
 
+                {/* ST-14 — what the catalog already holds that looks like this,
+                    shown while the name is being entered rather than only after
+                    the save is refused. */}
+                <DuplicateWarning matches={duplicateMatches} checking={checkingDuplicates} />
+
                 {/* Description */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Description</label>
@@ -881,7 +922,7 @@ const ProductList = () => {
                           `${selectedProduct.quantity} ${selectedProduct.unit}`,
                           "Stock In request",
                         ],
-                        ["Store Room", selectedProduct.storeRoom, "Admin moves it"],
+                        ["Company", selectedProduct.storeRoom, "Admin moves it"],
                       ].map(([term, value, why]) => (
                         <div key={term} className="min-w-0">
                           <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">

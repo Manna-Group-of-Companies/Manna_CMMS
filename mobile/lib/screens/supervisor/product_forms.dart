@@ -1076,7 +1076,7 @@ class _ProductFormState extends State<_ProductForm> {
               ),
             ),
             _Field(
-              label: 'Store Room',
+              label: 'Company',
               required: true,
               child: DropdownShell(
                 child: AppDropdown<String>(
@@ -1312,7 +1312,7 @@ class _LockedFacts extends StatelessWidget {
         value: '${product.quantity} ${product.unit}',
         where: 'Stock In request',
       ),
-      (label: 'Store Room', value: product.storeRoom, where: 'Admin moves it'),
+      (label: 'Company', value: product.storeRoom, where: 'Admin moves it'),
       (
         label: 'Minimum Stock',
         value: '${product.minStock} ${product.unit}',
@@ -1526,7 +1526,7 @@ class _StockInRequestFormState extends State<_StockInRequestForm> {
         ),
         if (_rooms.isNotEmpty)
           _Field(
-            label: 'Preferred Stock Room',
+            label: 'Preferred Company',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1541,7 +1541,7 @@ class _StockInRequestFormState extends State<_StockInRequestForm> {
                 ),
                 const SizedBox(height: 7),
                 const Text(
-                  'The Admin confirms the room when accepting.',
+                  'The Admin confirms the company when accepting.',
                   style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
                 ),
               ],
@@ -2023,7 +2023,7 @@ class _DisposalFormState extends State<_DisposalForm> {
                           'scrap metric and cannot be edited afterwards.'
                       : 'This stock has been used up and will not come back. '
                           'It was already taken off the shelf when it was '
-                          'issued, so no store room changes here.',
+                          'issued, so no company changes here.',
                   style: TextStyle(color: accent, fontSize: 11.5, height: 1.45),
                 ),
               ),

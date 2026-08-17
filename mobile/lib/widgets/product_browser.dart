@@ -37,7 +37,7 @@ class _ProductBrowserState extends State<ProductBrowser>
     with WidgetsBindingObserver, AutoRefresh {
   static const _anyCategory = 'All Categories';
   static const _anySubCategory = 'All Sub-Categories';
-  static const _anyRoom = 'All Rooms';
+  static const _anyRoom = 'All Companies';
   static const _anyStock = 'All Stock Levels';
 
   final _searchController = TextEditingController();
@@ -372,7 +372,7 @@ class _ProductBrowserState extends State<ProductBrowser>
                       ),
                       const SizedBox(height: 12),
                       _SheetField(
-                        label: 'Store room',
+                        label: 'Company',
                         value: storeRoom,
                         items: const [_anyRoom, 'Manna Rubber Park', 'Consumables Room'],
                         onChanged: (value) => setSheetState(() => storeRoom = value),

@@ -132,7 +132,8 @@ class _RoomInventoryViewState extends State<RoomInventoryView>
                     PanelHeader(
                       icon: Icons.warehouse_outlined,
                       iconColor: AppColors.primaryDeep,
-                      title: '${_allRooms.length} Stock Room(s)',
+                      title: '${_allRooms.length} '
+                          '${_allRooms.length == 1 ? "Company" : "Companies"}',
                       trailing: AppBadge(
                         '$_grandTotal Pcs total',
                         color: AppColors.primaryDeep,

@@ -98,7 +98,7 @@ const BranchDashboard = () => {
     );
   }
 
-  const roomName = stock.room?.name || user?.stockRoom?.name || "Your Stock Room";
+  const roomName = stock.room?.name || user?.stockRoom?.name || "Your Company";
 
   const cards = [
     {

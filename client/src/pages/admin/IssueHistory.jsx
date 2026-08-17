@@ -237,7 +237,7 @@ const AdminIssueHistory = () => {
           <div className="min-w-0">
             <h3 className="panel-title">Issue History — All Supervisors</h3>
             <p className="panel-sub">
-              Every product issued out of a store room, and what has come back
+              Every product issued out of a company, and what has come back
             </p>
           </div>
         </div>

@@ -248,7 +248,7 @@ const ScrapReport = () => {
             <div className="glass-premium rounded-2xl border border-slate-200 p-5">
               <h4 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <Warehouse className="h-4 w-4 text-brand-700" />
-                By store room
+                By company
               </h4>
               {(summary?.byStoreRoom || []).length === 0 ? (
                 <p className="text-xs text-slate-500">Nothing scrapped in this window.</p>
@@ -326,7 +326,7 @@ const ScrapReport = () => {
                       <th className="py-4 px-6">Ref #</th>
                       <th className="py-4 px-6">Product</th>
                       <th className="py-4 px-6 text-center">Qty</th>
-                      <th className="py-4 px-6">Store Room</th>
+                      <th className="py-4 px-6">Company</th>
                       <th className="py-4 px-6">Against</th>
                       <th className="py-4 px-6">Reason</th>
                       <th className="py-4 px-6">By</th>

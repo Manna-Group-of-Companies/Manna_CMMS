@@ -185,11 +185,15 @@ const raiseMerge = async ({ candidates, user, now, comment, createdVia, notify }
     await mergeRequest.save();
   }
 
-  // Admin-facing: no `user`, so it reaches every Admin.
-  await Notification.create({
-    message: notify(mergeRequest),
-    type: "MERGE_REQUESTED",
-  });
+  // Admin-facing: no `user`, so it reaches every Admin. Skipped when the caller
+  // applies the merge itself — it announces the outcome rather than the request,
+  // and only once it knows what actually moved.
+  if (notify) {
+    await Notification.create({
+      message: notify(mergeRequest),
+      type: "MERGE_REQUESTED",
+    });
+  }
 
   const populated = await MergeRequest.findById(mergeRequest._id)
     .populate("requestedBy", "name email")
@@ -267,14 +271,14 @@ export const runWeeklyMerge = async ({
 };
 
 /**
- * A Supervisor asking for their own Red Stock to be moved into a store room
- * without waiting for the weekly run.
+ * Claims a Supervisor's own Red Stock into a merge request, ready to be applied.
  *
- * Only their own returns are ever claimed, so two supervisors can have
- * requests open at once and neither blocks the scheduler. Nothing moves here
- * either — the Admin still approves the merge and names the destination room.
+ * Only their own returns are ever claimed, so two supervisors can merge at once
+ * and neither blocks the scheduler. This writes and claims but does not move
+ * anything — `createSupervisorMergeRequest` applies the result immediately, so a
+ * supervisor no longer waits on the Admin.
  *
- * [restockItemIds] narrows the request to specific returns; omit it to send
+ * [restockItemIds] narrows the merge to specific returns; omit it to take
  * everything the supervisor has sitting in Red Stock.
  */
 export const requestSupervisorMerge = async ({
@@ -299,29 +303,22 @@ export const requestSupervisorMerge = async ({
   if (candidates.length === 0) {
     return {
       created: false,
-      // Their earlier request may still be open, which is the usual reason
-      // there is nothing left to send.
-      reason: "You have nothing in Red Stock to merge. Anything already sent is waiting on the Admin.",
+      reason: "You have nothing in Red Stock to merge.",
       mergeRequest: null,
     };
   }
 
-  const result = await raiseMerge({
+  // No notification here: the caller applies this merge straight away and
+  // announces what actually moved, so a "please approve" notice would be both
+  // wrong and duplicated.
+  return raiseMerge({
     candidates,
     user,
     now,
     comment,
     createdVia: "Supervisor",
-    notify: (request) =>
-      `${user.name} asked to merge ${request.totalQuantity} pcs across ${request.itemCount} returned item(s) into a store room (${request.requestId})`,
+    notify: null,
   });
-
-  return result.created
-    ? {
-        ...result,
-        reason: `Merge ${result.mergeRequest.requestId} sent to the Admin: ${result.mergeRequest.totalQuantity} pcs across ${result.mergeRequest.itemCount} item(s)`,
-      }
-    : result;
 };
 
 /**

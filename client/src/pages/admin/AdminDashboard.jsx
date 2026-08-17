@@ -86,7 +86,7 @@ const AdminDashboard = () => {
       icon: Boxes,
       chip: "bg-brand-50 text-brand-700 border-brand-500/20",
       link: "/admin/products",
-      hint: "Across every store room",
+      hint: "Across every company",
     },
     {
       title: "Pending Requests",
@@ -273,7 +273,7 @@ const AdminDashboard = () => {
                   <tr>
                     <th>Code</th>
                     <th>Product</th>
-                    <th>Store Room</th>
+                    <th>Company</th>
                     <th className="text-center">Qty / Min</th>
                     <th className="text-right">Severity</th>
                   </tr>

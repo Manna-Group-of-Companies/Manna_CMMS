@@ -168,12 +168,12 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Merge to store rooms', style: TextStyle(fontSize: 17)),
+        title: const Text('Merge to companies', style: TextStyle(fontSize: 17)),
         content: Text(
-          'Send $_mergeQuantity Pcs across ${picked.length} '
-          '${_selecting ? "selected " : ""}returned item(s) to the Admin for '
-          'merging.\n\nNothing moves yet — the Admin decides which store room '
-          'the stock goes into.',
+          'Merge $_mergeQuantity Pcs across ${picked.length} '
+          '${_selecting ? "selected " : ""}returned item(s) out of Red Stock.'
+          '\n\nEach item goes back to its own company, and the stock is '
+          'available straight away — this no longer waits for the Admin.',
           style: const TextStyle(color: AppColors.textSecondary, fontSize: 13.5, height: 1.4),
         ),
         actions: [
@@ -183,7 +183,7 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Send Request'),
+            child: const Text('Merge Now'),
           ),
         ],
       ),
@@ -472,7 +472,7 @@ class _MergeButton extends StatelessWidget {
   String get _label {
     if (quantity == 0) return 'Nothing to merge';
     if (count > 0) return 'Merge $count Selected ($quantity Pcs)';
-    return 'Merge $quantity Pcs to Store Rooms';
+    return 'Merge $quantity Pcs to Companies';
   }
 
   @override

@@ -51,7 +51,7 @@ const StockRooms = () => {
       setRedStock(redStockRes.data);
     } catch (error) {
       console.error("Error loading stock rooms:", error);
-      if (!silent) showToast("Could not retrieve stock rooms", "error");
+      if (!silent) showToast("Could not retrieve companies", "error");
     } finally {
       if (!silent) setLoading(false);
     }
@@ -131,7 +131,7 @@ const StockRooms = () => {
       if (quantity > item.quantity) {
         return showToast(`${room.name} only holds ${item.quantity}`, "error");
       }
-      if (!form.toRoomId) return showToast("Choose a destination room", "error");
+      if (!form.toRoomId) return showToast("Choose a destination company", "error");
     } else if (!Number.isInteger(quantity) || quantity < 0) {
       return showToast("Quantity must be a whole number of 0 or more", "error");
     }
@@ -160,7 +160,7 @@ const StockRooms = () => {
       fetchInventory();
     } catch (error) {
       console.error("Error updating stock room:", error);
-      showToast(error.response?.data?.message || "Failed to update stock room", "error");
+      showToast(error.response?.data?.message || "Failed to update the company", "error");
     } finally {
       setSubmitting(false);
     }
@@ -173,7 +173,7 @@ const StockRooms = () => {
         <div className="flex items-center gap-2">
           <Warehouse className="h-5 w-5 text-brand-700" />
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Stock Rooms</h3>
+            <h3 className="text-lg font-bold text-slate-900">Companies</h3>
             <p className="text-xs text-slate-500">
               {rooms.length} room(s) • {grandTotal} pcs on hand
               {redStock?.totalQuantity > 0 && (
@@ -281,7 +281,7 @@ const StockRooms = () => {
               )}
 
               <div className="px-5 py-3 bg-slate-50 border-t border-rose-500/20 text-[11px] text-slate-600 flex items-center justify-between gap-3">
-                <span>Moves to a store room only when a weekly merge is approved.</span>
+                <span>Moves to a company only when a weekly merge is approved.</span>
                 <Link
                   to="/admin/red-stock"
                   className="font-semibold text-rose-600 hover:underline shrink-0"
@@ -313,7 +313,7 @@ const StockRooms = () => {
               </div>
 
               {room.items.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-500">This room is empty.</div>
+                <div className="p-8 text-center text-xs text-slate-500">This company is empty.</div>
               ) : (
                 <div className="divide-y divide-slate-200">
                   {room.items.map((item) => (
@@ -349,14 +349,14 @@ const StockRooms = () => {
                           onClick={() => openTransfer(room, item)}
                           disabled={rooms.length < 2 || item.quantity === 0}
                           className="p-1.5 hover:bg-slate-100 rounded-lg text-indigo-600 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                          title="Move to another room"
+                          title="Move to another company"
                         >
                           <ArrowLeftRight className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => openAdjust(room, item)}
                           className="p-1.5 hover:bg-slate-100 rounded-lg text-brand-700 transition-all cursor-pointer"
-                          title="Correct this room's count"
+                          title="Correct this company's count"
                         >
                           <Pencil className="h-4 w-4" />
                         </button>
@@ -412,7 +412,7 @@ const StockRooms = () => {
                       required
                       className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
                     >
-                      <option value="">Select a destination room…</option>
+                      <option value="">Select a destination company…</option>
                       {rooms
                         .filter((room) => room._id !== action.room._id)
                         .map((room) => (

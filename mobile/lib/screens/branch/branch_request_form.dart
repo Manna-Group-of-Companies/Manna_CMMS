@@ -82,7 +82,7 @@ class _BranchRequestFormState extends State<_BranchRequestForm> {
 
   /// The dropdown carries product ids; this is what the row reads as.
   String _labelForProduct(String id) {
-    if (id == _kNoProduct) return 'Select a product from your room';
+    if (id == _kNoProduct) return 'Select a product from your company';
     for (final item in _inStock) {
       if (item.productId == id) {
         return '${item.name} — ${item.quantity} ${item.unit}';
@@ -203,7 +203,7 @@ class _BranchRequestFormState extends State<_BranchRequestForm> {
                       const SizedBox(height: 6),
                       if (_inStock.isEmpty)
                         const Text(
-                          'Your room holds no stock to request right now.',
+                          'Your company holds no stock to request right now.',
                           style: TextStyle(color: AppColors.warning, fontSize: 12),
                         )
                       else
@@ -246,7 +246,7 @@ class _BranchRequestFormState extends State<_BranchRequestForm> {
                                     ),
                                     const SizedBox(height: 3),
                                     Text(
-                                      '${product.quantity} ${product.unit} in room · '
+                                      '${product.quantity} ${product.unit} in company · '
                                       'min ${product.minStock}',
                                       style: const TextStyle(
                                         color: AppColors.textSecondary,
