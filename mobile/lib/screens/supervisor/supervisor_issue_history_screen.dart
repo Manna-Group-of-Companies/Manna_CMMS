@@ -71,6 +71,13 @@ class _SupervisorIssueHistoryScreenState extends State<SupervisorIssueHistoryScr
     if (returned) await _load();
   }
 
+  /// The other two outcomes an issued item can have. Neither restores stock —
+  /// both just close the quantity out against the issue.
+  Future<void> _recordDisposal(IssueRecord issue, String type) async {
+    final recorded = await showDisposalForm(context, issue: issue, type: type);
+    if (recorded) await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final visible = _visible;
@@ -134,6 +141,10 @@ class _SupervisorIssueHistoryScreenState extends State<SupervisorIssueHistoryScr
                             issues: visible,
                             showSupervisor: true,
                             onReturn: _returnStock,
+                            onConsume: (issue) =>
+                                _recordDisposal(issue, 'Consumed'),
+                            onScrap: (issue) =>
+                                _recordDisposal(issue, 'Scrapped'),
                           ),
                   ),
           ),

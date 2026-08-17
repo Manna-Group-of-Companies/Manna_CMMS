@@ -13,6 +13,7 @@ import {
   Warehouse,
   ClipboardCheck,
   KeyRound,
+  TrendingDown,
   X,
 } from "lucide-react";
 
@@ -50,6 +51,11 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
       name: "Issue History",
       path: "/admin/issues",
       icon: Send,
+    },
+    {
+      name: "Scrap & Consumption",
+      path: "/admin/scrap",
+      icon: TrendingDown,
     },
     {
       name: "Branch Requests",

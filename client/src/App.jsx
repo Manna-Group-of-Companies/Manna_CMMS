@@ -22,6 +22,7 @@ import BranchDashboard from "./pages/branch/BranchDashboard";
 import BranchMyRequests from "./pages/branch/MyRequests";
 import AdminBranchRequests from "./pages/admin/BranchRequests";
 import AdminUsers from "./pages/admin/Users";
+import AdminScrapReport from "./pages/admin/ScrapReport";
 import BranchApprovals from "./pages/supervisor/BranchApprovals";
 
 // Protected Route Root Switcher
@@ -60,6 +61,7 @@ function App() {
               <Route path="products" element={<AdminProductList />} />
               <Route path="requests" element={<RequestManagement />} />
               <Route path="issues" element={<AdminIssueHistory />} />
+              <Route path="scrap" element={<AdminScrapReport />} />
               <Route path="branch-requests" element={<AdminBranchRequests />} />
               <Route path="users" element={<AdminUsers />} />
               {/* Red Stock is decided in Request Control now; an old link or a

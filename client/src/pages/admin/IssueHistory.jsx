@@ -16,6 +16,7 @@ import {
   Warehouse,
   Download,
 } from "lucide-react";
+import { formatCurrency } from "../../utils/currency";
 
 const AdminIssueHistory = () => {
   const { showToast } = useNotifications();
@@ -62,7 +63,23 @@ const AdminIssueHistory = () => {
   };
 
   /** How much of an issue is still out with the recipient. */
-  const outstandingOf = (issue) => issue.quantity - (issue.returnedQuantity || 0);
+  // Returned, consumed and scrapped all close quantity out against an issue,
+  // so all three are netted off — counting only returns would report a fully
+  // consumed issue as permanently still out.
+  const outstandingOf = (issue) =>
+    Math.max(
+      0,
+      issue.quantity -
+        ((issue.returnedQuantity || 0) +
+          (issue.consumedQuantity || 0) +
+          (issue.scrappedQuantity || 0))
+    );
+
+  /** What a scrap has cost against this issue, for the export and the row. */
+  const scrapValueOf = (issue) =>
+    (issue.disposals || [])
+      .filter((d) => d.type === "Scrapped")
+      .reduce((sum, d) => sum + (d.value || 0), 0);
 
   /**
    * Only the supervisors who actually appear in the history, so the dropdown
@@ -141,6 +158,9 @@ const AdminIssueHistory = () => {
       ["Issued Qty", (i) => i.quantity],
       ["Unit", (i) => i.product?.unit || ""],
       ["Returned Qty", (i) => i.returnedQuantity || 0],
+      ["Consumed Qty", (i) => i.consumedQuantity || 0],
+      ["Scrapped Qty", (i) => i.scrappedQuantity || 0],
+      ["Scrap Value", (i) => scrapValueOf(i)],
       ["Still Out", (i) => outstandingOf(i)],
       ["Recipient", (i) => i.recipient],
       ["Purpose", (i) => i.purpose || ""],
@@ -340,6 +360,10 @@ const AdminIssueHistory = () => {
                 {filteredIssues.map((issue) => {
                   const returns = issue.returns || [];
                   const returnedQty = issue.returnedQuantity || 0;
+                  const consumedQty = issue.consumedQuantity || 0;
+                  const scrappedQty = issue.scrappedQuantity || 0;
+                  const settledQty = returnedQty + consumedQty + scrappedQty;
+                  const scrapValue = scrapValueOf(issue);
                   const outstanding = outstandingOf(issue);
                   const isOpen = expanded === issue._id;
                   const rooms = roomsOf(issue);
@@ -405,13 +429,33 @@ const AdminIssueHistory = () => {
                             −{issue.quantity} {issue.product?.unit || ""}
                           </span>
                         </td>
-                        {/* How much has come back, and how much is still out. */}
+                        {/* How the issue settled, and how much is still out.
+                            Returning is only one of three routes, so consumed
+                            and scrapped are shown alongside it — otherwise a
+                            fully consumed issue reads as an empty cell. */}
                         <td className="text-center whitespace-nowrap">
-                          {returnedQty > 0 ? (
+                          {settledQty > 0 ? (
                             <>
-                              <span className="badge badge-emerald">
-                                +{returnedQty} {issue.product?.unit || ""}
-                              </span>
+                              {returnedQty > 0 && (
+                                <span className="badge badge-emerald">
+                                  +{returnedQty} {issue.product?.unit || ""}
+                                </span>
+                              )}
+                              {consumedQty > 0 && (
+                                <span className="badge badge-slate ml-1">
+                                  {consumedQty} used
+                                </span>
+                              )}
+                              {scrappedQty > 0 && (
+                                <span className="badge badge-rose ml-1">
+                                  {scrappedQty} scrapped
+                                </span>
+                              )}
+                              {scrapValue > 0 && (
+                                <span className="mt-1 block text-[11px] font-semibold text-rose-600">
+                                  {formatCurrency(scrapValue)} written off
+                                </span>
+                              )}
                               {outstanding > 0 && (
                                 <span className="mt-1 block text-[11px] text-amber-600">
                                   {outstanding} still out

@@ -18,6 +18,22 @@ String formatDate(DateTime? date) => date == null ? '—' : _date.format(date);
 String formatDateTime(DateTime? date) =>
     date == null ? '—' : '${_date.format(date)} ${_time.format(date)}';
 
+/// Rupees, grouped the Indian way — "₹1,20,450.50", and "₹2,400" when the
+/// amount is whole. Costs are held in INR throughout; there is no second
+/// currency to switch on.
+///
+/// Trailing ".00" is dropped because most stock is costed in whole rupees and
+/// a column of "₹2,400.00" reads worse than "₹2,400" for no added precision.
+final _rupees = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
+final _wholeRupees = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+
+String formatCurrency(num? amount) {
+  if (amount == null) return '—';
+  return amount == amount.roundToDouble()
+      ? _wholeRupees.format(amount)
+      : _rupees.format(amount);
+}
+
 /// Parsing helpers tolerant of the partially-populated documents the API
 /// returns (e.g. `populate("product", "name code unit")`).
 int asInt(dynamic value, [int fallback = 0]) {

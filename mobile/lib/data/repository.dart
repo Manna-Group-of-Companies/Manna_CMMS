@@ -224,6 +224,67 @@ class StockRepository {
     return _message(data, 'Product issued successfully');
   }
 
+  // --------------------------------------------------- consumption and scrap
+
+  /// Books issued stock as used up or thrown away — the two outcomes besides
+  /// returning it.
+  ///
+  /// Neither puts stock back on a shelf: it left the store room when it was
+  /// issued, so this only closes the quantity out against the issue. Scrap is
+  /// the exception that also takes stock out of the Red Stock Room, which is
+  /// why [restockItemId] is accepted in place of [issueId].
+  ///
+  /// Exactly one of [issueId] and [restockItemId] must be given, and Red Stock
+  /// can only be scrapped, never consumed. [quantity] defaults to everything
+  /// still outstanding when null.
+  Future<String> recordDisposal({
+    required String type,
+    String? issueId,
+    String? restockItemId,
+    int? quantity,
+    String reason = '',
+  }) async {
+    final data = await _api.post('/disposals', {
+      'type': type,
+      'issueId': ?issueId,
+      'restockItemId': ?restockItemId,
+      'quantity': ?quantity,
+      'reason': reason,
+    });
+    return _message(data, 'Recorded as ${type.toLowerCase()}');
+  }
+
+  /// The consumption and scrap logs. [type] narrows to one of them; null reads
+  /// both. History is never pruned, so this doubles as the audit read.
+  Future<List<DisposalRecord>> disposals({
+    String? type,
+    String? storeRoom,
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final data = await _api.get('/disposals', query: {
+      'type': type,
+      'storeRoom': storeRoom,
+      'from': from?.toIso8601String(),
+      'to': to?.toIso8601String(),
+    });
+    return _list(data, DisposalRecord.fromJson);
+  }
+
+  /// Total scrap value per item, per store room and per period.
+  Future<ScrapSummary> scrapSummary({
+    DateTime? from,
+    DateTime? to,
+    String groupBy = 'month',
+  }) async {
+    final data = await _api.get('/disposals/scrap-summary', query: {
+      'from': from?.toIso8601String(),
+      'to': to?.toIso8601String(),
+      'groupBy': groupBy,
+    });
+    return ScrapSummary.fromJson(Map<String, dynamic>.from(data as Map));
+  }
+
   // --------------------------------------------------------------- red stock
 
   /// Hands issued stock back into the Red Stock Room. No Admin approval is

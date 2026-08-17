@@ -712,6 +712,9 @@ class IssueRecord {
     required this.returnedQuantity,
     required this.createdAt,
     required this.isMine,
+    this.consumedQuantity = 0,
+    this.scrappedQuantity = 0,
+    this.disposals = const [],
   });
 
   final String id;
@@ -726,6 +729,16 @@ class IssueRecord {
 
   /// How much of [quantity] has already been handed back into Red Stock.
   final int returnedQuantity;
+
+  /// The other two ways an issue settles: used up, and thrown away. Neither
+  /// puts stock back on a shelf, but both close the quantity out against the
+  /// issue, so [outstanding] has to count them.
+  final int consumedQuantity;
+  final int scrappedQuantity;
+
+  /// Every consumption and scrap booked against this issue, newest last.
+  final List<DisposalRecord> disposals;
+
   final DateTime? createdAt;
 
   /// Whether this account made the issue. Only labels the row — every
@@ -734,12 +747,24 @@ class IssueRecord {
 
   bool get isReturned => returnStatus == 'Returned';
 
-  /// Still out with the recipient, and so still returnable.
-  int get outstanding => quantity - returnedQuantity;
+  /// How much of the issue is accounted for, whichever way it went.
+  int get settledQuantity =>
+      returnedQuantity + consumedQuantity + scrappedQuantity;
 
-  /// Whether there is anything left to hand back. Open to any supervisor, not
+  /// Still out with the recipient, and so still actionable.
+  int get outstanding => (quantity - settledQuantity).clamp(0, quantity);
+
+  /// Whether there is anything left to action. Open to any supervisor, not
   /// just the one who issued it — the server allows it either way.
   bool get canReturn => outstanding > 0;
+
+  /// Nothing left outstanding: the issue is closed business however it ended.
+  bool get isSettled => outstanding == 0;
+
+  /// Total value written off against this issue, for the scrap metric.
+  num get scrapValue => disposals
+      .where((d) => d.isScrap)
+      .fold<num>(0, (sum, d) => sum + d.value);
 
   factory IssueRecord.fromJson(Map<String, dynamic> json) => IssueRecord(
         id: asString(json['_id']),
@@ -756,11 +781,170 @@ class IssueRecord {
             : '',
         returnStatus: asString(json['returnStatus'], 'Not Returned'),
         returnedQuantity: asInt(json['returnedQuantity']),
+        consumedQuantity: asInt(json['consumedQuantity']),
+        scrappedQuantity: asInt(json['scrappedQuantity']),
+        disposals: (json['disposals'] as List? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(DisposalRecord.fromJson)
+            .toList(),
         createdAt: parseDate(json['createdAt']),
         // Servers that predate the shared history send only the caller's own
         // issues and no flag, so an absent flag means "mine".
         isMine: json['isMine'] != false,
       );
+}
+
+/// One consumption or scrap, as returned by `/disposals` and embedded in each
+/// issue row.
+///
+/// Both logs share a record because they answer the same question — how much
+/// of an issue will never come back, and what it was worth. [value] is the
+/// scrap value metric when [isScrap]; the server computes and stores it from
+/// the unit cost as it stood on the day, so re-costing a product later does
+/// not restate past periods.
+class DisposalRecord {
+  const DisposalRecord({
+    required this.id,
+    required this.disposalNumber,
+    required this.type,
+    required this.quantity,
+    required this.unitCost,
+    required this.value,
+    required this.reason,
+    required this.disposedAt,
+    required this.disposedByName,
+    this.productName = '',
+    this.productCode = '',
+    this.unit = '',
+    this.storeRoom = '',
+    this.reference = '',
+    this.department = '',
+    this.source = '',
+  });
+
+  final String id;
+  final String disposalNumber;
+
+  /// `Consumed` or `Scrapped`.
+  final String type;
+  final int quantity;
+  final num unitCost;
+
+  /// quantity × unitCost, as recorded at disposal time.
+  final num value;
+  final String reason;
+  final DateTime? disposedAt;
+  final String disposedByName;
+
+  // Present on the standalone log read; the copies embedded in an issue row
+  // leave them empty because the issue already carries the product.
+  final String productName;
+  final String productCode;
+  final String unit;
+  final String storeRoom;
+
+  /// The issue or restock number this was booked against.
+  final String reference;
+  final String department;
+
+  /// `Issue` or `Red Stock` — which stage it was disposed from.
+  final String source;
+
+  bool get isScrap => type == 'Scrapped';
+  bool get isConsumption => type == 'Consumed';
+
+  factory DisposalRecord.fromJson(Map<String, dynamic> json) => DisposalRecord(
+        id: asString(json['_id']),
+        disposalNumber: asString(json['disposalNumber']),
+        type: asString(json['type']),
+        quantity: asInt(json['quantity']),
+        unitCost: json['unitCost'] is num ? json['unitCost'] as num : 0,
+        value: json['value'] is num ? json['value'] as num : 0,
+        reason: asString(json['reason']),
+        disposedAt: parseDate(json['disposedAt']),
+        disposedByName: json['disposedBy'] is Map
+            ? asString((json['disposedBy'] as Map)['name'], 'Unknown')
+            : 'Unknown',
+        productName: asString(json['productName']),
+        productCode: asString(json['productCode']),
+        unit: asString(json['unit']),
+        storeRoom: asString(json['storeRoom']),
+        reference: asString(json['reference']),
+        department: asString(json['department']),
+        source: asString(json['source']),
+      );
+}
+
+/// One row of a scrap-value breakdown — by item, by store room, or by period.
+class ScrapTotal {
+  const ScrapTotal({
+    required this.label,
+    required this.quantity,
+    required this.value,
+    required this.events,
+    this.code = '',
+  });
+
+  /// The product name, store room, or period key this row totals.
+  final String label;
+  final int quantity;
+  final num value;
+
+  /// How many separate scrap events make up the row.
+  final int events;
+  final String code;
+}
+
+/// `GET /disposals/scrap-summary` — total scrap value broken down three ways
+/// at once (ST-27). One call rather than three, so the breakdowns cannot
+/// disagree with each other.
+class ScrapSummary {
+  const ScrapSummary({
+    required this.totalValue,
+    required this.totalQuantity,
+    required this.events,
+    required this.byItem,
+    required this.byStoreRoom,
+    required this.byPeriod,
+    required this.groupBy,
+  });
+
+  final num totalValue;
+  final int totalQuantity;
+  final int events;
+  final List<ScrapTotal> byItem;
+  final List<ScrapTotal> byStoreRoom;
+  final List<ScrapTotal> byPeriod;
+
+  /// `day`, `week` or `month` — how [byPeriod] is bucketed.
+  final String groupBy;
+
+  bool get isEmpty => events == 0;
+
+  static List<ScrapTotal> _rows(dynamic raw, String labelKey) =>
+      (raw as List? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map((row) => ScrapTotal(
+                label: asString(row[labelKey]),
+                quantity: asInt(row['quantity']),
+                value: row['value'] is num ? row['value'] as num : 0,
+                events: asInt(row['events']),
+                code: asString(row['code']),
+              ))
+          .toList();
+
+  factory ScrapSummary.fromJson(Map<String, dynamic> json) {
+    final total = json['total'];
+    return ScrapSummary(
+      totalValue: total is Map && total['value'] is num ? total['value'] as num : 0,
+      totalQuantity: total is Map ? asInt(total['quantity']) : 0,
+      events: total is Map ? asInt(total['events']) : 0,
+      byItem: _rows(json['byItem'], 'name'),
+      byStoreRoom: _rows(json['byStoreRoom'], 'storeRoom'),
+      byPeriod: _rows(json['byPeriod'], 'period'),
+      groupBy: asString(json['groupBy'], 'month'),
+    );
+  }
 }
 
 /// A merge the supervisor raised over their own Red Stock, as returned by

@@ -7,19 +7,27 @@ import 'common.dart';
 import 'product_details_sheet.dart';
 
 /// One issuance record, shared by the admin and supervisor issue history
-/// screens. [onReturn] adds the "Return Stock" action (supervisors only) to the
-/// product details sheet the card opens — the card itself carries no buttons.
+/// screens.
+///
+/// An issued item settles in exactly three ways, and each has its own action
+/// on the product details sheet the card opens: [onReturn] hands it back into
+/// the Red Stock Room, [onConsume] books it as used up, [onScrap] writes it
+/// off. The card itself carries no buttons.
 class IssueCard extends StatelessWidget {
   const IssueCard({
     super.key,
     required this.issue,
     this.showSupervisor = false,
     this.onReturn,
+    this.onConsume,
+    this.onScrap,
   });
 
   final IssueRecord issue;
   final bool showSupervisor;
   final Future<void> Function()? onReturn;
+  final Future<void> Function()? onConsume;
+  final Future<void> Function()? onScrap;
 
   @override
   Widget build(BuildContext context) {
@@ -28,9 +36,9 @@ class IssueCard extends StatelessWidget {
 
     return AppCard(
       padding: const EdgeInsets.all(14),
-      // Returning is reached by opening the product, the same way every other
-      // stock operation is. Any supervisor may return any issue, and partial
-      // returns keep the action available until nothing is left outstanding.
+      // Actioning is reached by opening the product, the same way every other
+      // stock operation is. Any supervisor may action any issue, and partial
+      // settlement keeps the actions available until nothing is outstanding.
       onTap: product == null
           ? null
           : () => showProductDetails(
@@ -45,6 +53,20 @@ class IssueCard extends StatelessWidget {
                       color: AppColors.accent,
                       onSelected: () => onReturn!(),
                     ),
+                  if (onConsume != null && issue.canReturn)
+                    ProductAction(
+                      label: 'Mark Consumed',
+                      icon: Icons.local_fire_department_outlined,
+                      color: AppColors.textSecondary,
+                      onSelected: () => onConsume!(),
+                    ),
+                  if (onScrap != null && issue.canReturn)
+                    ProductAction(
+                      label: 'Scrap',
+                      icon: Icons.delete_outline,
+                      color: AppColors.danger,
+                      onSelected: () => onScrap!(),
+                    ),
                 ],
               ),
       child: Column(
@@ -55,12 +77,8 @@ class IssueCard extends StatelessWidget {
               MonoText(issue.issueNumber, color: AppColors.warning, fontSize: 11.5),
               const Spacer(),
               AppBadge(
-                issue.returnStatus,
-                color: switch (issue.returnStatus) {
-                  'Returned' => AppColors.success,
-                  'Partially Returned' => AppColors.warning,
-                  _ => AppColors.danger,
-                },
+                _settlementLabel(issue),
+                color: _settlementColor(issue),
                 uppercase: false,
                 fontSize: 10.5,
               ),
@@ -145,6 +163,37 @@ class IssueCard extends StatelessWidget {
               valueColor: AppColors.warning,
             ),
           ],
+          if (issue.consumedQuantity > 0) ...[
+            const SizedBox(height: 6),
+            _DetailLine(
+              icon: Icons.local_fire_department_outlined,
+              label: 'Consumed',
+              value: '${issue.consumedQuantity} of ${issue.quantity} $unit',
+              valueColor: AppColors.textSecondary,
+            ),
+          ],
+          if (issue.scrappedQuantity > 0) ...[
+            const SizedBox(height: 6),
+            _DetailLine(
+              icon: Icons.delete_outline,
+              label: 'Scrapped',
+              // The value is the point of recording scrap at all, so it is
+              // shown beside the quantity rather than buried in the log.
+              value: issue.scrapValue > 0
+                  ? '${issue.scrappedQuantity} of ${issue.quantity} $unit  •  ${formatCurrency(issue.scrapValue)}'
+                  : '${issue.scrappedQuantity} of ${issue.quantity} $unit',
+              valueColor: AppColors.danger,
+            ),
+          ],
+          if (issue.outstanding > 0 && issue.settledQuantity > 0) ...[
+            const SizedBox(height: 6),
+            _DetailLine(
+              icon: Icons.pending_outlined,
+              label: 'Outstanding',
+              value: '${issue.outstanding} $unit',
+              valueColor: AppColors.textStrong,
+            ),
+          ],
           if (showSupervisor) ...[
             const SizedBox(height: 6),
             _DetailLine(
@@ -173,6 +222,31 @@ class IssueCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// How the issue ended, in one word.
+///
+/// The server's `returnStatus` only tracks the returning half of the story, so
+/// an issue that was entirely used up still reads "Not Returned" there. What
+/// the card needs to say is whether anything is still outstanding, and if not,
+/// which of the three routes closed it.
+String _settlementLabel(IssueRecord issue) {
+  if (!issue.isSettled) {
+    return issue.settledQuantity > 0 ? 'Part Settled' : 'Outstanding';
+  }
+  if (issue.returnedQuantity == issue.quantity) return 'Returned';
+  if (issue.consumedQuantity == issue.quantity) return 'Consumed';
+  if (issue.scrappedQuantity == issue.quantity) return 'Scrapped';
+  return 'Settled';
+}
+
+Color _settlementColor(IssueRecord issue) {
+  if (!issue.isSettled) {
+    return issue.settledQuantity > 0 ? AppColors.warning : AppColors.danger;
+  }
+  // Scrap is the one settlement worth flagging even when complete: it is the
+  // only one that cost the company something.
+  return issue.scrappedQuantity > 0 ? AppColors.danger : AppColors.success;
 }
 
 class _DetailLine extends StatelessWidget {

@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
+import '../../core/formatters.dart';
 import '../../core/palette.dart';
 import '../../core/product_status.dart';
 import '../../core/toast.dart';
@@ -92,6 +93,26 @@ Future<bool> showReturnStockForm(
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (_) => _ReturnStockForm(issue: issue),
+  );
+  return result ?? false;
+}
+
+/// Books issued stock as Consumed (used up) or Scrapped (written off) — the
+/// two outcomes besides returning it.
+///
+/// Neither puts stock back on a shelf: it left the store room at issue time,
+/// so this only closes the quantity out against the issue. Resolves to `true`
+/// when the disposal was recorded.
+Future<bool> showDisposalForm(
+  BuildContext context, {
+  required IssueRecord issue,
+  required String type,
+}) async {
+  final result = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _DisposalForm(issue: issue, type: type),
   );
   return result ?? false;
 }
@@ -1277,6 +1298,311 @@ class _ReturnStockFormState extends State<_ReturnStockForm> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Consumption and scrap
+// ---------------------------------------------------------------------------
+
+/// Books an issued batch as Consumed or Scrapped.
+///
+/// The two share a sheet because the operation is identical — close a quantity
+/// out against an issue, with a reason — and only the wording, the colour and
+/// the value line differ. Scrap additionally prices what is being written off,
+/// since that total is the metric the whole log exists to produce.
+class _DisposalForm extends StatefulWidget {
+  const _DisposalForm({required this.issue, required this.type});
+
+  final IssueRecord issue;
+
+  /// `Consumed` or `Scrapped`.
+  final String type;
+
+  @override
+  State<_DisposalForm> createState() => _DisposalFormState();
+}
+
+class _DisposalFormState extends State<_DisposalForm> {
+  late final TextEditingController _quantity =
+      TextEditingController(text: '${widget.issue.outstanding}');
+  final TextEditingController _reason = TextEditingController();
+  bool _submitting = false;
+
+  bool get _isScrap => widget.type == 'Scrapped';
+  int get _qty => int.tryParse(_quantity.text.trim()) ?? 0;
+  int get _outstanding => widget.issue.outstanding;
+  bool get _exceedsOutstanding => _qty > _outstanding;
+
+  /// Per-unit cost as the catalogue currently holds it. 0 means the product has
+  /// never been costed, which is common on the imported rows — the scrap is
+  /// still worth recording, it just cannot be priced.
+  num get _unitCost => widget.issue.product?.unitCost ?? 0;
+  bool get _isCosted => _unitCost > 0;
+  num get _previewValue => _unitCost * _qty;
+
+  /// A write-off should say why. Consumption is routine and does not need one.
+  bool get _reasonMissing => _isScrap && _reason.text.trim().isEmpty;
+
+  @override
+  void dispose() {
+    _quantity.dispose();
+    _reason.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    FocusScope.of(context).unfocus();
+    if (_qty < 1) {
+      Toast.error('Quantity must be at least 1');
+      return;
+    }
+    if (_exceedsOutstanding) {
+      Toast.error('Only $_outstanding still outstanding on this issue');
+      return;
+    }
+    if (_reasonMissing) {
+      Toast.error('Give a reason for scrapping this item');
+      return;
+    }
+    setState(() => _submitting = true);
+    try {
+      final message = await context.read<StockRepository>().recordDisposal(
+            type: widget.type,
+            issueId: widget.issue.id,
+            quantity: _qty,
+            reason: _reason.text.trim(),
+          );
+      Toast.success(message);
+      if (mounted) Navigator.of(context).pop(true);
+    } on ApiException catch (error) {
+      Toast.error(error.message);
+    } catch (_) {
+      Toast.error('Failed to record the ${widget.type.toLowerCase()} entry');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final product = widget.issue.product;
+    final unit = product?.unit ?? 'unit(s)';
+    final accent = _isScrap ? AppColors.danger : AppColors.textSecondary;
+
+    return _FormSheet(
+      title: _isScrap ? 'Scrap Item' : 'Mark as Consumed',
+      titleIcon: _isScrap
+          ? Icons.delete_outline
+          : Icons.local_fire_department_outlined,
+      titleIconColor: accent,
+      submitLabel: _isScrap ? 'Record Scrap' : 'Record Consumption',
+      submitColor: _isScrap ? AppColors.dangerDeep : AppColors.primary,
+      submitting: _submitting,
+      canSubmit: !_exceedsOutstanding && _qty >= 1 && !_reasonMissing,
+      initialSize: 0.85,
+      onSubmit: _submit,
+      children: [
+        if (product != null) ...[
+          _ProductSummary(product: product),
+          const SizedBox(height: 14),
+        ],
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: accent.withValues(alpha: 0.18)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                _isScrap ? Icons.warning_amber_outlined : Icons.info_outline,
+                size: 16,
+                color: accent,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _isScrap
+                      ? 'This stock is being written off — it will not come back '
+                          'to a shelf. The value below is recorded against the '
+                          'scrap metric and cannot be edited afterwards.'
+                      : 'This stock has been used up and will not come back. '
+                          'It was already taken off the shelf when it was '
+                          'issued, so no store room changes here.',
+                  style: TextStyle(color: accent, fontSize: 11.5, height: 1.45),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        _Field(
+          label: 'Quantity to ${_isScrap ? 'Scrap' : 'Consume'} ($unit)',
+          required: true,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              QuantityStepper(
+                controller: _quantity,
+                max: _outstanding,
+                onChanged: () => setState(() {}),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                'Still outstanding: $_outstanding $unit of ${widget.issue.quantity}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+              ),
+            ],
+          ),
+        ),
+        if (_exceedsOutstanding)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                Icon(Icons.error_outline, size: 14, color: AppColors.dangerDeep),
+                SizedBox(width: 6),
+                Text(
+                  'Exceeds the outstanding quantity!',
+                  style: TextStyle(
+                    color: AppColors.dangerDeep,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (_isScrap) ...[
+          _ScrapValuePreview(
+            unitCost: _unitCost,
+            quantity: _qty,
+            value: _previewValue,
+            isCosted: _isCosted,
+          ),
+          const SizedBox(height: 18),
+        ],
+        _Field(
+          label: _isScrap ? 'Reason for Scrapping' : 'Note',
+          required: _isScrap,
+          child: TextField(
+            controller: _reason,
+            maxLines: 3,
+            textCapitalization: TextCapitalization.sentences,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: _isScrap
+                  ? 'e.g. Bearing seized, beyond repair'
+                  : 'e.g. Used on the mixer overhaul',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Prices the scrap before it is booked, so the person recording it sees the
+/// number that will land on the maintenance metric.
+class _ScrapValuePreview extends StatelessWidget {
+  const _ScrapValuePreview({
+    required this.unitCost,
+    required this.quantity,
+    required this.value,
+    required this.isCosted,
+  });
+
+  final num unitCost;
+  final int quantity;
+  final num value;
+  final bool isCosted;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isCosted) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceMuted,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.help_outline, size: 15, color: AppColors.textMuted),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'This product has no unit cost recorded, so the scrap cannot be '
+                'valued. The quantity is still logged.',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 11.5,
+                  height: 1.45,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.danger.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Text(
+                'Unit cost',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
+              const Spacer(),
+              Text(
+                formatCurrency(unitCost),
+                style: const TextStyle(
+                  color: AppColors.textBody,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Divider(height: 1),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text(
+                'Scrap value ($quantity × unit cost)',
+                style: const TextStyle(
+                  color: AppColors.textStrong,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                formatCurrency(value),
+                style: const TextStyle(
+                  color: AppColors.dangerDeep,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

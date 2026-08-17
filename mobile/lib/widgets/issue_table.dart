@@ -18,6 +18,8 @@ class IssueTable extends StatelessWidget {
     required this.issues,
     this.showSupervisor = false,
     this.onReturn,
+    this.onConsume,
+    this.onScrap,
   });
 
   final List<IssueRecord> issues;
@@ -26,22 +28,31 @@ class IssueTable extends StatelessWidget {
   /// shared, so it matters who sent the stock out.
   final bool showSupervisor;
 
-  /// Supplied by the supervisor screen; omitted where returning is not offered.
+  /// The three ways an issued item settles. Supplied by the supervisor screen;
+  /// omitted where actioning is not offered (the Admin's read-only audit view).
   final Future<void> Function(IssueRecord issue)? onReturn;
+  final Future<void> Function(IssueRecord issue)? onConsume;
+  final Future<void> Function(IssueRecord issue)? onScrap;
 
   /// The full wording does not fit a phone column; the badge shortens it and
   /// the unfolded record spells it out.
-  static String _shortStatus(String status) => switch (status) {
-        'Returned' => 'Returned',
-        'Partially Returned' => 'Partial',
-        _ => 'Out',
-      };
+  ///
+  /// This reads settlement, not `returnStatus`: an issue that was entirely
+  /// consumed is closed business even though nothing was ever returned.
+  static String _shortStatus(IssueRecord issue) {
+    if (!issue.isSettled) return issue.settledQuantity > 0 ? 'Partial' : 'Out';
+    if (issue.returnedQuantity == issue.quantity) return 'Returned';
+    if (issue.consumedQuantity == issue.quantity) return 'Used';
+    if (issue.scrappedQuantity == issue.quantity) return 'Scrapped';
+    return 'Settled';
+  }
 
-  static Color _statusColor(String status) => switch (status) {
-        'Returned' => AppColors.success,
-        'Partially Returned' => AppColors.warning,
-        _ => AppColors.danger,
-      };
+  static Color _statusColor(IssueRecord issue) {
+    if (!issue.isSettled) {
+      return issue.settledQuantity > 0 ? AppColors.warning : AppColors.danger;
+    }
+    return issue.scrappedQuantity > 0 ? AppColors.danger : AppColors.success;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -67,8 +78,8 @@ class IssueTable extends StatelessWidget {
         ),
         TableTextCell(issue.recipient),
         TableBadgeCell(
-          _shortStatus(issue.returnStatus),
-          color: _statusColor(issue.returnStatus),
+          _shortStatus(issue),
+          color: _statusColor(issue),
         ),
       ],
       detailOf: (context, issue) {
@@ -100,6 +111,24 @@ class IssueTable extends StatelessWidget {
                 value: '${issue.returnedQuantity} of ${issue.quantity} $unit'.trim(),
                 valueColor: AppColors.warning,
               ),
+            if (issue.consumedQuantity > 0)
+              TableDetailLine(
+                label: 'Consumed',
+                value: '${issue.consumedQuantity} of ${issue.quantity} $unit'.trim(),
+                valueColor: AppColors.textSecondary,
+              ),
+            if (issue.scrappedQuantity > 0)
+              TableDetailLine(
+                label: 'Scrapped',
+                value: '${issue.scrappedQuantity} of ${issue.quantity} $unit'.trim(),
+                valueColor: AppColors.danger,
+              ),
+            if (issue.scrapValue > 0)
+              TableDetailLine(
+                label: 'Scrap value',
+                value: formatCurrency(issue.scrapValue),
+                valueColor: AppColors.dangerDeep,
+              ),
             if (issue.canReturn)
               TableDetailLine(
                 label: 'Outstanding',
@@ -115,7 +144,7 @@ class IssueTable extends StatelessWidget {
                 color: AppColors.primaryDeep,
                 onPressed: () => showProductDetails(context, issue.product!),
               ),
-            // Any supervisor may return any issue — whoever the recipient hands
+            // Any supervisor may action any issue — whoever the recipient hands
             // the stock back to books it in.
             if (onReturn != null && issue.canReturn)
               TableActionButton(
@@ -124,6 +153,20 @@ class IssueTable extends StatelessWidget {
                 icon: Icons.undo,
                 color: AppColors.accent,
                 onPressed: () => onReturn!(issue),
+              ),
+            if (onConsume != null && issue.canReturn)
+              TableActionButton(
+                label: 'Consumed',
+                icon: Icons.local_fire_department_outlined,
+                color: AppColors.textSecondary,
+                onPressed: () => onConsume!(issue),
+              ),
+            if (onScrap != null && issue.canReturn)
+              TableActionButton(
+                label: 'Scrap',
+                icon: Icons.delete_outline,
+                color: AppColors.danger,
+                onPressed: () => onScrap!(issue),
               ),
           ],
         );
