@@ -13,9 +13,22 @@ import {
   User,
   MessageSquare,
   History,
+  Search,
+  Package,
+  Boxes,
+  Clock,
 } from "lucide-react";
 
 const STATUS_TABS = ["Pending Approval", "Approved", "Rejected", "All"];
+
+/**
+ * The page has two readings of the same stock: what is waiting on a decision,
+ * and what a merge has already put on a shelf.
+ */
+const VIEW_TABS = [
+  { key: "requests", label: "Merge Requests" },
+  { key: "history", label: "Merged History" },
+];
 
 /** How the merge came to be raised, as shown under the requester's name. */
 const CREATED_VIA_LABELS = {
@@ -70,6 +83,16 @@ const MergeRequests = () => {
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("Pending Approval");
+  const [view, setView] = useState("requests");
+
+  // Merged history: one row per returned batch that reached a store room,
+  // filtered on the server so a long history is not shipped to be hidden here.
+  const [history, setHistory] = useState({ rows: [], totals: null, truncated: false });
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyRoom, setHistoryRoom] = useState("All");
+  const [historyFrom, setHistoryFrom] = useState("");
+  const [historyTo, setHistoryTo] = useState("");
 
   // The list carries enough for the table; the inspector needs the enriched
   // detail (Red Stock held, store room balances, return history).
@@ -101,13 +124,44 @@ const MergeRequests = () => {
     }
   };
 
+  const fetchHistory = async ({ silent = false } = {}) => {
+    try {
+      if (!silent) setHistoryLoading(true);
+      const { data } = await API.get("/merge-requests/history", {
+        params: {
+          search: historySearch.trim() || undefined,
+          room: historyRoom !== "All" ? historyRoom : undefined,
+          from: historyFrom || undefined,
+          to: historyTo || undefined,
+        },
+      });
+      setHistory(data);
+    } catch (error) {
+      console.error("Error loading merged history:", error);
+      if (!silent) showToast("Could not retrieve the merged history", "error");
+    } finally {
+      if (!silent) setHistoryLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchRequests();
   }, []);
 
+  // Typing in the search box should not fire a request per keystroke.
+  useEffect(() => {
+    if (view !== "history") return undefined;
+    const timer = setTimeout(fetchHistory, historySearch ? 350 : 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, historySearch, historyRoom, historyFrom, historyTo]);
+
   // The scheduler can raise a merge at any time; paused while one is open for
   // inspection or decision.
-  useAutoRefresh(() => fetchRequests({ silent: true }), { enabled: !selectedId });
+  useAutoRefresh(
+    () => (view === "history" ? fetchHistory({ silent: true }) : fetchRequests({ silent: true })),
+    { enabled: !selectedId }
+  );
 
   // Load the review detail whenever a request is opened.
   useEffect(() => {
@@ -202,6 +256,24 @@ const MergeRequests = () => {
     );
   };
 
+  /** Day on one line, clock time under it — the history table reads both. */
+  const formatDay = (dateString) =>
+    dateString
+      ? new Date(dateString).toLocaleDateString([], {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+      : "—";
+
+  const formatClock = (dateString) =>
+    dateString
+      ? new Date(dateString).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "";
+
   const destinationFor = (line) =>
     lineDestinations[String(line.restockItem?._id || line.restockItem)] || destinationRoom;
 
@@ -216,6 +288,7 @@ const MergeRequests = () => {
   // are offered for one.
   const isSupervisorMerge = detail?.createdVia === "Supervisor";
   const isPending = detail?.status === "Pending Approval" && !isSupervisorMerge;
+  const isMerged = detail?.status === "Approved";
   const projections = detail?.items ? projectBalances(detail.items, destinationFor) : [];
 
   return (
@@ -227,136 +300,374 @@ const MergeRequests = () => {
           <div>
             <h3 className="text-lg font-bold text-slate-900">Merge Review</h3>
             <p className="text-xs text-slate-500">
-              Approve to move Red Stock into a company
+              {view === "history"
+                ? "Every product a merge has put on a shelf, with quantity, company and time"
+                : "Approve to move Red Stock into a company"}
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-xl border border-slate-200">
-          {STATUS_TABS.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setStatusFilter(tab)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                statusFilter === tab
-                  ? "bg-brand-600 text-white shadow"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+            {VIEW_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setView(tab.key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  view === tab.key
+                    ? "bg-slate-900 text-white shadow"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {view === "requests" && (
+            <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+              {STATUS_TABS.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setStatusFilter(tab)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    statusFilter === tab
+                      ? "bg-brand-600 text-white shadow"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Table */}
-      {loading ? (
-        <div className="h-[40vh] flex items-center justify-center">
-          <Loader2 className="h-7 w-7 text-brand-500 animate-spin" />
-        </div>
-      ) : filteredRequests.length === 0 ? (
-        <div className="glass-premium p-12 text-center rounded-2xl border border-slate-200 flex flex-col items-center justify-center">
-          <HelpCircle className="h-10 w-10 text-slate-400 mb-3" />
-          <h3 className="text-base font-bold text-slate-900 mb-1">No merge requests found</h3>
-          <p className="text-xs text-slate-500">
-            One merge request is raised per week over the Red Stock Room, plus any a
-            supervisor sends in for their own returns.
-          </p>
-        </div>
-      ) : (
-        <div className="glass-premium rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm border-collapse">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium text-xs uppercase tracking-wider">
-                  <th className="py-4 px-6">Merge Request</th>
-                  <th className="py-4 px-6">Week</th>
-                  <th className="py-4 px-6 text-center">Items</th>
-                  <th className="py-4 px-6 text-center">Total Qty</th>
-                  <th className="py-4 px-6">Raised By</th>
-                  <th className="py-4 px-6">Merge Date</th>
-                  <th className="py-4 px-6 text-center">Status</th>
-                  <th className="py-4 px-6 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 text-slate-700">
-                {filteredRequests.map((req) => (
-                  <tr key={req._id} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-4 px-6 font-mono text-xs text-brand-700 font-bold">
-                      {req.requestId}
-                    </td>
-                    <td className="py-4 px-6 text-xs font-semibold text-slate-700">
-                      {req.weekKey}
-                    </td>
-                    <td className="py-4 px-6 text-center font-semibold text-slate-900">
-                      {req.itemCount}
-                    </td>
-                    <td className="py-4 px-6 text-center">
-                      <span className="bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2.5 py-0.5 rounded text-xs font-bold">
-                        {req.totalQuantity} pcs
-                      </span>
-                    </td>
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-2">
-                        <div className="h-7 w-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 border border-slate-200">
-                          <User className="h-3.5 w-3.5" />
-                        </div>
-                        <div>
-                          <div className="font-semibold text-slate-800 text-xs">
-                            {req.requestedBy?.name || "System"}
+      {view === "requests" && (
+        <>
+          {/* Table */}
+          {loading ? (
+            <div className="h-[40vh] flex items-center justify-center">
+              <Loader2 className="h-7 w-7 text-brand-500 animate-spin" />
+            </div>
+          ) : filteredRequests.length === 0 ? (
+            <div className="glass-premium p-12 text-center rounded-2xl border border-slate-200 flex flex-col items-center justify-center">
+              <HelpCircle className="h-10 w-10 text-slate-400 mb-3" />
+              <h3 className="text-base font-bold text-slate-900 mb-1">No merge requests found</h3>
+              <p className="text-xs text-slate-500">
+                One merge request is raised per week over the Red Stock Room, plus any a
+                supervisor sends in for their own returns.
+              </p>
+            </div>
+          ) : (
+            <div className="glass-premium rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium text-xs uppercase tracking-wider">
+                      <th className="py-4 px-6">Merge Request</th>
+                      <th className="py-4 px-6">Week</th>
+                      <th className="py-4 px-6 text-center">Items</th>
+                      <th className="py-4 px-6 text-center">Total Qty</th>
+                      <th className="py-4 px-6">Raised By</th>
+                      <th className="py-4 px-6">Merge Date</th>
+                      <th className="py-4 px-6 text-center">Status</th>
+                      <th className="py-4 px-6 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 text-slate-700">
+                    {filteredRequests.map((req) => (
+                      <tr key={req._id} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-4 px-6 font-mono text-xs text-brand-700 font-bold">
+                          {req.requestId}
+                        </td>
+                        <td className="py-4 px-6 text-xs font-semibold text-slate-700">
+                          {req.weekKey}
+                        </td>
+                        <td className="py-4 px-6 text-center font-semibold text-slate-900">
+                          {req.itemCount}
+                        </td>
+                        <td className="py-4 px-6 text-center">
+                          <span className="bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2.5 py-0.5 rounded text-xs font-bold">
+                            {req.totalQuantity} pcs
+                          </span>
+                        </td>
+                        <td className="py-4 px-6">
+                          <div className="flex items-center gap-2">
+                            <div className="h-7 w-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 border border-slate-200">
+                              <User className="h-3.5 w-3.5" />
+                            </div>
+                            <div>
+                              <div className="font-semibold text-slate-800 text-xs">
+                                {req.requestedBy?.name || "System"}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                {CREATED_VIA_LABELS[req.createdVia] || "Run by hand"}
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-[10px] text-slate-500">
-                            {CREATED_VIA_LABELS[req.createdVia] || "Run by hand"}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4 px-6 text-xs text-slate-600">
-                      {/* Once resolved this is the moment the stock moved, which
-                          is not when the merge was raised — a supervisor's own
-                          merge is both at once, the weekly one rarely is. */}
-                      <span className="flex items-center gap-1.5">
-                        <Calendar className="h-3.5 w-3.5 opacity-65" />
-                        {formatDate(req.reviewedAt || req.requestedAt)}
-                      </span>
-                      {req.reviewedAt && (
-                        <span className="block text-[10px] text-slate-400 mt-0.5">
-                          raised {formatDate(req.requestedAt)}
-                        </span>
-                      )}
-                      {req.reviewedBy?.name && (
-                        <span className="block text-[10px] text-slate-500 mt-0.5">
-                          by {req.reviewedBy.name}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-4 px-6 text-center">
-                      <span
-                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${getStatusBadge(
-                          req.status
-                        )}`}
-                      >
-                        {req.status}
-                      </span>
-                      {req.destinationRoom && req.status === "Approved" && (
-                        <span className="block mt-1 text-[10px] text-emerald-600 font-semibold">
-                          → {req.destinationRoom}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-4 px-6 text-right">
-                      <button
-                        onClick={() => setSelectedId(req._id)}
-                        className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 cursor-pointer transition-all hover:bg-slate-100"
-                      >
-                        <Eye className="h-3.5 w-3.5" /> Review
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        </td>
+                        <td className="py-4 px-6 text-xs text-slate-600">
+                          {/* Once resolved this is the moment the stock moved, which
+                              is not when the merge was raised — a supervisor's own
+                              merge is both at once, the weekly one rarely is. */}
+                          <span className="flex items-center gap-1.5">
+                            <Calendar className="h-3.5 w-3.5 opacity-65" />
+                            {formatDate(req.reviewedAt || req.requestedAt)}
+                          </span>
+                          {req.reviewedAt && (
+                            <span className="block text-[10px] text-slate-400 mt-0.5">
+                              raised {formatDate(req.requestedAt)}
+                            </span>
+                          )}
+                          {req.reviewedBy?.name && (
+                            <span className="block text-[10px] text-slate-500 mt-0.5">
+                              by {req.reviewedBy.name}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-4 px-6 text-center">
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${getStatusBadge(
+                              req.status
+                            )}`}
+                          >
+                            {req.status}
+                          </span>
+                          {req.destinationRoom && req.status === "Approved" && (
+                            <span className="block mt-1 text-[10px] text-emerald-600 font-semibold">
+                              → {req.destinationRoom}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-4 px-6 text-right">
+                          <button
+                            onClick={() => setSelectedId(req._id)}
+                            className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 cursor-pointer transition-all hover:bg-slate-100"
+                          >
+                            <Eye className="h-3.5 w-3.5" /> Review
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {view === "history" && (
+        <div className="space-y-4">
+          {/* Filters over the merged history */}
+          <div className="glass-premium rounded-2xl border border-slate-200 p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="relative lg:col-span-2">
+              <Search className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                placeholder="Product, code, batch, department or REQ-MERGE-…"
+                className="w-full pl-9 pr-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
+              />
+            </div>
+
+            <select
+              value={historyRoom}
+              onChange={(e) => setHistoryRoom(e.target.value)}
+              className="px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
+            >
+              <option value="All">All companies</option>
+              {rooms.map((room) => (
+                <option key={room._id} value={room.name}>
+                  {room.name}
+                </option>
+              ))}
+            </select>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={historyFrom}
+                onChange={(e) => setHistoryFrom(e.target.value)}
+                className="w-full px-3 py-2.5 text-xs rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
+              />
+              <span className="text-slate-400 text-xs">to</span>
+              <input
+                type="date"
+                value={historyTo}
+                onChange={(e) => setHistoryTo(e.target.value)}
+                className="w-full px-3 py-2.5 text-xs rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
+              />
+            </div>
           </div>
+
+          {/* Totals over what is on screen, so they agree with the filters */}
+          {history.totals && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="glass-premium p-4 rounded-2xl border border-slate-200">
+                <span className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                  <Boxes className="h-3.5 w-3.5" /> Merged Quantity
+                </span>
+                <span className="block mt-1 text-xl font-bold text-emerald-600">
+                  {history.totals.quantity} pcs
+                </span>
+              </div>
+              <div className="glass-premium p-4 rounded-2xl border border-slate-200">
+                <span className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5" /> Returned Batches
+                </span>
+                <span className="block mt-1 text-xl font-bold text-slate-900">
+                  {history.totals.batches}
+                </span>
+              </div>
+              <div className="glass-premium p-4 rounded-2xl border border-slate-200">
+                <span className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                  <Package className="h-3.5 w-3.5" /> Products
+                </span>
+                <span className="block mt-1 text-xl font-bold text-slate-900">
+                  {history.totals.products}
+                </span>
+              </div>
+              <div className="glass-premium p-4 rounded-2xl border border-slate-200">
+                <span className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                  <Building2 className="h-3.5 w-3.5" /> By Company
+                </span>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {history.totals.byRoom.length === 0 ? (
+                    <span className="text-xs text-slate-400">—</span>
+                  ) : (
+                    history.totals.byRoom.map((entry) => (
+                      <span
+                        key={entry.stockRoom}
+                        className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-[10px] font-semibold text-slate-700"
+                      >
+                        {entry.stockRoom}: {entry.quantity}
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {historyLoading ? (
+            <div className="h-[35vh] flex items-center justify-center">
+              <Loader2 className="h-7 w-7 text-brand-500 animate-spin" />
+            </div>
+          ) : history.rows.length === 0 ? (
+            <div className="glass-premium p-12 text-center rounded-2xl border border-slate-200 flex flex-col items-center justify-center">
+              <History className="h-10 w-10 text-slate-400 mb-3" />
+              <h3 className="text-base font-bold text-slate-900 mb-1">Nothing merged yet</h3>
+              <p className="text-xs text-slate-500">
+                A product appears here the moment a merge moves it out of Red Stock into a
+                company.
+              </p>
+            </div>
+          ) : (
+            <div className="glass-premium rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium text-xs uppercase tracking-wider">
+                      <th className="py-4 px-6">Product</th>
+                      <th className="py-4 px-6 text-center">Merged Qty</th>
+                      <th className="py-4 px-6">Company</th>
+                      <th className="py-4 px-6">Returned By</th>
+                      <th className="py-4 px-6">Merge Request</th>
+                      <th className="py-4 px-6">Merged On</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 text-slate-700">
+                    {history.rows.map((row) => (
+                      <tr key={row._id} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-4 px-6">
+                          <div className="flex items-center gap-2.5">
+                            <img
+                              src={
+                                row.product?.image ||
+                                "https://images.unsplash.com/photo-1595246140707-1e5b22b271d4?w=50&auto=format"
+                              }
+                              alt={row.productName}
+                              className="w-9 h-9 rounded-lg object-cover border border-slate-200"
+                            />
+                            <div className="min-w-0">
+                              <span className="font-semibold text-slate-800 text-xs block truncate">
+                                {row.productName}
+                              </span>
+                              <span className="font-mono text-[10px] text-slate-500">
+                                {row.productCode || "—"}
+                                {row.unit ? ` • ${row.unit}` : ""}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-4 px-6 text-center">
+                          <span className="bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2.5 py-0.5 rounded text-xs font-bold whitespace-nowrap">
+                            +{row.quantity} {row.unit || "pcs"}
+                          </span>
+                        </td>
+                        <td className="py-4 px-6 text-xs">
+                          <span className="font-semibold text-slate-800 flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5 text-slate-400" />
+                            {row.destinationRoom || "—"}
+                          </span>
+                          <span className="block text-[10px] text-slate-500 mt-0.5">
+                            from Red Stock Room
+                            {row.sourceRoom ? ` • issued from ${row.sourceRoom}` : ""}
+                          </span>
+                        </td>
+                        <td className="py-4 px-6 text-xs">
+                          <span className="font-semibold text-slate-800">{row.returnedBy}</span>
+                          <span className="block text-[10px] text-slate-500">
+                            {row.department || "—"} • {row.condition}
+                          </span>
+                          <span className="block font-mono text-[10px] text-slate-400">
+                            {row.restockNumber}
+                          </span>
+                        </td>
+                        <td className="py-4 px-6 text-xs">
+                          <span className="font-mono text-[11px] text-brand-700 font-bold">
+                            {row.requestId}
+                          </span>
+                          <span className="block text-[10px] text-slate-500">
+                            {row.weekKey}
+                            {row.createdVia
+                              ? ` • ${CREATED_VIA_LABELS[row.createdVia] || row.createdVia}`
+                              : ""}
+                          </span>
+                          <span className="block text-[10px] text-slate-500">
+                            merged by {row.mergedBy}
+                          </span>
+                        </td>
+                        <td className="py-4 px-6 text-xs whitespace-nowrap">
+                          <span className="font-semibold text-slate-800 flex items-center gap-1.5">
+                            <Calendar className="h-3.5 w-3.5 opacity-65" />
+                            {formatDay(row.mergedAt)}
+                          </span>
+                          <span className="text-[11px] text-slate-600 flex items-center gap-1.5 mt-0.5">
+                            <Clock className="h-3.5 w-3.5 opacity-65" />
+                            {formatClock(row.mergedAt)}
+                          </span>
+                          <span className="block text-[10px] text-slate-400 mt-0.5">
+                            returned {formatDay(row.returnDate)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {history.truncated && (
+                <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500">
+                  Showing the {history.rows.length} most recent merges. Narrow the dates or
+                  search to see older ones.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -558,6 +869,7 @@ const MergeRequests = () => {
                             <th className="py-3 px-4 text-center">In Stock After Merge</th>
                           )}
                           <th className="py-3 px-4">Destination</th>
+                          {isMerged && <th className="py-3 px-4">Merged On</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 text-slate-700">
@@ -640,6 +952,20 @@ const MergeRequests = () => {
                                   </span>
                                 )}
                               </td>
+                              {isMerged && (
+                                <td className="py-3 px-4 whitespace-nowrap">
+                                  {/* The batch carries the minute its own
+                                      quantity was credited; the request's
+                                      review time covers a line merged by an
+                                      older build that recorded neither. */}
+                                  <span className="font-semibold text-slate-800">
+                                    {formatDay(line.restockItem?.mergedAt || detail.reviewedAt)}
+                                  </span>
+                                  <span className="block text-[10px] text-slate-500">
+                                    {formatClock(line.restockItem?.mergedAt || detail.reviewedAt)}
+                                  </span>
+                                </td>
+                              )}
                             </tr>
                           );
                         })}

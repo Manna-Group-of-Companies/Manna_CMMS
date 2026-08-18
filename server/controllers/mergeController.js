@@ -533,3 +533,128 @@ export const rejectMergeRequest = async (req, res) => {
 // Kept so any client still posting to the old collection endpoint lands on the
 // weekly merge rather than opening a second, parallel merge.
 export const createMergeRequest = createWeeklyMergeRequest;
+
+/**
+ * @desc    Everything that has actually reached a store room through a merge:
+ *          the product, how much of it moved, where it went, and when
+ * @route   GET /api/merge-requests/history?search=&room=&from=&to=&limit=
+ * @access  Private (Admin)
+ *
+ * Read off the returned batches rather than the merge requests, because that
+ * is where the per-line record lives: a request can be part-merged, and each
+ * batch carries the exact room and the exact minute its own quantity was
+ * credited. The merge request is still attached for the id, the week and who
+ * approved it.
+ */
+export const getMergeHistory = async (req, res) => {
+  try {
+    const { search, room, from, to } = req.query;
+    const limit = Math.min(Number(req.query.limit) || 300, 1000);
+
+    const query = { status: "Moved to Stock Room", mergedAt: { $ne: null } };
+
+    if (room && room !== "All") query.destinationRoom = room;
+
+    if (from || to) {
+      query.mergedAt = {};
+      // Both ends read as whole local days, which is how a date picker reads:
+      // a plain "2026-08-18" parses as UTC midnight and would otherwise cut the
+      // first hours of that morning off the front of the range.
+      if (from) {
+        const start = new Date(from);
+        start.setHours(0, 0, 0, 0);
+        query.mergedAt.$gte = start;
+      }
+      if (to) {
+        const end = new Date(to);
+        end.setHours(23, 59, 59, 999);
+        query.mergedAt.$lte = end;
+      }
+    }
+
+    if (search && search.trim()) {
+      const rx = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      // The request id lives on the merge, not the batch, so resolve it first
+      // rather than leaving "REQ-MERGE-00125" unsearchable.
+      const merges = await MergeRequest.find({ requestId: rx }).select("_id").lean();
+
+      query.$or = [
+        { productName: rx },
+        { productCode: rx },
+        { restockNumber: rx },
+        { department: rx },
+        { destinationRoom: rx },
+        ...(merges.length ? [{ mergeRequest: { $in: merges.map((m) => m._id) } }] : []),
+      ];
+    }
+
+    const items = await RestockItem.find(query)
+      .populate("product", "name code unit image")
+      .populate("returnedBy", "name email role")
+      .populate({
+        path: "mergeRequest",
+        select: "requestId weekKey createdVia reviewedAt reviewedBy requestedBy comment",
+        populate: [
+          { path: "reviewedBy", select: "name role" },
+          { path: "requestedBy", select: "name role" },
+        ],
+      })
+      .sort({ mergedAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const rows = items.map((item) => {
+      const merge = item.mergeRequest || null;
+
+      return {
+        _id: item._id,
+        restockNumber: item.restockNumber,
+        product: item.product || null,
+        productName: item.product?.name || item.productName,
+        productCode: item.product?.code || item.productCode || "",
+        unit: item.unit || item.product?.unit || "",
+        quantity: item.quantity,
+        condition: item.condition,
+        department: item.department,
+        sourceRoom: item.sourceRoom || "",
+        destinationRoom: item.destinationRoom || "",
+        returnDate: item.returnDate,
+        returnedBy: item.returnedBy?.name || "Unknown",
+        mergedAt: item.mergedAt,
+        requestId: merge?.requestId || "—",
+        mergeRequestId: merge?._id || null,
+        weekKey: merge?.weekKey || "",
+        createdVia: merge?.createdVia || "",
+        // Who put it on the shelf: the Admin who approved the weekly merge, or
+        // the supervisor whose own merge applied itself.
+        mergedBy: merge?.reviewedBy?.name || merge?.requestedBy?.name || "System",
+      };
+    });
+
+    // Totals over what is being shown, so the header agrees with the table
+    // even when a filter is on.
+    const byRoom = new Map();
+    for (const row of rows) {
+      const key = row.destinationRoom || "Unassigned";
+      byRoom.set(key, (byRoom.get(key) || 0) + row.quantity);
+    }
+
+    res.json({
+      rows,
+      totals: {
+        batches: rows.length,
+        quantity: rows.reduce((sum, row) => sum + row.quantity, 0),
+        products: new Set(rows.map((row) => row.productCode || row.productName)).size,
+        byRoom: [...byRoom.entries()]
+          .map(([stockRoom, quantity]) => ({ stockRoom, quantity }))
+          .sort((a, b) => b.quantity - a.quantity),
+      },
+      // Says so plainly when the list was cut, rather than reading as the
+      // whole history.
+      truncated: rows.length === limit,
+    });
+  } catch (error) {
+    console.error("Error loading merge history:", error);
+    res.status(500).json({ message: error.message });
+  }
+};

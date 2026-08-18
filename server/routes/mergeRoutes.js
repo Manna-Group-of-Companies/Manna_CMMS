@@ -7,6 +7,7 @@ import {
   getMyMergeRequests,
   getWeeklyMergeStatus,
   getMergeRequests,
+  getMergeHistory,
   getMergeRequestById,
   approveMergeRequest,
   rejectMergeRequest,
@@ -38,6 +39,10 @@ router.get("/weekly/status", getWeeklyMergeStatus);
 router.post("/weekly", createWeeklyMergeRequest);
 
 router.route("/").post(createMergeRequest).get(getMergeRequests);
+// Everything a merge has actually put on a shelf, line by line. Ahead of
+// "/:id" so "history" is not read as an id.
+router.get("/history", getMergeHistory);
+
 router.get("/:id", getMergeRequestById);
 router.put("/:id/approve", approveMergeRequest);
 router.put("/:id/reject", rejectMergeRequest);

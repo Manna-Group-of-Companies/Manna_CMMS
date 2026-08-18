@@ -310,6 +310,12 @@ const ProductList = () => {
                           {isLowStock && <AlertCircle className="h-3 w-3" />}
                           {product.quantity} {product.unit}
                         </span>
+                        {/* The limit the badge is judged against. Without it,
+                            an amber row only says "low" — this says how low,
+                            and against what, without opening the item. */}
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          min {product.minStock ?? 0} {product.unit}
+                        </div>
                       </td>
                       <td>
                         <div className="flex items-center justify-end gap-1">
