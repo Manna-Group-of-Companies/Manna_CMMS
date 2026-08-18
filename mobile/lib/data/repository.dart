@@ -330,6 +330,17 @@ class StockRepository {
     return _list(data, IssueRecord.fromJson);
   }
 
+  /// Who stock may be issued to, as the Admin keeps them.
+  ///
+  /// The issue form picks from this rather than taking a typed name, so the
+  /// same firm cannot arrive spelled three ways. A server that does not serve
+  /// the list yet answers 404; the caller shows the form regardless and says
+  /// there is nobody to pick.
+  Future<List<Recipient>> recipients() async {
+    final data = await _api.get('/recipients');
+    return _list(data, Recipient.fromJson);
+  }
+
   /// Returns the confirmation message produced by the API.
   Future<String> issueProduct({
     required String productId,

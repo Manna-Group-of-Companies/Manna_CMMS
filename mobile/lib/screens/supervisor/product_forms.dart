@@ -1577,17 +1577,46 @@ class _IssueProductForm extends StatefulWidget {
 
 class _IssueProductFormState extends State<_IssueProductForm> {
   final _quantity = TextEditingController(text: '1');
-  final _recipient = TextEditingController();
   final _purpose = TextEditingController();
   bool _submitting = false;
+
+  /// Who the stock may go to, as the Admin keeps them. Picked rather than
+  /// typed, so the same firm cannot reach the issue history spelled three ways.
+  List<Recipient> _recipients = const [];
+  String _recipient = '';
 
   int get _qty => int.tryParse(_quantity.text.trim()) ?? 0;
   bool get _exceedsStock => _qty > widget.product.quantity;
 
   @override
+  void initState() {
+    super.initState();
+    _loadRecipients();
+  }
+
+  Future<void> _loadRecipients() async {
+    try {
+      final recipients = await context.read<StockRepository>().recipients();
+      if (!mounted) return;
+      // Ordered by group so the headings in the picker come out in one run
+      // each; the API already sorts, this keeps it true against an older one.
+      recipients.sort((a, b) {
+        final byGroup = Recipient.groups
+            .indexOf(a.type)
+            .compareTo(Recipient.groups.indexOf(b.type));
+        return byGroup != 0 ? byGroup : a.name.compareTo(b.name);
+      });
+      setState(() => _recipients = recipients);
+    } catch (error) {
+      // A server that does not serve the list yet, or a phone that is offline:
+      // the form still opens and says there is nobody to pick.
+      debugPrint('Could not load recipients: $error');
+    }
+  }
+
+  @override
   void dispose() {
     _quantity.dispose();
-    _recipient.dispose();
     _purpose.dispose();
     super.dispose();
   }
@@ -1598,8 +1627,8 @@ class _IssueProductFormState extends State<_IssueProductForm> {
       Toast.error('Quantity must be at least 1');
       return;
     }
-    if (_recipient.text.trim().isEmpty) {
-      Toast.error('Recipient is required');
+    if (_recipient.isEmpty) {
+      Toast.error('Choose who is taking the stock');
       return;
     }
 
@@ -1608,7 +1637,7 @@ class _IssueProductFormState extends State<_IssueProductForm> {
       final message = await context.read<StockRepository>().issueProduct(
             productId: widget.product.id,
             quantity: _qty,
-            recipient: _recipient.text.trim(),
+            recipient: _recipient,
             purpose: _purpose.text.trim(),
           );
       Toast.success(message);
@@ -1631,7 +1660,7 @@ class _IssueProductFormState extends State<_IssueProductForm> {
       submitLabel: 'Issue Now',
       submitColor: AppColors.warningDeep,
       submitting: _submitting,
-      canSubmit: !_exceedsStock && _qty >= 1,
+      canSubmit: !_exceedsStock && _qty >= 1 && _recipient.isNotEmpty,
       initialSize: 0.8,
       onSubmit: _submit,
       children: [
@@ -1699,14 +1728,37 @@ class _IssueProductFormState extends State<_IssueProductForm> {
             ),
           ),
         _Field(
-          label: 'Recipient (Name / Department)',
+          label: 'Recipient',
           required: true,
-          child: TextField(
-            controller: _recipient,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              hintText: 'e.g. Marketing Dept, John Smith',
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DropdownShell(
+                child: AppDropdown<String>(
+                  value: _recipient,
+                  // The empty first entry is "nothing picked yet"; AppDropdown
+                  // takes a non-null value, and an issue cannot be made out to
+                  // nobody, so it is refused on submit rather than offered.
+                  items: ['', ..._recipients.map((one) => one.name)],
+                  groupOf: (name) => name.isEmpty
+                      ? null
+                      : _recipients
+                          .where((one) => one.name == name)
+                          .firstOrNull
+                          ?.type,
+                  labelBuilder: (name) =>
+                      name.isEmpty ? 'Choose who is taking it…' : name,
+                  onChanged: (value) => setState(() => _recipient = value ?? ''),
+                ),
+              ),
+              if (_recipients.isEmpty) ...[
+                const SizedBox(height: 7),
+                const Text(
+                  'No recipients yet — ask the Admin to add them.',
+                  style: TextStyle(color: AppColors.warning, fontSize: 11.5),
+                ),
+              ],
+            ],
           ),
         ),
         _Field(

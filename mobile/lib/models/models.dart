@@ -470,6 +470,27 @@ class StockRoom {
       );
 }
 
+/// Somebody stock can be issued to, as listed by `/recipients`.
+///
+/// The Admin keeps this list. An issue still carries the name as text — [type]
+/// only says which heading the name sits under while it is being picked.
+class Recipient {
+  const Recipient({required this.id, required this.name, required this.type});
+
+  /// The two groups, in the order the picker shows them.
+  static const groups = ['Our Company', 'Outside Company'];
+
+  final String id;
+  final String name;
+  final String type;
+
+  factory Recipient.fromJson(Map<String, dynamic> json) => Recipient(
+        id: asString(json['_id']),
+        name: asString(json['name']),
+        type: asString(json['type'], groups.first),
+      );
+}
+
 /// One product's balance inside one room, as listed by `/stock-rooms/inventory`.
 class RoomStockItem {
   const RoomStockItem({

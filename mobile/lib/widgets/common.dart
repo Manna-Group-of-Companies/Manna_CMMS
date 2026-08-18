@@ -863,12 +863,29 @@ class AppDropdown<T> extends StatelessWidget {
     required this.items,
     required this.onChanged,
     this.labelBuilder,
+    this.groupOf,
   });
 
   final T value;
   final List<T> items;
   final ValueChanged<T?> onChanged;
   final String Function(T value)? labelBuilder;
+
+  /// Splits the list under headings, the way `<optgroup>` does on the web.
+  ///
+  /// [items] must already be ordered by group; a heading is written out
+  /// whenever the group changes, and headings cannot be picked. Return null —
+  /// or leave this off — for a list that reads as one run.
+  final String? Function(T value)? groupOf;
+
+  /// The heading to write above `items[i]`, or null when it belongs under the
+  /// one already written.
+  String? _headingBefore(int i) {
+    final group = groupOf?.call(items[i]);
+    if (group == null || group.isEmpty) return null;
+    if (i == 0) return group;
+    return group == groupOf?.call(items[i - 1]) ? null : group;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -884,14 +901,29 @@ class AppDropdown<T> extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         onChanged: onChanged,
         items: [
-          for (final item in items)
+          for (var i = 0; i < items.length; i++) ...[
+            // A heading carries no value, so it can never be what is selected.
+            if (_headingBefore(i) case final heading?)
+              DropdownMenuItem<T>(
+                enabled: false,
+                child: Text(
+                  heading.toUpperCase(),
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+              ),
             DropdownMenuItem<T>(
-              value: item,
+              value: items[i],
               child: Text(
-                labelBuilder?.call(item) ?? '$item',
+                labelBuilder?.call(items[i]) ?? '${items[i]}',
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+          ],
         ],
       ),
     );
