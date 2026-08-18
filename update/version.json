@@ -1,17 +1,16 @@
 {
-  "latestVersion": "1.0.3",
-  "versionCode": 4,
-  "apkUrl": "https://github.com/Manna-Group-of-Companies/Manna_CMMS/releases/download/v1.0.3/stockmaster-1.0.3.apk",
+  "latestVersion": "1.0.4",
+  "versionCode": 5,
+  "apkUrl": "https://github.com/Manna-Group-of-Companies/Manna_CMMS/releases/download/v1.0.4/stockmaster-1.0.4.apk",
   "releaseNotes": [
-    "Merge your own returns straight away, even while the weekly merge is open",
-    "Returned stock always has a company to go back to",
-    "Red Stock shows who merged each item and when",
-    "An item's name is set when it is taken in and is no longer edited",
-    "Pick who is taking the stock from the list the Admin keeps",
-    "The old Engineer Room no longer appears when choosing a company"
+    "Products are now called Engineering Stock throughout the app",
+    "An item shows how much of it each company holds, not just one total",
+    "Stock waiting in the Red Stock Room is shown on the item it belongs to",
+    "Take stock in against any company the Admin has added, and filter the catalog by it",
+    "Branch approvals are decided on the web console and no longer appear on the phone"
   ],
-  "fileSize": 54706984,
-  "sha256": "dbacdb8e2154944907956a900d4052452577cf0d73445474783f5685827b6d08",
+  "fileSize": 54690528,
+  "sha256": "089ee00c19d01a393db4097566dd2c123ecac18102e9c3dd5419c0755a273f2b",
   "mandatory": false,
   "minSupportedVersion": "1.0.0"
 }
