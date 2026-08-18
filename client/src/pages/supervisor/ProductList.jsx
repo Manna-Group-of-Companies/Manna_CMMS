@@ -37,6 +37,9 @@ const SAMPLE_IMAGES = [
   { name: "Laptop/Computer", url: "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3" },
 ];
 
+/** The two headings the recipient picker groups its names under. */
+const RECIPIENT_GROUPS = ["Our Company", "Outside Company"];
+
 const ProductList = () => {
   const { showToast } = useNotifications();
   const [products, setProducts] = useState([]);
@@ -59,6 +62,8 @@ const ProductList = () => {
   const [issueQty, setIssueQty] = useState(1);
   const [issueRecipient, setIssueRecipient] = useState("");
   const [issuePurpose, setIssuePurpose] = useState("");
+  // Who stock may be issued to, as the Admin keeps them.
+  const [recipients, setRecipients] = useState([]);
 
   /**
    * The add / edit form.
@@ -141,6 +146,23 @@ const ProductList = () => {
     }
   };
 
+  /**
+   * Who an issue can be made out to. The Admin keeps this list; a supervisor
+   * picks from it rather than typing a name, so the same firm cannot arrive
+   * spelled three ways.
+   *
+   * A server that does not serve the list yet answers 404 — the catalog still
+   * has to work, so the recipients are simply empty and the form says so.
+   */
+  const fetchRecipients = async () => {
+    try {
+      const { data } = await API.get("/recipients");
+      setRecipients(data);
+    } catch (error) {
+      console.error("Error loading recipients:", error);
+    }
+  };
+
   // Scoped to the chosen category — see the Admin catalog for why.
   const fetchSubCategories = async () => {
     try {
@@ -157,6 +179,12 @@ const ProductList = () => {
     fetchProducts();
     fetchCategories();
   }, [searchTerm, selectedCategory, selectedSubCategory, selectedStoreRoom, stockStatus]);
+
+  // Read once: the Admin adding a recipient mid-shift is rare, and the issue
+  // form re-reads it each time it opens.
+  useEffect(() => {
+    fetchRecipients();
+  }, []);
 
   useEffect(() => {
     fetchSubCategories();
@@ -204,6 +232,9 @@ const ProductList = () => {
     setIssueQty(1);
     setIssueRecipient("");
     setIssuePurpose("");
+    // Re-read on open, so a recipient the Admin added a minute ago is offered
+    // without the supervisor reloading the page.
+    fetchRecipients();
     setActiveModal("issue");
   };
 
@@ -215,7 +246,7 @@ const ProductList = () => {
       return;
     }
     if (!issueRecipient.trim()) {
-      showToast("Recipient is required", "error");
+      showToast("Choose who is taking the stock", "error");
       return;
     }
     try {
@@ -1030,19 +1061,39 @@ const ProductList = () => {
                   )}
                 </div>
 
-                {/* Recipient */}
+                {/* Recipient — picked from the Admin's list, so the same name
+                    reads the same way on every issue. */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                    Recipient (Name / Department) *
+                    Recipient *
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={issueRecipient}
                     onChange={(e) => setIssueRecipient(e.target.value)}
                     required
-                    placeholder="e.g. Marketing Dept, John Smith"
-                    className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
-                  />
+                    className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
+                  >
+                    <option value="">Choose who is taking it…</option>
+                    {RECIPIENT_GROUPS.map((group) => {
+                      const names = recipients.filter((one) => one.type === group);
+                      if (names.length === 0) return null;
+                      return (
+                        <optgroup key={group} label={group}>
+                          {names.map((one) => (
+                            <option key={one._id} value={one.name}>
+                              {one.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                  </select>
+                  {recipients.length === 0 && (
+                    <div className="text-amber-600 text-[10px] mt-1 flex items-center gap-1 font-medium">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                      No recipients yet — ask the Admin to add them.
+                    </div>
+                  )}
                 </div>
 
                 {/* Purpose */}

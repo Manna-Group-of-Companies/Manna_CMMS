@@ -22,6 +22,7 @@ import BranchDashboard from "./pages/branch/BranchDashboard";
 import BranchMyRequests from "./pages/branch/MyRequests";
 import AdminBranchRequests from "./pages/admin/BranchRequests";
 import AdminUsers from "./pages/admin/Users";
+import AdminRecipients from "./pages/admin/Recipients";
 import AdminScrapReport from "./pages/admin/ScrapReport";
 import AdminSapHandoff from "./pages/admin/SapHandoff";
 import BranchApprovals from "./pages/supervisor/BranchApprovals";
@@ -66,6 +67,7 @@ function App() {
               <Route path="sap-handoff" element={<AdminSapHandoff />} />
               <Route path="branch-requests" element={<AdminBranchRequests />} />
               <Route path="users" element={<AdminUsers />} />
+              <Route path="recipients" element={<AdminRecipients />} />
               {/* Red Stock is decided in Request Control now; an old link or a
                   bookmark lands on the dashboard rather than a dead route. */}
               <Route path="red-stock" element={<Navigate to="/admin/dashboard" replace />} />

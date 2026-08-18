@@ -13,6 +13,7 @@ import {
   Warehouse,
   ClipboardCheck,
   KeyRound,
+  Contact,
   TrendingDown,
   ArrowRightLeft,
   X,
@@ -67,6 +68,11 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
       name: "Branch Requests",
       path: "/admin/branch-requests",
       icon: ClipboardCheck,
+    },
+    {
+      name: "Recipients",
+      path: "/admin/recipients",
+      icon: Contact,
     },
     {
       name: "Users & PINs",
