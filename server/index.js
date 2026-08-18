@@ -8,6 +8,7 @@ import {
   migrateRedStockStatuses,
   startWeeklyMergeScheduler,
 } from "./utils/weeklyMerge.js";
+import { settleParkedSupervisorMerges } from "./utils/mergeApply.js";
 
 // Routes imports
 import authRoutes from "./routes/authRoutes.js";
@@ -119,6 +120,11 @@ const start = async () => {
 
     // Bring any pre-Red-Stock records onto the current status vocabulary
     await migrateRedStockStatuses();
+
+    // A supervisor merge is theirs to make, so any that an older build left
+    // waiting on an Admin are applied now — that stock is out of Red Stock and
+    // countable nowhere until it reaches a store room.
+    await settleParkedSupervisorMerges();
 
     // Raises one merge request per week over whatever is in Red Stock
     startWeeklyMergeScheduler();

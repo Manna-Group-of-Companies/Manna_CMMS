@@ -1175,8 +1175,9 @@ class ScrapSummary {
 /// A merge the supervisor raised over their own Red Stock, as returned by
 /// `/merge-requests/mine`.
 ///
-/// Raising one moves no stock: it puts the request on the Admin's desk, and
-/// the quantity only leaves Red Stock if the Admin approves it.
+/// Raising one is the whole merge: the stock is in the main store room by the
+/// time the call answers, so these read as Approved from the start. A row that
+/// says otherwise came from an older server.
 class MergeRequestSummary {
   const MergeRequestSummary({
     required this.id,
