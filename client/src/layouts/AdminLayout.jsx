@@ -39,8 +39,6 @@ const AdminLayout = () => {
     ["/admin/issues", "Issue History", "Every engineering stock item issued, by every supervisor"],
     ["/admin/scrap", "Scrap & Consumption", "Value written off across the stores"],
     ["/admin/audits", "Stock Audits", "Monthly counts, the score each store room earned, and the history"],
-    ["/admin/sap-handoff", "SAP Hand-off", "Names waiting to be created in SAP"],
-    ["/admin/branch-requests", "Branch Requests", "First-stage approval for branch orders"],
     ["/admin/users", "Users & PINs", "Accounts and the PINs they sign in with"],
   ];
 

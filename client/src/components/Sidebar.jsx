@@ -16,7 +16,6 @@ import {
   KeyRound,
   Contact,
   TrendingDown,
-  ArrowRightLeft,
   X,
 } from "lucide-react";
 
@@ -64,16 +63,6 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
       name: "Stock Audits",
       path: "/admin/audits",
       icon: Gauge,
-    },
-    {
-      name: "SAP Hand-off",
-      path: "/admin/sap-handoff",
-      icon: ArrowRightLeft,
-    },
-    {
-      name: "Branch Requests",
-      path: "/admin/branch-requests",
-      icon: ClipboardCheck,
     },
     {
       name: "Recipients",

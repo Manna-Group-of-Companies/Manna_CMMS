@@ -20,13 +20,11 @@ import SupervisorIssueHistory from "./pages/supervisor/IssueHistory";
 import MyReturns from "./pages/supervisor/MyReturns";
 import BranchDashboard from "./pages/branch/BranchDashboard";
 import BranchMyRequests from "./pages/branch/MyRequests";
-import AdminBranchRequests from "./pages/admin/BranchRequests";
 import AdminUsers from "./pages/admin/Users";
 import AdminRecipients from "./pages/admin/Recipients";
 import AdminScrapReport from "./pages/admin/ScrapReport";
 import AdminAuditReport from "./pages/admin/AuditReport";
 import SupervisorStockAudit from "./pages/supervisor/StockAudit";
-import AdminSapHandoff from "./pages/admin/SapHandoff";
 import BranchApprovals from "./pages/supervisor/BranchApprovals";
 
 // Protected Route Root Switcher
@@ -67,8 +65,16 @@ function App() {
               <Route path="issues" element={<AdminIssueHistory />} />
               <Route path="scrap" element={<AdminScrapReport />} />
               <Route path="audits" element={<AdminAuditReport />} />
-              <Route path="sap-handoff" element={<AdminSapHandoff />} />
-              <Route path="branch-requests" element={<AdminBranchRequests />} />
+              {/* SAP Hand-off and Branch Requests are hidden from the
+                  console. Kept as redirects rather than deleted so a bookmark
+                  or an old link lands on the dashboard instead of a blank
+                  screen — the pages are still in pages/admin/ if either comes
+                  back. */}
+              <Route path="sap-handoff" element={<Navigate to="/admin/dashboard" replace />} />
+              <Route
+                path="branch-requests"
+                element={<Navigate to="/admin/dashboard" replace />}
+              />
               <Route path="users" element={<AdminUsers />} />
               <Route path="recipients" element={<AdminRecipients />} />
               {/* Red Stock is decided in Request Control now; an old link or a

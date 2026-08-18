@@ -129,7 +129,6 @@ const AdminDashboard = () => {
       title: "Branch Requests to Approve",
       value: metrics.branchPendingAdmin || 0,
       icon: ClipboardCheck,
-      link: "/admin/branch-requests",
       alert: metrics.branchPendingAdmin > 0,
       chip:
         metrics.branchPendingAdmin > 0
