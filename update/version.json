@@ -7,10 +7,11 @@
     "Returned stock always has a company to go back to",
     "Red Stock shows who merged each item and when",
     "An item's name is set when it is taken in and is no longer edited",
+    "Pick who is taking the stock from the list the Admin keeps",
     "The old Engineer Room no longer appears when choosing a company"
   ],
-  "fileSize": 54690600,
-  "sha256": "673234a876baa9f24d49254992be594fbccaa079e40df57aa29de2574799dfdf",
+  "fileSize": 54706984,
+  "sha256": "dbacdb8e2154944907956a900d4052452577cf0d73445474783f5685827b6d08",
   "mandatory": false,
   "minSupportedVersion": "1.0.0"
 }
