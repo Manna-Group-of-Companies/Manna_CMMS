@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stockmaster/models/models.dart';
 
 void main() {
-  group('Product', () {
+  group('Engineering Stock', () {
     test('parses a full document', () {
       final product = Product.fromJson(const {
         '_id': 'p1',
@@ -67,11 +67,11 @@ void main() {
       expect(request.exceedsStock, isFalse);
     });
 
-    test('uses the drafted details for an Add Product request', () {
+    test('uses the drafted details for an Add Engineering Stock request', () {
       final request = AdminRequest.fromJson(const {
         '_id': 'r2',
         'requestNumber': 'REQ-ADD-100002',
-        'requestType': 'Add Product',
+        'requestType': 'Add Engineering Stock',
         'details': {'name': 'New Monitor', 'quantity': 5, 'unit': 'Pcs'},
         'createdDate': '2026-08-11T09:15:00.000Z',
         'status': 'Pending',
@@ -195,7 +195,7 @@ void main() {
       final request = MyRequest.fromJson(const {
         '_id': 'q2',
         'requestNumber': 'REQ-ADD-100001',
-        'requestType': 'Add Product',
+        'requestType': 'Add Engineering Stock',
         'productName': 'New Chair',
         'status': 'Pending',
         'rawType': 'product',

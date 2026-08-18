@@ -70,7 +70,7 @@ export const getProductById = async (req, res) => {
     if (product) {
       res.json(product);
     } else {
-      res.status(404).json({ message: "Product not found" });
+      res.status(404).json({ message: "Engineering Stock not found" });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -249,7 +249,7 @@ export const updateSapStatus = async (req, res) => {
 
     const product = await Product.findById(req.params.id);
     if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({ message: "Engineering Stock not found" });
     }
 
     product.sap = {
@@ -328,7 +328,7 @@ export const createProduct = async (req, res) => {
     // when none was typed, then hold it against the convention.
     const named = resolveItemName({ name, naming });
     if (!named.name) {
-      return res.status(400).json({ message: "Product name is required" });
+      return res.status(400).json({ message: "Engineering Stock name is required" });
     }
     if (!named.compliant && !acknowledgeNaming) {
       return res.status(422).json({
@@ -341,7 +341,7 @@ export const createProduct = async (req, res) => {
 
     const productCode = code?.trim() || generateProductCode();
     if (await Product.findOne({ code: productCode })) {
-      return res.status(400).json({ message: `Product code ${productCode} already exists` });
+      return res.status(400).json({ message: `Engineering Stock code ${productCode} already exists` });
     }
 
     // ST-14 — say so before a second copy of an item the store already holds
@@ -402,7 +402,7 @@ export const createProduct = async (req, res) => {
     });
 
     await Notification.create({
-      message: `Product "${product.name}" added to the catalog by ${req.user.name}`,
+      message: `Engineering Stock "${product.name}" added to the catalog by ${req.user.name}`,
       type: "REQUEST_APPROVED",
     });
 
@@ -420,7 +420,7 @@ export const updateProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({ message: "Engineering Stock not found" });
     }
 
     const { code, quantity, storeRoom, acknowledgeNaming = false, allowDuplicate = false } =
@@ -445,7 +445,7 @@ export const updateProduct = async (req, res) => {
     // Product code is user-facing and must stay unique.
     if (code && code.trim() && code.trim() !== product.code) {
       if (await Product.findOne({ code: code.trim(), _id: { $ne: product._id } })) {
-        return res.status(400).json({ message: `Product code ${code.trim()} is already taken` });
+        return res.status(400).json({ message: `Engineering Stock code ${code.trim()} is already taken` });
       }
       product.code = code.trim();
     }
@@ -462,7 +462,7 @@ export const updateProduct = async (req, res) => {
       });
 
       if (!named.name) {
-        return res.status(400).json({ message: "Product name is required" });
+        return res.status(400).json({ message: "Engineering Stock name is required" });
       }
 
       const renamed = named.name !== product.name;
@@ -602,7 +602,7 @@ export const deleteProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({ message: "Engineering Stock not found" });
     }
 
     // History (issues, movements, past requests) snapshots the name and code,
@@ -611,7 +611,7 @@ export const deleteProduct = async (req, res) => {
     await Product.deleteOne({ _id: product._id });
 
     await Notification.create({
-      message: `Product "${product.name}" (${product.code}) was deleted by ${req.user.name}`,
+      message: `Engineering Stock "${product.name}" (${product.code}) was deleted by ${req.user.name}`,
       type: "REQUEST_REJECTED",
     });
 

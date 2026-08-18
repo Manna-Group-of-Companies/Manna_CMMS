@@ -32,7 +32,7 @@ const RequestFormModal = ({ items = [], preselected = null, onClose, onSubmitted
     setError("");
 
     if (!productId) {
-      setError("Choose a product to request");
+      setError("Choose engineering stock to request");
       return;
     }
     const qty = Number(quantity);
@@ -70,7 +70,7 @@ const RequestFormModal = ({ items = [], preselected = null, onClose, onSubmitted
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Apply for Product</h3>
+            <h3 className="text-lg font-bold text-slate-900">Apply for Engineering Stock</h3>
             <p className="text-xs text-slate-600 mt-0.5">
               Goes to the Admin first, then to the Supervisor for final approval.
             </p>
@@ -90,17 +90,17 @@ const RequestFormModal = ({ items = [], preselected = null, onClose, onSubmitted
             </div>
           )}
 
-          {/* Product */}
+          {/* Engineering Stock */}
           <div>
             <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
-              Product
+              Engineering Stock
             </label>
             <select
               value={productId}
               onChange={(e) => setProductId(e.target.value)}
               className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20 transition-all cursor-pointer"
             >
-              <option value="">Select a product from your room</option>
+              <option value="">Select engineering stock from your room</option>
               {inStock.map((item) => (
                 <option key={item.productId} value={item.productId}>
                   {item.name} ({item.code}) — {item.quantity} {item.unit} available

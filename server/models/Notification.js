@@ -25,6 +25,8 @@ const notificationSchema = new mongoose.Schema(
         "MERGE_REQUESTED",
         "MERGE_APPROVED",
         "MERGE_REJECTED",
+        "AUDIT_SUBMITTED",
+        "AUDIT_REVIEWED",
       ],
     },
     read: {

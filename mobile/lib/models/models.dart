@@ -344,7 +344,7 @@ class ProductDraft {
     this.quantity = 0,
     this.unit = 'Pcs',
     this.minStock = 5,
-    this.storeRoom = 'Manna Rubber Park',
+    this.storeRoom = '',
     this.description = '',
     this.image = '',
     NamingParts? naming,
@@ -401,7 +401,7 @@ class ProductDraft {
         quantity: asInt(json['quantity']),
         unit: asString(json['unit']),
         minStock: asInt(json['minStock']),
-        storeRoom: asString(json['storeRoom'], 'Manna Rubber Park'),
+        storeRoom: asString(json['storeRoom']),
         description: asString(json['description']),
         image: asString(json['image']),
         naming: NamingParts.maybe(json['naming']),
@@ -467,6 +467,30 @@ class StockRoom {
   factory StockRoom.fromJson(Map<String, dynamic> json) => StockRoom(
         id: asString(json['_id']),
         name: asString(json['name']),
+      );
+}
+
+/// How much of one product a single company holds, from
+/// `/products/:id/rooms` (ST-34, ST-35).
+///
+/// Stock is kept per company, so "12 in stock" is only ever a total: the
+/// lookup has to say which company those 12 are in before anybody can walk to
+/// a shelf and find them.
+class ProductRoomStock {
+  const ProductRoomStock({
+    required this.stockRoomId,
+    required this.stockRoom,
+    required this.quantity,
+  });
+
+  final String stockRoomId;
+  final String stockRoom;
+  final int quantity;
+
+  factory ProductRoomStock.fromJson(Map<String, dynamic> json) => ProductRoomStock(
+        stockRoomId: asString(json['stockRoomId']),
+        stockRoom: asString(json['stockRoom']),
+        quantity: asInt(json['quantity']),
       );
 }
 
@@ -916,7 +940,7 @@ class AdminRequest {
   /// Name shown in listings, matching the web client's fallback chain.
   String get displayName => isProductRequest
       ? (details?.name ?? '')
-      : (product?.name ?? 'Unknown Product');
+      : (product?.name ?? 'Unknown Engineering Stock');
 
   /// True when approving a Stock Out would drive the stock negative.
   bool get exceedsStock =>

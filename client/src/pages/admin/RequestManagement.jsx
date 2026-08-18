@@ -198,9 +198,9 @@ const RequestManagement = () => {
 
   const getRequestTypeColor = (type) => {
     switch (type) {
-      case "Add Product":
+      case "Add Engineering Stock":
         return "badge-brand";
-      case "Edit Product":
+      case "Edit Stock":
         return "badge-indigo";
       case "Stock In":
         return "badge-emerald";
@@ -277,7 +277,7 @@ const RequestManagement = () => {
                   <th>Request #</th>
                   <th>Type</th>
                   <th>Supervisor</th>
-                  <th>Product / Scope</th>
+                  <th>Engineering Stock / Scope</th>
                   <th>Submitted</th>
                   <th>Status</th>
                   <th className="text-right">Actions</th>
@@ -322,7 +322,7 @@ const RequestManagement = () => {
                             <div className="cell-title">
                               {req.rawType === "product"
                                 ? req.details.name
-                                : req.product?.name || "Unknown Product"}
+                                : req.product?.name || "Unknown Engineering Stock"}
                             </div>
                             {req.quantity && (
                               <span className="text-[11px] text-slate-500">
@@ -499,7 +499,7 @@ const RequestManagement = () => {
                 )}
 
                 {/* TYPE: ADD PRODUCT */}
-                {selectedRequest.requestType === "Add Product" && (
+                {selectedRequest.requestType === "Add Engineering Stock" && (
                   <div className="space-y-4">
                     <div className="flex gap-4 p-4 bg-brand-50 rounded-xl border border-brand-500/15">
                       <img
@@ -549,7 +549,7 @@ const RequestManagement = () => {
                 )}
 
                 {/* TYPE: EDIT PRODUCT */}
-                {selectedRequest.requestType === "Edit Product" && (
+                {selectedRequest.requestType === "Edit Stock" && (
                   <div className="space-y-4">
                     <h4 className="eyebrow">Compare Values (Original vs Request)</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

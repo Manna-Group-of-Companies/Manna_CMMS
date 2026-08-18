@@ -123,7 +123,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(AppBar),
-        matching: find.text('Browse Products Catalog'),
+        matching: find.text('Browse Engineering Stock Catalog'),
       ),
       findsOneWidget,
     );
@@ -131,9 +131,11 @@ void main() {
 
     // Every working screen is a bottom tab; none hide behind a drawer.
     expect(find.byType(Drawer), findsNothing);
-    for (final tab in ['Catalog', 'Requests', 'Approvals', 'Issues', 'Red Room']) {
+    for (final tab in ['Catalog', 'Requests', 'Issues', 'Red Room']) {
       expect(find.text(tab), findsWidgets, reason: '$tab tab');
     }
+    // Branch approvals are decided in the web console, not on the phone.
+    expect(find.text('Approvals'), findsNothing);
     expect(find.text('Home'), findsNothing);
 
     // Settings is the gear in the app bar, holding profile and sign-out.
@@ -200,7 +202,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(AppBar),
-        matching: find.text('Browse Products Catalog'),
+        matching: find.text('Browse Engineering Stock Catalog'),
       ),
       findsOneWidget,
     );

@@ -215,7 +215,7 @@ const StockRequestsPanel = () => {
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium text-xs uppercase tracking-wider">
                   <th className="py-4 px-6">Request ID</th>
                   <th className="py-4 px-6">Supervisor</th>
-                  <th className="py-4 px-6">Product</th>
+                  <th className="py-4 px-6">Engineering Stock</th>
                   <th className="py-4 px-6 text-center">Requested</th>
                   <th className="py-4 px-6 text-center">Current Stock</th>
                   <th className="py-4 px-6">Requested Company</th>
@@ -257,7 +257,7 @@ const StockRequestsPanel = () => {
                         />
                         <div>
                           <div className="font-bold text-slate-900">
-                            {req.product?.name || "Unknown Product"}
+                            {req.product?.name || "Unknown Engineering Stock"}
                           </div>
                           <div className="text-[10px] font-mono text-brand-700">
                             {req.product?.code || "—"}
@@ -371,7 +371,7 @@ const StockRequestsPanel = () => {
                 />
                 <div className="text-xs">
                   <h4 className="text-sm font-bold text-slate-900">
-                    {selected.product?.name || "Unknown Product"}
+                    {selected.product?.name || "Unknown Engineering Stock"}
                   </h4>
                   <span className="font-mono text-brand-700 block mt-0.5">
                     {selected.product?.code || "—"}

@@ -108,7 +108,7 @@ export const transferStock = async (req, res) => {
 
     const product = await Product.findById(productId);
     if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({ message: "Engineering Stock not found" });
     }
 
     const fromRoom = await resolveRoom(fromRoomId);
@@ -172,7 +172,7 @@ export const setRoomQuantity = async (req, res) => {
 
     const product = await Product.findById(productId);
     if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({ message: "Engineering Stock not found" });
     }
 
     const room = await resolveRoom(stockRoomId);

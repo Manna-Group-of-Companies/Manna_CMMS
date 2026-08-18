@@ -5,7 +5,6 @@ import 'core/palette.dart';
 import 'screens/branch/branch_requests_screen.dart';
 import 'screens/branch/branch_stock_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/supervisor/branch_approvals_screen.dart';
 import 'screens/supervisor/my_requests_screen.dart';
 import 'screens/supervisor/my_returns_screen.dart';
 import 'screens/supervisor/sap_handoff_screen.dart';
@@ -56,11 +55,6 @@ GoRouter buildRouter(AuthProvider auth) {
       GoRoute(path: '/supervisor/sap-handoff', builder: (_, _) => const SapHandoffScreen()),
       // Profile details and sign-out both live here.
       GoRoute(path: '/supervisor/settings', builder: (_, _) => const SettingsScreen()),
-      // Stage two of the branch workflow is decided here.
-      GoRoute(
-        path: '/supervisor/branch-approvals',
-        builder: (_, _) => const BranchApprovalsScreen(),
-      ),
 
       // Branch portal — one room's stock, and the requests raised on it.
       GoRoute(path: '/branch/stock', builder: (_, _) => const BranchStockScreen()),
@@ -94,6 +88,11 @@ GoRouter buildRouter(AuthProvider auth) {
       // The Home screen is gone — the bottom bar now carries every screen, so
       // an old dashboard link lands on the catalog instead.
       if (path == '/supervisor/dashboard') return home;
+
+      // Branch approvals are decided in the web console now, so the phone no
+      // longer carries stage two. Old links land on the catalog rather than
+      // nowhere.
+      if (path == '/supervisor/branch-approvals') return home;
 
       // The profile is a section of Settings now; keep old links working.
       if (path == '/supervisor/profile') return '/supervisor/settings';

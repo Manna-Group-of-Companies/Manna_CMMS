@@ -288,7 +288,7 @@ const BranchDashboard = () => {
             <table className="w-full text-left">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr className="text-[11px] uppercase tracking-wider text-slate-600">
-                  <th className="px-6 py-3 font-semibold">Product</th>
+                  <th className="px-6 py-3 font-semibold">Engineering Stock</th>
                   <th className="px-6 py-3 font-semibold">Code</th>
                   <th className="px-6 py-3 font-semibold">Category</th>
                   <th className="px-6 py-3 font-semibold text-right">Quantity</th>
@@ -345,7 +345,7 @@ const BranchDashboard = () => {
                           onClick={() => setRequestFor(item)}
                           disabled={item.isOutOfStock}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-brand-500/30 bg-brand-500/10 text-brand-700 text-xs font-semibold hover:bg-brand-500/20 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          title={item.isOutOfStock ? "Nothing in stock to request" : "Apply for this product"}
+                          title={item.isOutOfStock ? "Nothing in stock to request" : "Apply for this engineering stock"}
                         >
                           <Send className="h-3.5 w-3.5" />
                           Apply

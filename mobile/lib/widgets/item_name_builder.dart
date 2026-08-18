@@ -53,7 +53,7 @@ InputDecoration _dense(String hint) => InputDecoration(
 ///
 /// [naming] is mutated in place — it belongs to the draft being edited — and
 /// [onChanged] lets the parent rebuild. [onApply] hands the finished name back
-/// to the Product Name field.
+/// to the Engineering Stock Name field.
 class ItemNameBuilderCard extends StatefulWidget {
   const ItemNameBuilderCard({
     super.key,
@@ -509,7 +509,7 @@ class _NamePreview extends StatelessWidget {
 }
 
 /// Whether a name follows the convention, and what is wrong with it if not
-/// (ST-10). Used under the preview and under the Product Name field.
+/// (ST-10). Used under the preview and under the Engineering Stock Name field.
 class NameComplianceHint extends StatelessWidget {
   const NameComplianceHint({super.key, required this.check});
 

@@ -24,7 +24,7 @@ class _SupervisorProductListScreenState extends State<SupervisorProductListScree
   @override
   Widget build(BuildContext context) {
     return AppShell(
-      title: 'Browse Products Catalog',
+      title: 'Browse Engineering Stock Catalog',
       actions: [
         // The SAP hand-off queue belongs to intake, so it sits beside the
         // catalog rather than taking a slot in the bottom bar.
@@ -39,7 +39,7 @@ class _SupervisorProductListScreenState extends State<SupervisorProductListScree
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add, size: 20),
         label: const Text(
-          'Add Products',
+          'Add Engineering Stock',
           style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
         ),
         onPressed: () async {
@@ -53,7 +53,7 @@ class _SupervisorProductListScreenState extends State<SupervisorProductListScree
         // the only way to reach them.
         actionsBuilder: (context, product, reload) => [
           ProductAction(
-            label: 'Edit Product',
+            label: 'Edit Stock',
             icon: Icons.edit_outlined,
             color: AppColors.primaryDeep,
             onSelected: () async {
@@ -71,7 +71,7 @@ class _SupervisorProductListScreenState extends State<SupervisorProductListScree
           ),
           ProductAction(
             filled: true,
-            label: 'Issue Product',
+            label: 'Issue Engineering Stock',
             icon: Icons.send_outlined,
             color: AppColors.warning,
             onSelected: () async {

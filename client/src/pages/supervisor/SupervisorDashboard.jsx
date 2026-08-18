@@ -80,7 +80,7 @@ const SupervisorDashboard = () => {
   // Every card counts the whole store; `note` is this supervisor's share of it.
   const cards = [
     {
-      title: "Total Catalog Products",
+      title: "Total Engineering Stock",
       value: metrics.totalProducts,
       icon: Boxes,
       color: "from-brand-600/10 to-brand-400/10 border-brand-500/20 text-brand-700",
@@ -270,7 +270,7 @@ const SupervisorDashboard = () => {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <h4 className="text-sm font-semibold text-slate-900 leading-tight">
-                      {issue.product?.name || "Deleted Product"}
+                      {issue.product?.name || "Deleted Engineering Stock"}
                     </h4>
                     <span className="shrink-0 bg-amber-500/10 text-amber-600 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-bold">
                       −{issue.quantity} {issue.product?.unit || ""}

@@ -59,7 +59,7 @@ void main() {
     await pumpTable(tester);
 
     expect(tester.takeException(), isNull, reason: 'nothing may overflow');
-    for (final header in ['PRODUCT', 'QTY', 'RECIPIENT', 'STATUS']) {
+    for (final header in ['ENGINEERING STOCK', 'QTY', 'RECIPIENT', 'STATUS']) {
       expect(find.text(header), findsOneWidget);
       expect(
         tester.getBottomRight(find.text(header)).dx,
@@ -99,7 +99,7 @@ void main() {
   testWidgets('a fully deleted product still renders its row', (tester) async {
     await pumpTable(tester);
 
-    expect(find.text('Deleted Product'), findsOneWidget);
+    expect(find.text('Deleted Engineering Stock'), findsOneWidget);
 
     await tester.tap(find.text('Electrical'));
     await tester.pumpAndSettle();
@@ -107,7 +107,7 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('ISS-433649'), findsOneWidget);
     // No product to open, so the sheet button is withheld.
-    expect(find.text('Product'), findsNothing);
+    expect(find.text('Engineering Stock'), findsNothing);
     expect(find.text('Return Stock'), findsOneWidget);
   });
 }

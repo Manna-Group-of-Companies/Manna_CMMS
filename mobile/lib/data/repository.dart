@@ -45,6 +45,15 @@ class StockRepository {
     return Product.fromJson(data as Map<String, dynamic>);
   }
 
+  /// Where this product's stock actually sits, company by company (ST-35).
+  ///
+  /// The catalog carries one total; stock is held per company, so this is what
+  /// turns "12 in stock" into somewhere to walk to.
+  Future<List<ProductRoomStock>> productRooms(String id) async {
+    final data = await _api.get('/products/$id/rooms');
+    return _list(data, ProductRoomStock.fromJson);
+  }
+
   // ------------------------------------------------------- intake and naming
 
   /// Composes and checks a name against SOI1/SOP1 (ST-09, ST-10).
@@ -183,13 +192,6 @@ class StockRepository {
     return _list(data, BranchRequestRecord.fromJson);
   }
 
-  /// The whole queue, as an approver sees it. Both approvers read the same
-  /// list so each can see the stage the other is holding.
-  Future<List<BranchRequestRecord>> branchRequests() async {
-    final data = await _api.get('/branch-requests');
-    return _list(data, BranchRequestRecord.fromJson);
-  }
-
   /// Raises a request against the branch's own room. Returns the new number.
   Future<String> createBranchRequest({
     required String productId,
@@ -207,21 +209,9 @@ class StockRepository {
   /// Withdraws a request the Admin has not decided yet.
   Future<void> cancelBranchRequest(String id) => _api.delete('/branch-requests/$id');
 
-  /// Stage two. Approving here completes the request and releases the stock
-  /// from the branch's room. [action] is `approve` or `reject`.
-  Future<BranchRequestRecord> decideBranchRequestAsSupervisor({
-    required String id,
-    required String action,
-    String comment = '',
-    int? approvedQuantity,
-  }) async {
-    final data = await _api.put('/branch-requests/$id/supervisor', {
-      'action': action,
-      'comment': comment,
-      'approvedQuantity': ?approvedQuantity,
-    });
-    return BranchRequestRecord.fromJson(data as Map<String, dynamic>);
-  }
+  // Both approval stages are decided in the web console. The app raises and
+  // follows a branch's own requests; it no longer decides any of them, so the
+  // queue read and the stage-two decision are not called from here.
 
   // ---------------------------------------------------------------- requests
 
@@ -354,7 +344,7 @@ class StockRepository {
       'recipient': recipient,
       'purpose': purpose,
     });
-    return _message(data, 'Product issued successfully');
+    return _message(data, 'Engineering Stock issued successfully');
   }
 
   // --------------------------------------------------- consumption and scrap
@@ -448,6 +438,22 @@ class StockRepository {
     final json = Map<String, dynamic>.from(data as Map);
     json['_id'] = kRedStockRoomId;
     return RoomInventory.fromJson(json);
+  }
+
+  /// What one product has sitting in the Red Stock Room, or null when it has
+  /// nothing there.
+  ///
+  /// Read out of the same rolled-up room as [redStockRoom]. The room carries
+  /// one row per product that has returned stock — a short list, and the only
+  /// read the API offers — so there is nothing narrower to ask for.
+  Future<RoomStockItem?> redStockForProduct(String productId) async {
+    if (productId.isEmpty) return null;
+
+    final room = await redStockRoom();
+    for (final item in room.items) {
+      if (item.productId == productId) return item;
+    }
+    return null;
   }
 
   /// A supervisor sees only their own returns; the API scopes this by role.

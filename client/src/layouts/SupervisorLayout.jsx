@@ -32,8 +32,9 @@ const SupervisorLayout = () => {
   const getPageTitle = () => {
     const path = location.pathname;
     if (path.includes("/dashboard")) return "Supervisor Dashboard";
-    if (path.includes("/products")) return "Browse Products Catalog";
+    if (path.includes("/products")) return "Browse Engineering Stock Catalog";
     if (path.includes("/requests")) return "My Requests Tracker";
+    if (path.includes("/audit")) return "Monthly Stock Audit";
     return "Supervisor Stock Manager";
   };
 

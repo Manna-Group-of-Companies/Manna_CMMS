@@ -23,7 +23,7 @@ export const issueProduct = async (req, res) => {
   try {
     // Validate inputs
     if (!productId || !quantity || quantity < 1) {
-      return res.status(400).json({ message: "Valid Product ID and Quantity (>= 1) are required" });
+      return res.status(400).json({ message: "Valid Engineering Stock ID and Quantity (>= 1) are required" });
     }
     if (!recipient || !recipient.trim()) {
       return res.status(400).json({ message: "Recipient is required" });
@@ -32,7 +32,7 @@ export const issueProduct = async (req, res) => {
     // Find product
     const product = await Product.findById(productId);
     if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({ message: "Engineering Stock not found" });
     }
 
     // Check sufficient stock
@@ -87,7 +87,7 @@ export const issueProduct = async (req, res) => {
 
     // 5. Notify admin about the issuance
     await Notification.create({
-      message: `Product issued: ${quantity} × "${product.name}" to "${recipient.trim()}" by ${req.user.name} (${issueNumber})`,
+      message: `Engineering Stock issued: ${quantity} × "${product.name}" to "${recipient.trim()}" by ${req.user.name} (${issueNumber})`,
       type: "REQUEST_CREATED",
     });
 

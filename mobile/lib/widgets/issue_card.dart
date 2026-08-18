@@ -95,7 +95,7 @@ class IssueCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      product?.name ?? 'Deleted Product',
+                      product?.name ?? 'Deleted Engineering Stock',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(

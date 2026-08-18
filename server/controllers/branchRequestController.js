@@ -66,7 +66,7 @@ export const createBranchRequest = async (req, res) => {
 
     const product = await Product.findById(productId);
     if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({ message: "Engineering Stock not found" });
     }
 
     const available = await roomQuantityFor(room._id, product._id);
@@ -317,7 +317,7 @@ export const supervisorDecideBranchRequest = async (req, res) => {
 
     const product = await Product.findById(request.product);
     if (!product) {
-      return res.status(404).json({ message: "Product no longer exists" });
+      return res.status(404).json({ message: "Engineering Stock no longer exists" });
     }
 
     // debitRoom refuses to go negative, so a room that has since been drained

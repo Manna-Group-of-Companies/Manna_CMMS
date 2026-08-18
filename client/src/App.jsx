@@ -24,6 +24,8 @@ import AdminBranchRequests from "./pages/admin/BranchRequests";
 import AdminUsers from "./pages/admin/Users";
 import AdminRecipients from "./pages/admin/Recipients";
 import AdminScrapReport from "./pages/admin/ScrapReport";
+import AdminAuditReport from "./pages/admin/AuditReport";
+import SupervisorStockAudit from "./pages/supervisor/StockAudit";
 import AdminSapHandoff from "./pages/admin/SapHandoff";
 import BranchApprovals from "./pages/supervisor/BranchApprovals";
 
@@ -64,6 +66,7 @@ function App() {
               <Route path="requests" element={<RequestManagement />} />
               <Route path="issues" element={<AdminIssueHistory />} />
               <Route path="scrap" element={<AdminScrapReport />} />
+              <Route path="audits" element={<AdminAuditReport />} />
               <Route path="sap-handoff" element={<AdminSapHandoff />} />
               <Route path="branch-requests" element={<AdminBranchRequests />} />
               <Route path="users" element={<AdminUsers />} />
@@ -82,6 +85,7 @@ function App() {
               <Route path="issues" element={<SupervisorIssueHistory />} />
               <Route path="returns" element={<MyReturns />} />
               <Route path="branch-approvals" element={<BranchApprovals />} />
+              <Route path="audit" element={<SupervisorStockAudit />} />
               <Route path="" element={<Navigate to="dashboard" replace />} />
             </Route>
 

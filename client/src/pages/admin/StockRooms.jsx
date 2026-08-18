@@ -194,7 +194,7 @@ const StockRooms = () => {
           </span>
           <input
             type="text"
-            placeholder="Search product name or code…"
+            placeholder="Search engineering stock name or code…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
@@ -214,7 +214,7 @@ const StockRooms = () => {
           </h3>
           <p className="text-xs text-slate-500">
             {search
-              ? "Try a different product name or code."
+              ? "Try a different engineering stock name or code."
               : "Approved stock requests appear here under the room they were credited to."}
           </p>
         </div>

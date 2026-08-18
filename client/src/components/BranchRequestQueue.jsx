@@ -348,7 +348,7 @@ const BranchRequestQueue = ({ stage }) => {
                       <h5 className="eyebrow">Details</h5>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <p className="kv-label">Product code</p>
+                          <p className="kv-label">Engineering Stock code</p>
                           <p className="kv-value">{request.productCode}</p>
                         </div>
                         <div>

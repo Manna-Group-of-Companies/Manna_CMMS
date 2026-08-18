@@ -44,7 +44,7 @@ void main() {
           actionsOf: (context, product) => [
             ProductAction(
               filled: true,
-              label: 'Issue Product',
+              label: 'Issue Engineering Stock',
               icon: Icons.send_outlined,
               onSelected: onIssue ?? () {},
             ),
@@ -59,7 +59,7 @@ void main() {
     await pumpTable(tester);
 
     expect(tester.takeException(), isNull, reason: 'nothing may overflow');
-    for (final header in ['PRODUCT', 'STOCK', 'ROOM']) {
+    for (final header in ['ENGINEERING STOCK', 'STOCK', 'ROOM']) {
       expect(find.text(header), findsOneWidget);
       expect(
         tester.getBottomRight(find.text(header)).dx,
@@ -94,11 +94,11 @@ void main() {
     // test font's square glyphs, which is the sheet's business, not the
     // table's.
     tester.takeException();
-    expect(find.text('Product Specifications'), findsOneWidget);
+    expect(find.text('Engineering Stock Specifications'), findsOneWidget);
     expect(find.text('Colour-calibrated review monitor.'), findsOneWidget);
 
     // The role's actions come with the sheet.
-    await tester.tap(find.text('Issue Product'));
+    await tester.tap(find.text('Issue Engineering Stock'));
     await tester.pumpAndSettle();
     expect(issued, isTrue);
   });

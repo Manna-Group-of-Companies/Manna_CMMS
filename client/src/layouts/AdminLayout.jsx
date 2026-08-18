@@ -34,9 +34,12 @@ const AdminLayout = () => {
   // has an entry so none of them falls back to a heading meant for another.
   const PAGE_META = [
     ["/admin/dashboard", "Dashboard", "Stock, requests and alerts at a glance"],
-    ["/admin/products", "Products & Stock", "The catalog and what is on the shelves"],
+    ["/admin/products", "Engineering Stock", "The catalog and what is on the shelves"],
     ["/admin/requests", "Request Control", "Approve, reject or hold supervisor requests"],
-    ["/admin/issues", "Issue History", "Every product issued, by every supervisor"],
+    ["/admin/issues", "Issue History", "Every engineering stock item issued, by every supervisor"],
+    ["/admin/scrap", "Scrap & Consumption", "Value written off across the stores"],
+    ["/admin/audits", "Stock Audits", "Monthly counts, the score each store room earned, and the history"],
+    ["/admin/sap-handoff", "SAP Hand-off", "Names waiting to be created in SAP"],
     ["/admin/branch-requests", "Branch Requests", "First-stage approval for branch orders"],
     ["/admin/users", "Users & PINs", "Accounts and the PINs they sign in with"],
   ];

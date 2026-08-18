@@ -82,19 +82,19 @@ class _BranchRequestFormState extends State<_BranchRequestForm> {
 
   /// The dropdown carries product ids; this is what the row reads as.
   String _labelForProduct(String id) {
-    if (id == _kNoProduct) return 'Select a product from your company';
+    if (id == _kNoProduct) return 'Select engineering stock from your company';
     for (final item in _inStock) {
       if (item.productId == id) {
         return '${item.name} — ${item.quantity} ${item.unit}';
       }
     }
-    return 'Unknown product';
+    return 'Unknown engineering stock';
   }
 
   Future<void> _submit() async {
     final product = _selected;
     if (product == null) {
-      setState(() => _error = 'Choose a product to request');
+      setState(() => _error = 'Choose engineering stock to request');
       return;
     }
     if (_quantity < 1 || _quantity > product.quantity) {
@@ -157,7 +157,7 @@ class _BranchRequestFormState extends State<_BranchRequestForm> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Apply for Product',
+                        'Apply for Engineering Stock',
                         style: TextStyle(
                           color: AppColors.textStrong,
                           fontSize: 17,
@@ -199,7 +199,7 @@ class _BranchRequestFormState extends State<_BranchRequestForm> {
                         const SizedBox(height: 14),
                       ],
 
-                      const _FieldLabel('Product'),
+                      const _FieldLabel('Engineering Stock'),
                       const SizedBox(height: 6),
                       if (_inStock.isEmpty)
                         const Text(

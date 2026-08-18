@@ -95,7 +95,7 @@ const useNameCheck = (payload, { enabled = true, delay = 400 } = {}) => {
 /**
  * The compliance readout for a name as it currently stands.
  *
- * Shown under the Product Name field. Silent while the field is empty — an
+ * Shown under the Engineering Stock Name field. Silent while the field is empty — an
  * untouched form should not open covered in warnings.
  */
 export const NameComplianceNotice = ({ name }) => {

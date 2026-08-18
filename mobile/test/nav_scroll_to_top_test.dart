@@ -152,6 +152,6 @@ void main() {
     await tester.pumpAndSettle();
 
     // Left the stock screen rather than scrolling it.
-    expect(find.text('My Product Requests'), findsWidgets);
+    expect(find.text('My Engineering Stock Requests'), findsWidgets);
   });
 }

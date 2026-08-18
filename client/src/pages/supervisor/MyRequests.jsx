@@ -67,9 +67,9 @@ const MyRequests = () => {
 
   const getRequestTypeStyle = (type) => {
     switch (type) {
-      case "Add Product":
+      case "Add Engineering Stock":
         return "bg-brand-500/10 text-brand-700 border border-brand-500/20";
-      case "Edit Product":
+      case "Edit Stock":
         return "bg-indigo-500/10 text-indigo-600 border border-indigo-500/20";
       case "Stock In":
         return "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20";
@@ -177,7 +177,7 @@ const MyRequests = () => {
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium text-xs uppercase tracking-wider">
                   <th className="py-4 px-6">Request Number</th>
                   <th className="py-4 px-6">Type</th>
-                  <th className="py-4 px-6">Target Product</th>
+                  <th className="py-4 px-6">Target Engineering Stock</th>
                   <th className="py-4 px-6">Requested By</th>
                   <th className="py-4 px-6">Requested On</th>
                   <th className="py-4 px-6">Approval Status</th>

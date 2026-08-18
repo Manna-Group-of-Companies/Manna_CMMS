@@ -81,7 +81,7 @@ const AdminDashboard = () => {
 
   const cardData = [
     {
-      title: "Catalog Products",
+      title: "Engineering Stock",
       value: metrics.totalProducts,
       icon: Boxes,
       chip: "bg-brand-50 text-brand-700 border-brand-500/20",
@@ -113,7 +113,7 @@ const AdminDashboard = () => {
       hint: "All time",
     },
     {
-      title: "Low Stock Products",
+      title: "Low Engineering Stock",
       value: metrics.lowStockProductsCount,
       icon: AlertTriangle,
       link: "/admin/products",
@@ -216,7 +216,7 @@ const AdminDashboard = () => {
                 <thead>
                   <tr>
                     <th>Request #</th>
-                    <th>Product</th>
+                    <th>Engineering Stock</th>
                     <th>Type</th>
                     <th>Supervisor</th>
                     <th className="text-right">Status</th>
@@ -242,12 +242,12 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* Panel 2: Low Stock Products Alert */}
+        {/* Panel 2: Low Engineering Stock Alert */}
         <div className="card flex flex-col overflow-hidden">
           <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-200">
             <h3 className="section-title">
               <AlertTriangle className="h-[18px] w-[18px] text-rose-600 shrink-0" />
-              Low Stock Products
+              Low Engineering Stock
               <span className="badge badge-slate badge-soft">
                 {metrics.lowStockProductsCount}
               </span>
@@ -265,14 +265,14 @@ const AdminDashboard = () => {
             {metrics.lowStockProducts.length === 0 ? (
               <div className="empty-inline m-5">
                 <CheckCircle className="h-8 w-8 mb-2 text-emerald-600 opacity-60" />
-                <p className="text-[13px]">All products are adequately stocked.</p>
+                <p className="text-[13px]">All engineering stock is adequately stocked.</p>
               </div>
             ) : (
               <table className="tbl tbl-compact">
                 <thead>
                   <tr>
                     <th>Code</th>
-                    <th>Product</th>
+                    <th>Engineering Stock</th>
                     <th>Company</th>
                     <th className="text-center">Qty / Min</th>
                     <th className="text-right">Severity</th>

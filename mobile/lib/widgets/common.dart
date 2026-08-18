@@ -131,8 +131,8 @@ class RequestTypeBadge extends StatelessWidget {
   final String type;
 
   static Color colorOf(String type) => switch (type) {
-        'Add Product' => AppColors.primaryDeep,
-        'Edit Product' => AppColors.accent,
+        'Add Engineering Stock' => AppColors.primaryDeep,
+        'Edit Stock' => AppColors.accent,
         'Stock In' => AppColors.success,
         'Stock Out' => AppColors.danger,
         _ => AppColors.info,

@@ -57,7 +57,7 @@ export const returnIssuedStock = async (req, res) => {
 
     const product = await Product.findById(issue.product);
     if (!product) {
-      return res.status(404).json({ message: "Product no longer exists" });
+      return res.status(404).json({ message: "Engineering Stock no longer exists" });
     }
 
     const restockItem = await RestockItem.create({

@@ -120,7 +120,7 @@ const MyRequests = () => {
             <ClipboardList className="h-6 w-6 text-brand-700" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-slate-900 tracking-tight">My Product Requests</h3>
+            <h3 className="text-xl font-bold text-slate-900 tracking-tight">My Engineering Stock Requests</h3>
             <p className="text-xs text-slate-600 mt-1">
               Admin approval first, then Supervisor approval completes the request.
             </p>
@@ -259,7 +259,7 @@ const MyRequests = () => {
                       </h5>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <p className="text-slate-500">Product code</p>
+                          <p className="text-slate-500">Engineering Stock code</p>
                           <p className="font-semibold text-slate-900">{request.productCode}</p>
                         </div>
                         <div>

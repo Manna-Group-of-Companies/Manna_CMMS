@@ -24,6 +24,7 @@ import stockRoomRoutes from "./routes/stockRoomRoutes.js";
 import recipientRoutes from "./routes/recipientRoutes.js";
 import branchRequestRoutes from "./routes/branchRequestRoutes.js";
 import disposalRoutes from "./routes/disposalRoutes.js";
+import auditRoutes from "./routes/auditRoutes.js";
 
 dotenv.config();
 
@@ -93,6 +94,9 @@ app.use("/api/recipients", recipientRoutes);
 app.use("/api/branch-requests", branchRequestRoutes);
 // Consumption and scrap logs, and the scrap value report.
 app.use("/api/disposals", disposalRoutes);
+// Monthly stock counts, the score each store room earned, and the history the
+// Admin reports off.
+app.use("/api/audits", auditRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {

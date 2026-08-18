@@ -22,7 +22,7 @@ class ProductTable extends StatelessWidget {
   /// sheet renders in its footer.
   final List<ProductAction> Function(BuildContext context, Product product) actionsOf;
 
-  /// Room under the last row for the "Add Products" button to float over.
+  /// Room under the last row for the "Add Engineering Stock" button to float over.
   final double bottomInset;
 
   static Color _stockColor(Product product) => product.isOutOfStock
@@ -38,7 +38,7 @@ class ProductTable extends StatelessWidget {
       idOf: (product) => product.id,
       bottomInset: bottomInset,
       columns: const [
-        AppTableColumn('Product', flex: 6),
+        AppTableColumn('Engineering Stock', flex: 6),
         AppTableColumn('Stock', width: 62, center: true),
         AppTableColumn('Room', flex: 3),
       ],

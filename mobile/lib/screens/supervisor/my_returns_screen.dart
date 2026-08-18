@@ -358,7 +358,7 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
       onRowLongPress: (_, item) => _toggle(item),
       onRowTap: _selecting ? (_, item) => _toggle(item) : null,
       columns: const [
-        AppTableColumn('Product', flex: 6),
+        AppTableColumn('Engineering Stock', flex: 6),
         AppTableColumn('Qty', width: 52, center: true),
         AppTableColumn('Status', width: 82, center: true),
       ],

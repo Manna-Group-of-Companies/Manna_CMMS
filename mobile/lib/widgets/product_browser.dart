@@ -46,6 +46,9 @@ class _ProductBrowserState extends State<ProductBrowser>
   List<Product> _products = const [];
   List<String> _categories = const [];
   List<String> _subCategories = const [];
+  /// The companies to filter by (ST-33), read from the API so a company added
+  /// on the console can be filtered on without shipping a new app.
+  List<String> _rooms = const [];
   bool _loading = true;
 
   String _search = '';
@@ -59,6 +62,7 @@ class _ProductBrowserState extends State<ProductBrowser>
     super.initState();
     _loadProducts();
     _loadCategories();
+    _loadRooms();
     _loadSubCategories(_anyCategory);
     // The Admin edits products and moves stock on their console, so the
     // catalog re-reads the API rather than showing only the first fetch.
@@ -96,7 +100,7 @@ class _ProductBrowserState extends State<ProductBrowser>
       if (mounted) setState(() => _products = products);
     } catch (error) {
       debugPrint('Error loading products: $error');
-      if (!silent) Toast.error('Could not load product list');
+      if (!silent) Toast.error('Could not load engineering stock list');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -108,6 +112,18 @@ class _ProductBrowserState extends State<ProductBrowser>
       if (mounted) setState(() => _categories = categories);
     } catch (error) {
       debugPrint('Error loading categories: $error');
+    }
+  }
+
+  Future<void> _loadRooms() async {
+    try {
+      final rooms = await context.read<StockRepository>().stockRooms();
+      if (mounted) {
+        setState(() => _rooms = rooms.map((room) => room.name).toList());
+      }
+    } catch (error) {
+      // The filter simply offers "All Companies" — the catalog is unaffected.
+      debugPrint('Error loading companies: $error');
     }
   }
 
@@ -153,14 +169,14 @@ class _ProductBrowserState extends State<ProductBrowser>
                           padding: const EdgeInsets.all(16),
                           children: const [
                             EmptyState(
-                              title: 'No products found',
+                              title: 'No engineering stock found',
                               message: 'Try adjusting your search query or filters.',
                             ),
                           ],
                         )
                       : ProductTable(
                           products: _products,
-                          // Clears the "Add Products" button floating over
+                          // Clears the "Add Engineering Stock" button floating over
                           // the bottom of the list.
                           bottomInset: 88,
                           actionsOf: (context, product) =>
@@ -374,7 +390,7 @@ class _ProductBrowserState extends State<ProductBrowser>
                       _SheetField(
                         label: 'Company',
                         value: storeRoom,
-                        items: const [_anyRoom, 'Manna Rubber Park', 'Consumables Room'],
+                        items: [_anyRoom, ..._rooms],
                         onChanged: (value) => setSheetState(() => storeRoom = value),
                       ),
                       const SizedBox(height: 12),
@@ -389,7 +405,7 @@ class _ProductBrowserState extends State<ProductBrowser>
                         width: double.infinity,
                         child: FilledButton(
                           onPressed: () => Navigator.of(sheetContext).pop(true),
-                          child: const Text('Show products'),
+                          child: const Text('Show engineering stock'),
                         ),
                       ),
                     ],

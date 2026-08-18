@@ -122,7 +122,7 @@ class _BranchRequestsScreenState extends State<BranchRequestsScreen>
     final visible = _requests.where(_matches).toList();
 
     return AppShell(
-      title: 'My Product Requests',
+      title: 'My Engineering Stock Requests',
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _newRequest,
         backgroundColor: AppColors.primary,
@@ -394,7 +394,7 @@ class _Details extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: SpecTile(label: 'Product code', value: request.productCode),
+              child: SpecTile(label: 'Engineering Stock code', value: request.productCode),
             ),
             Expanded(
               child: SpecTile(

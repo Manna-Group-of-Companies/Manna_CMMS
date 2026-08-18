@@ -193,7 +193,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!form.name.trim()) return showToast("Product name is required", "error");
+    if (!form.name.trim()) return showToast("Engineering Stock name is required", "error");
     if (!form.category.trim()) return showToast("Category is required", "error");
 
     const quantity = Number(form.quantity);
@@ -255,7 +255,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       // decide; the retry carries the matching override.
       if (error.response?.status === 422 && refusal?.code === "NAME_NOT_COMPLIANT") {
         setNameIssues(refusal.issues || []);
-        showToast("Check the product name before saving", "error");
+        showToast("Check the engineering stock name before saving", "error");
         return;
       }
       if (error.response?.status === 409 && refusal?.code === "POSSIBLE_DUPLICATE") {
@@ -265,7 +265,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       }
 
       console.error("Error saving product:", error);
-      showToast(refusal?.message || "Failed to save product", "error");
+      showToast(refusal?.message || "Failed to save engineering stock", "error");
     } finally {
       setSubmitting(false);
     }
@@ -279,7 +279,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       <div className="modal-head">
         <h3 className="modal-title truncate">
           <Boxes className="h-[18px] w-[18px] text-brand-700 shrink-0" />
-          <span className="truncate">{isEdit ? `Edit ${product.name}` : "Add Product"}</span>
+          <span className="truncate">{isEdit ? `Edit ${product.name}` : "Add Engineering Stock"}</span>
         </h3>
         <button onClick={onClose} className="modal-close" aria-label="Close">
           <X className="h-5 w-5" />
@@ -318,7 +318,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2">
             {/* No asterisk on an edit: nothing is being asked for. */}
-            <label className={label}>Product Name{isEdit ? "" : " *"}</label>
+            <label className={label}>Engineering Stock Name{isEdit ? "" : " *"}</label>
             {isEdit ? (
               <>
                 {/* Shown, never typed over. The name is how the catalog, the
@@ -404,7 +404,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
             <>
               <div>
                 <label className={label}>
-                  Product Code{" "}
+                  Engineering Stock Code{" "}
                   <span className="font-normal text-slate-500">(auto if blank)</span>
                 </label>
                 <input type="text" value={form.code} onChange={set("code")} className={field} />
@@ -498,7 +498,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
             </h4>
             <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
               {[
-                ["Product Code", product.code, "fixed identity"],
+                ["Engineering Stock Code", product.code, "fixed identity"],
                 ["Brand", product.brand || "—", "raise a new item if it differs"],
                 ["Unit", product.unit, "fixed identity"],
                 [
@@ -592,7 +592,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
             className="btn btn-primary"
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            {isEdit ? "Save Changes" : "Add Product"}
+            {isEdit ? "Save Changes" : "Add Engineering Stock"}
           </button>
         </div>
       </form>

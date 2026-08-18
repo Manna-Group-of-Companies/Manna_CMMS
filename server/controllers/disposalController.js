@@ -130,7 +130,7 @@ export const recordDisposal = async (req, res) => {
 
     const product = await Product.findById(source.product);
     if (!product) {
-      return res.status(404).json({ message: "Product no longer exists" });
+      return res.status(404).json({ message: "Engineering Stock no longer exists" });
     }
 
     const disposal = await StockDisposal.create({

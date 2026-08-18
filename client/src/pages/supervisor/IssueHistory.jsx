@@ -235,8 +235,8 @@ const SupervisorIssueHistory = () => {
               : "Nothing is still out with a recipient"}
           </h3>
           <p className="text-xs text-slate-500">
-            Fully returned issues drop off this list. Use the "Issue Product" button on
-            the Products catalog to issue items.
+            Fully returned issues drop off this list. Use the "Issue Engineering Stock" button on
+            the Engineering Stock catalog to issue items.
           </p>
         </div>
       ) : (
@@ -246,7 +246,7 @@ const SupervisorIssueHistory = () => {
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium text-xs uppercase tracking-wider">
                   <th className="py-4 px-6">Issue #</th>
-                  <th className="py-4 px-6">Product</th>
+                  <th className="py-4 px-6">Engineering Stock</th>
                   <th className="py-4 px-6 text-center">Qty Issued</th>
                   <th className="py-4 px-6">Issued By</th>
                   <th className="py-4 px-6">Recipient</th>
@@ -283,7 +283,7 @@ const SupervisorIssueHistory = () => {
                           />
                           <div>
                             <div className="font-bold text-slate-900 group-hover:text-brand-700 transition-colors">
-                              {issue.product?.name || "Deleted Product"}
+                              {issue.product?.name || "Deleted Engineering Stock"}
                             </div>
                             <div className="text-[10px] font-mono text-brand-700">
                               {issue.product?.code || "—"} • {issue.product?.storeRoom || ""}
@@ -417,7 +417,7 @@ const SupervisorIssueHistory = () => {
                 />
                 <div className="text-xs">
                   <h4 className="text-sm font-bold text-slate-900">
-                    {returnIssue.product?.name || "Deleted Product"}
+                    {returnIssue.product?.name || "Deleted Engineering Stock"}
                   </h4>
                   <span className="font-mono text-brand-700 block mt-0.5">
                     {returnIssue.product?.code || "—"}
@@ -550,7 +550,7 @@ const SupervisorIssueHistory = () => {
                   />
                   <div className="text-xs">
                     <h4 className="text-sm font-bold text-slate-900">
-                      {issue.product?.name || "Deleted Product"}
+                      {issue.product?.name || "Deleted Engineering Stock"}
                     </h4>
                     <span className="font-mono text-brand-700 block mt-0.5">
                       {issue.product?.code || "—"}
@@ -677,14 +677,14 @@ const SupervisorIssueHistory = () => {
         );
       })()}
 
-      {/* Product Details Modal */}
+      {/* Engineering Stock Details Modal */}
       {selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
           <div className="glass-premium w-full max-w-lg rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
               <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
                 <Boxes className="h-5 w-5 text-brand-700" />
-                Product Specifications
+                Engineering Stock Specifications
               </h3>
               <button
                 onClick={() => setSelectedProduct(null)}

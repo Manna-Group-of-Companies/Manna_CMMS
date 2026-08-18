@@ -38,7 +38,7 @@ const BranchLayout = () => {
 
   const roomName = user.stockRoom?.name || "Branch";
   const pageTitle = location.pathname.includes("/requests")
-    ? `${roomName} — My Product Requests`
+    ? `${roomName} — My Engineering Stock Requests`
     : `${roomName} Stock`;
 
   return (

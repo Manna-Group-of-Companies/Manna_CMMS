@@ -167,9 +167,9 @@ class _SupervisorIssueHistoryScreenState
                                   ? 'Nothing you issued is still out'
                                   : 'Nothing is still out with a recipient',
                               message:
-                                  'Fully returned issues drop off this list. Open a '
-                                  'product in the Products catalog and tap '
-                                  '"Issue Product" to issue items.',
+                                  'Fully returned issues drop off this list. Open an '
+                                  'engineering stock item in the Engineering Stock catalog and tap '
+                                  '"Issue Engineering Stock" to issue items.',
                             ),
                           ],
                         )

@@ -7,7 +7,7 @@ import '../data/repository.dart';
 import '../models/models.dart';
 import 'common.dart';
 
-/// A single action offered in the details sheet's footer (Issue Product,
+/// A single action offered in the details sheet's footer (Issue Engineering Stock,
 /// Request Stock, ...). The catalog card itself carries no action menu — every
 /// operation is reached by opening the product first.
 class ProductAction {
@@ -30,7 +30,7 @@ class ProductAction {
   final bool filled;
 }
 
-/// "Product Specifications" modal, shared by every screen that shows a product.
+/// "Engineering Stock Specifications" modal, shared by every screen that shows a product.
 /// Callers pass the [actions] their role is allowed to perform; they render as
 /// buttons in the footer.
 Future<void> showProductDetails(
@@ -59,12 +59,41 @@ class _ProductDetailsSheet extends StatefulWidget {
 class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
   late Product _product = widget.product;
 
+  /// What this product has waiting in the Red Stock Room, once that read
+  /// lands. Null covers both "nothing returned" and "not read yet", which show
+  /// the same way: the line is simply absent.
+  RoomStockItem? _redStock;
+
+  /// Where the stock actually is, company by company (ST-35). The catalog
+  /// carries one total; stock is kept per company, so the total on its own
+  /// does not say which shelf to walk to.
+  List<ProductRoomStock> _rooms = const [];
+
   @override
   void initState() {
     super.initState();
     // Issue history populates only a handful of product fields; fetch the full
     // document so the specification grid is complete.
     if (_product.isPartial && _product.id.isNotEmpty) _loadFullProduct();
+    _loadRedStock();
+    _loadRooms();
+  }
+
+  Future<void> _loadRooms() async {
+    if (_product.id.isEmpty) return;
+
+    try {
+      final rooms = await context.read<StockRepository>().productRooms(_product.id);
+      // Empty companies are dropped: a list of zeroes is noise on a lookup, and
+      // a company holding none of this item is not somewhere to be sent.
+      if (mounted) {
+        setState(() =>
+            _rooms = rooms.where((room) => room.quantity > 0).toList());
+      }
+    } catch (_) {
+      // The home company chip and the total are still shown; a failed read
+      // costs the breakdown, not the sheet.
+    }
   }
 
   Future<void> _loadFullProduct() async {
@@ -73,6 +102,24 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
       if (mounted) setState(() => _product = full);
     } catch (_) {
       // Keep the partial record — the sheet degrades to what we already have.
+    }
+  }
+
+  /// Stock that has been handed back but not yet merged into a company sits in
+  /// neither place the grid above reports: it is out of the room it was issued
+  /// from and not yet back in stock. Saying so here is what keeps somebody from
+  /// re-ordering an item the store already has in hand.
+  Future<void> _loadRedStock() async {
+    if (_product.id.isEmpty) return;
+
+    try {
+      final held =
+          await context.read<StockRepository>().redStockForProduct(_product.id);
+      if (mounted) setState(() => _redStock = held);
+    } catch (_) {
+      // A Branch account cannot read the Red Stock Room at all, and a failed
+      // read is not worth a toast on a sheet opened to look something up — the
+      // line stays off and the rest of the sheet is unaffected.
     }
   }
 
@@ -102,7 +149,7 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
-                      'Product Specifications',
+                      'Engineering Stock Specifications',
                       style: TextStyle(
                         color: AppColors.textStrong,
                         fontSize: 16,
@@ -204,6 +251,22 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                       SpecTile(label: 'Min Stock Limit', value: '${p.minStock} $unit'),
                     ],
                   ),
+                  // Where those units actually are (ST-35). Stock is kept per
+                  // company, so the total above is only a sum — this is the
+                  // part somebody walks to a shelf with. Shown once there is
+                  // more than one company holding it; a single company is
+                  // already the chip beside the name.
+                  if (_rooms.length > 1) ...[
+                    const SizedBox(height: 12),
+                    _CompanyBreakdown(rooms: _rooms, unit: unit, rack: p.rackNumber),
+                  ],
+                  // Only when there is something there. An item with nothing
+                  // returned says nothing, rather than carrying a "0 Pcs" line
+                  // on every product in the catalog.
+                  if (_redStock case final held? when held.quantity > 0) ...[
+                    const SizedBox(height: 12),
+                    _RedStockLine(held: held, fallbackUnit: unit),
+                  ],
                   const SizedBox(height: 12),
                   Container(
                     width: double.infinity,
@@ -282,6 +345,144 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// How much of this product is held in the Red Stock Room.
+///
+/// Marked out in the same accent the Red Stock Room screen uses, so the two
+/// read as the same place. It is stock the store holds but cannot issue yet —
+/// it counts towards neither the current stock above nor any company's shelf
+/// until the merge puts it back.
+/// Which company holds how much of this item, and where on the floor (ST-35).
+///
+/// Stock is kept separately per company, so an item can read "40 Pcs" while no
+/// single company has more than fifteen. Somebody sent to fetch twenty needs to
+/// know that before they walk.
+class _CompanyBreakdown extends StatelessWidget {
+  const _CompanyBreakdown({
+    required this.rooms,
+    required this.unit,
+    required this.rack,
+  });
+
+  final List<ProductRoomStock> rooms;
+  final String unit;
+
+  /// The rack the item sits on. One number on the product, so it is shown
+  /// against the whole breakdown rather than repeated per company.
+  final String rack;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceMuted,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warehouse_outlined, size: 16, color: AppColors.textMuted),
+              const SizedBox(width: 9),
+              const Expanded(
+                child: Text(
+                  'Held by company',
+                  style: TextStyle(
+                    color: AppColors.textBody,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (rack.isNotEmpty)
+                Text(
+                  'Rack $rack',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final room in rooms)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      room.stockRoom,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.textBody, fontSize: 12.5),
+                    ),
+                  ),
+                  Text(
+                    '${room.quantity} $unit',
+                    style: const TextStyle(
+                      color: AppColors.textStrong,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RedStockLine extends StatelessWidget {
+  const _RedStockLine({required this.held, required this.fallbackUnit});
+
+  final RoomStockItem held;
+
+  /// The product's own unit, used when the returned batch did not record one.
+  final String fallbackUnit;
+
+  @override
+  Widget build(BuildContext context) {
+    final unit = held.unit.isEmpty ? fallbackUnit : held.unit;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.accent.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.30)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.assignment_return_outlined,
+              size: 16, color: AppColors.accent),
+          const SizedBox(width: 9),
+          const Expanded(
+            child: Text(
+              'In Red Stock',
+              style: TextStyle(
+                color: AppColors.textBody,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Text(
+            '${held.quantity} $unit',
+            style: const TextStyle(
+              color: AppColors.accent,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }

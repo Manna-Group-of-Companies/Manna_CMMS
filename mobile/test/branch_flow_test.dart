@@ -8,15 +8,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:stockmaster/core/api_client.dart';
 import 'package:stockmaster/main.dart';
 
-/// Drives the branch request workflow against a mocked transport:
-/// Branch submits → (Admin approves elsewhere) → Supervisor completes it.
+/// Drives the branch portal against a mocked transport: a branch raises a
+/// request against its own room and follows it through the stages.
+///
+/// Both approval stages are decided in the web console, so nothing here
+/// approves anything — the app only raises, follows and withdraws.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late List<String> requested;
   late List<Map<String, dynamic>> posted;
 
-  /// The one request the mocked server holds, so a decision can move it on.
+  /// The one request the mocked server holds, sitting at stage two.
   late Map<String, dynamic> stored;
 
   Map<String, dynamic> branchUser(String email) => {
@@ -27,14 +30,7 @@ void main() {
         'stockRoom': {'_id': 'room1', 'name': 'Engineer Room'},
       };
 
-  Map<String, dynamic> supervisorUser(String email) => {
-        '_id': 'u1',
-        'name': 'Sam Store',
-        'email': email,
-        'role': 'Supervisor',
-      };
-
-  ApiClient buildClient({String role = 'Branch'}) {
+  ApiClient buildClient() {
     requested = [];
     posted = [];
     stored = {
@@ -90,15 +86,10 @@ void main() {
       switch (path) {
         case '/api/auth/login':
           // The name identifies the account now; the mock accepts any PIN.
-          final user = role == 'Branch'
-              ? branchUser('branch@stock.com')
-              : supervisorUser('supervisor@stock.com');
-          return ok({...user, 'token': 'test-token'});
+          return ok({...branchUser('branch@stock.com'), 'token': 'test-token'});
 
         case '/api/auth/me':
-          return ok(role == 'Branch'
-              ? branchUser('branch@stock.com')
-              : supervisorUser('supervisor@stock.com'));
+          return ok(branchUser('branch@stock.com'));
 
         case '/api/notifications':
           return ok(<Map<String, dynamic>>[]);
@@ -143,25 +134,6 @@ void main() {
             ],
           });
 
-        case '/api/dashboard/supervisor':
-          return ok({
-            'totalProducts': 42,
-            'pendingRequests': 0,
-            'approvedRequests': 0,
-            'rejectedRequests': 0,
-            'lowStockProductsCount': 0,
-            'branchPendingSupervisor': 1,
-            'todayActivity': <Map<String, dynamic>>[],
-          });
-
-        // A supervisor lands on the catalog before tapping through to the
-        // approvals tab.
-        case '/api/products':
-          return ok(<Map<String, dynamic>>[]);
-
-        case '/api/products/categories':
-          return ok(<String>[]);
-
         case '/api/branch-requests/mine':
         case '/api/branch-requests':
           if (request.method == 'POST') {
@@ -173,19 +145,6 @@ void main() {
             );
           }
           return ok([stored]);
-
-        case '/api/branch-requests/r1/supervisor':
-          final payload = jsonDecode(request.body) as Map<String, dynamic>;
-          posted.add(payload);
-          stored = {
-            ...stored,
-            'status': payload['action'] == 'approve' ? 'Approved' : 'Rejected',
-            'approvedQuantity': payload['approvedQuantity'] ?? 4,
-            'supervisor': {'name': 'Sam Store'},
-            'supervisorComments': payload['comment'],
-            'supervisorDecidedAt': '2026-08-13T10:00:00.000Z',
-          };
-          return ok(stored);
       }
 
       return http.Response(jsonEncode({'message': 'Unexpected $path'}), 404);
@@ -250,7 +209,7 @@ void main() {
     await tester.tap(apply);
     await tester.pumpAndSettle();
 
-    expect(find.text('Apply for Product'), findsOneWidget);
+    expect(find.text('Apply for Engineering Stock'), findsOneWidget);
     expect(
       find.text('Goes to the Admin first, then to the Supervisor for final approval.'),
       findsOneWidget,
@@ -292,59 +251,5 @@ void main() {
     expect(find.text('"Stock confirmed"'), findsWidgets);
 
     expect(requested, contains('GET /api/branch-requests/mine'));
-  });
-
-  testWidgets('supervisor completes stage two from the phone', (tester) async {
-    await tester.pumpWidget(
-      StockMasterApp(apiClient: buildClient(role: 'Supervisor')),
-    );
-    await tester.pumpAndSettle();
-    await signIn(tester, 'Sam Store');
-
-    await tester.tap(find.text('Approvals'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Final approval releases the stock'), findsOneWidget);
-    expect(find.text('#BRQ-100200'), findsOneWidget);
-
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Remark (required to reject)'),
-      'Released to branch',
-    );
-    await tester.ensureVisible(find.text('Approve & Release'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Approve & Release'));
-    await tester.pumpAndSettle();
-
-    expect(requested, contains('PUT /api/branch-requests/r1/supervisor'));
-    final decision = posted.firstWhere((p) => p.containsKey('action'));
-    expect(decision['action'], 'approve');
-    expect(decision['comment'], 'Released to branch');
-    expect(decision['approvedQuantity'], 4);
-
-    // Decided, so it leaves this approver's queue and lands under Completed.
-    expect(find.text('#BRQ-100200'), findsNothing);
-    await tester.tap(find.text('Completed'));
-    await tester.pumpAndSettle();
-    expect(find.text('APPROVED — COMPLETED'), findsOneWidget);
-  });
-
-  testWidgets('rejecting without a reason is refused before it is sent',
-      (tester) async {
-    await tester.pumpWidget(
-      StockMasterApp(apiClient: buildClient(role: 'Supervisor')),
-    );
-    await tester.pumpAndSettle();
-    await signIn(tester, 'Sam Store');
-
-    await tester.tap(find.text('Approvals'));
-    await tester.pumpAndSettle();
-
-    await tester.ensureVisible(find.text('Reject'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Reject'));
-    await tester.pumpAndSettle();
-
-    expect(requested, isNot(contains('PUT /api/branch-requests/r1/supervisor')));
   });
 }

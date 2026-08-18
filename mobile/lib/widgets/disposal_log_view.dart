@@ -145,7 +145,7 @@ class _DisposalLogViewState extends State<DisposalLogView> {
       items: visible,
       idOf: (item) => item.id,
       columns: const [
-        AppTableColumn('Product', flex: 6),
+        AppTableColumn('Engineering Stock', flex: 6),
         AppTableColumn('Qty', width: 52, center: true),
         AppTableColumn('Type', width: 78, center: true),
       ],

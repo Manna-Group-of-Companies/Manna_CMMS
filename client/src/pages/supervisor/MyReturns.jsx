@@ -276,7 +276,7 @@ const MyReturns = () => {
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium text-xs uppercase tracking-wider">
                   <th className="py-4 px-6">Return #</th>
-                  <th className="py-4 px-6">Product</th>
+                  <th className="py-4 px-6">Engineering Stock</th>
                   <th className="py-4 px-6 text-center">Qty</th>
                   <th className="py-4 px-6 text-center">Condition</th>
                   <th className="py-4 px-6">Returned By</th>

@@ -60,14 +60,14 @@ class IssueTable extends StatelessWidget {
       items: issues,
       idOf: (issue) => issue.id,
       columns: const [
-        AppTableColumn('Product', flex: 6),
+        AppTableColumn('Engineering Stock', flex: 6),
         AppTableColumn('Qty', width: 52, center: true),
         AppTableColumn('Recipient', flex: 3),
         AppTableColumn('Status', width: 74, center: true),
       ],
       cellsOf: (context, issue) => [
         TableTitleCell(
-          title: issue.product?.name ?? 'Deleted Product',
+          title: issue.product?.name ?? 'Deleted Engineering Stock',
           subtitle: issue.product?.code ?? '—',
           imageUrl: issue.product?.image ?? '',
         ),
@@ -139,7 +139,7 @@ class IssueTable extends StatelessWidget {
           actions: [
             if (issue.product != null)
               TableActionButton(
-                label: 'Product',
+                label: 'Engineering Stock',
                 icon: Icons.inventory_2_outlined,
                 color: AppColors.primaryDeep,
                 onPressed: () => showProductDetails(context, issue.product!),

@@ -195,7 +195,7 @@ class _RoomInventoryViewState extends State<RoomInventoryView>
                                   ? 'Approved stock requests appear here under the room '
                                       'they were credited to, and returned stock under '
                                       'the Red Stock Room.'
-                                  : 'Try a different product name or code.',
+                                  : 'Try a different engineering stock name or code.',
                               icon: Icons.warehouse_outlined,
                             ),
                           ],
@@ -270,8 +270,8 @@ class _RoomSection extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         _isRedStock
-                            ? '${room.itemCount} product(s) • returned stock'
-                            : '${room.itemCount} product(s)',
+                            ? '${room.itemCount} item(s) • returned stock'
+                            : '${room.itemCount} item(s)',
                         style: const TextStyle(
                           color: AppColors.textMuted,
                           fontSize: 11,

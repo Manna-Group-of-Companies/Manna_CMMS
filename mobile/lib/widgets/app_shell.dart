@@ -23,7 +23,6 @@ class NavLink {
 const _bottomTabs = [
   NavLink('Catalog', '/supervisor/products', Icons.inventory_2_outlined),
   NavLink('Requests', '/supervisor/requests', Icons.assignment_outlined),
-  NavLink('Approvals', '/supervisor/branch-approvals', Icons.fact_check_outlined),
   NavLink('Issues', '/supervisor/issues', Icons.send_outlined),
   NavLink('Red Room', '/supervisor/returns', Icons.assignment_return_outlined),
 ];

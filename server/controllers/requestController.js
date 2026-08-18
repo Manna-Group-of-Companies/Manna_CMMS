@@ -70,7 +70,7 @@ export const createProductRequest = async (req, res) => {
     // Admin should never be asked to approve a name they cannot change.
     const named = resolveItemName({ name: details?.name, naming: details?.naming });
     if (!named.name) {
-      return res.status(400).json({ message: "Product name is required" });
+      return res.status(400).json({ message: "Engineering Stock name is required" });
     }
     if (!named.compliant && !acknowledgeNaming) {
       return res.status(422).json({
@@ -89,7 +89,7 @@ export const createProductRequest = async (req, res) => {
     // Check if product code already exists in active products or pending ADD requests
     const codeExists = await Product.findOne({ code: productCode });
     if (codeExists) {
-      return res.status(400).json({ message: `Product code ${productCode} already exists in catalog` });
+      return res.status(400).json({ message: `Engineering Stock code ${productCode} already exists in catalog` });
     }
 
     // ST-14 — warn on a request that would add something the store already
@@ -152,12 +152,12 @@ export const createStockInRequest = async (req, res) => {
 
   try {
     if (!productId || !quantity || quantity < 1) {
-      return res.status(400).json({ message: "Valid Product ID and Quantity (>= 1) are required" });
+      return res.status(400).json({ message: "Valid Engineering Stock ID and Quantity (>= 1) are required" });
     }
 
     const product = await Product.findById(productId);
     if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({ message: "Engineering Stock not found" });
     }
 
     // Advisory only: the Admin picks the room that is actually credited.
@@ -242,7 +242,7 @@ export const updateOwnRequest = async (req, res) => {
     if (type === "product") {
       return res
         .status(400)
-        .json({ message: "Product requests cannot be edited — cancel and raise a new one" });
+        .json({ message: "Engineering Stock requests cannot be edited — cancel and raise a new one" });
     }
 
     const { request, error, status } = await loadOwnPendingRequest({
@@ -385,7 +385,7 @@ export const getMyRequests = async (req, res) => {
       ...prodReqs.map((r) => ({
         _id: r._id,
         requestNumber: r.requestNumber,
-        requestType: r.requestType === "ADD" ? "Add Product" : "Edit Product",
+        requestType: r.requestType === "ADD" ? "Add Engineering Stock" : "Edit Stock",
         productName: r.requestType === "ADD" ? r.details.name : (r.product ? r.product.name : r.details.name),
         createdDate: r.createdAt,
         status: r.status,
@@ -475,7 +475,7 @@ export const getAllRequests = async (req, res) => {
       ...prodReqs.map((r) => ({
         _id: r._id,
         requestNumber: r.requestNumber,
-        requestType: r.requestType === "ADD" ? "Add Product" : "Edit Product",
+        requestType: r.requestType === "ADD" ? "Add Engineering Stock" : "Edit Stock",
         product: r.product,
         details: r.details,
         createdDate: r.createdAt,
@@ -615,7 +615,7 @@ export const processRequest = async (req, res) => {
         // Double check uniqueness of code
         const codeExists = await Product.findOne({ code });
         if (codeExists) {
-          return res.status(400).json({ message: `Cannot approve. Product code ${code} is already taken.` });
+          return res.status(400).json({ message: `Cannot approve. Engineering Stock code ${code} is already taken.` });
         }
 
         // Created empty, then credited so the room row and the product total
@@ -717,7 +717,7 @@ export const processRequest = async (req, res) => {
     } else if (type === "stockin") {
       const product = await Product.findById(request.product);
       if (!product) {
-        return res.status(404).json({ message: "Product no longer exists" });
+        return res.status(404).json({ message: "Engineering Stock no longer exists" });
       }
 
       // The Admin's choice wins; fall back to what the supervisor asked for,
@@ -777,7 +777,7 @@ export const processRequest = async (req, res) => {
     } else if (type === "stockout") {
       const product = await Product.findById(request.product);
       if (!product) {
-        return res.status(404).json({ message: "Product no longer exists" });
+        return res.status(404).json({ message: "Engineering Stock no longer exists" });
       }
       if (product.quantity < request.quantity) {
         return res.status(400).json({
@@ -814,7 +814,7 @@ export const processRequest = async (req, res) => {
     } else if (type === "stockreturn") {
       const product = await Product.findById(request.product);
       if (!product) {
-        return res.status(404).json({ message: "Product no longer exists" });
+        return res.status(404).json({ message: "Engineering Stock no longer exists" });
       }
 
       // Returned stock never lands in a store room directly, whichever door it

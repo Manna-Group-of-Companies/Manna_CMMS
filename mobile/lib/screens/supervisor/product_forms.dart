@@ -598,9 +598,16 @@ class _ProductFormState extends State<_ProductForm> {
   bool _loadingCategories = true;
   bool _loadingSubCategories = false;
 
+  /// The companies an item can be filed against (ST-33). Read from the API
+  /// rather than written down here: there are three of them now, more can be
+  /// added from the console, and a list compiled into the app would need a
+  /// release before anybody could use one.
+  List<StockRoom> _rooms = const [];
+
   @override
   void initState() {
     super.initState();
+    _loadRooms();
     // Intake only — an edit shows the name read-only, so there is nothing to
     // watch and nothing the checks could tell the supervisor to act on.
     //
@@ -616,6 +623,25 @@ class _ProductFormState extends State<_ProductForm> {
     if (_draft.category.isNotEmpty) {
       _loadingSubCategories = true;
       _loadSubCategories(_draft.category);
+    }
+  }
+
+  Future<void> _loadRooms() async {
+    try {
+      final rooms = await context.read<StockRepository>().stockRooms();
+      if (!mounted) return;
+      setState(() {
+        _rooms = rooms;
+        // An intake with nothing chosen yet lands in the first company, which
+        // is the group's main store.
+        if (_draft.storeRoom.isEmpty) {
+          _draft.storeRoom = rooms.firstOrNull?.name ?? '';
+        }
+      });
+    } catch (error) {
+      // The picker falls back to whatever the item already carries; a company
+      // list that will not load must not stop an edit being saved.
+      debugPrint('Could not load companies: $error');
     }
   }
 
@@ -794,7 +820,7 @@ class _ProductFormState extends State<_ProductForm> {
           acknowledgeNaming: _acknowledgeNaming,
           allowDuplicate: _allowDuplicate,
         );
-        Toast.success('Product ADD request submitted successfully!');
+        Toast.success('Engineering Stock ADD request submitted successfully!');
       }
       if (mounted) Navigator.of(context).pop(true);
     } on ApiException catch (error) {
@@ -807,7 +833,7 @@ class _ProductFormState extends State<_ProductForm> {
               .map(NamingIssue.fromJson)
               .toList();
         });
-        Toast.error('Check the product name before saving');
+        Toast.error('Check the engineering stock name before saving');
       } else if (error.statusCode == 409 && error.code == 'POSSIBLE_DUPLICATE' && mounted) {
         setState(() {
           _refusedDuplicates = (error.body?['matches'] as List? ?? [])
@@ -821,7 +847,7 @@ class _ProductFormState extends State<_ProductForm> {
         Toast.error(error.message);
       }
     } catch (_) {
-      Toast.error(_isEdit ? 'Failed to save the product' : 'Failed to submit request');
+      Toast.error(_isEdit ? 'Failed to save the engineering stock' : 'Failed to submit request');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -888,7 +914,7 @@ class _ProductFormState extends State<_ProductForm> {
       child: _FormSheet(
         title: _isEdit
             ? 'Edit: ${widget.product!.name}'
-            : 'Request Add New Product',
+            : 'Request Add New Engineering Stock',
         submitLabel: _isEdit ? 'Save Changes' : 'Submit Request',
         submitting: _submitting,
         canSubmit: !_awaitingConfirmation,
@@ -932,7 +958,7 @@ class _ProductFormState extends State<_ProductForm> {
             const SizedBox(height: 18),
           ],
           _Field(
-            label: 'Product Name',
+            label: 'Engineering Stock Name',
             // No asterisk on an edit: nothing is being asked for.
             required: !_isEdit,
             child: Column(
@@ -1085,7 +1111,13 @@ class _ProductFormState extends State<_ProductForm> {
               child: DropdownShell(
                 child: AppDropdown<String>(
                   value: _draft.storeRoom,
-                  items: const ['Manna Rubber Park', 'Consumables Room'],
+                  // The item's own company stays in the list even if it has
+                  // since been retired, or the dropdown would have no entry
+                  // matching its value and could not be built.
+                  items: {
+                    if (_draft.storeRoom.isNotEmpty) _draft.storeRoom,
+                    ..._rooms.map((room) => room.name),
+                  }.toList(),
                   onChanged: (value) =>
                       setState(() => _draft.storeRoom = value ?? _draft.storeRoom),
                 ),
@@ -1099,7 +1131,7 @@ class _ProductFormState extends State<_ProductForm> {
             const SizedBox(height: 18),
           ],
           _Field(
-            label: 'Product Image',
+            label: 'Engineering Stock Image',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1309,7 +1341,7 @@ class _LockedFacts extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rows = <({String label, String value, String where})>[
-      (label: 'Product Code', value: product.code, where: 'fixed identity'),
+      (label: 'Engineering Stock Code', value: product.code, where: 'fixed identity'),
       (label: 'Unit of Measure', value: product.unit, where: 'fixed identity'),
       (
         label: 'Current Stock',
@@ -1645,7 +1677,7 @@ class _IssueProductFormState extends State<_IssueProductForm> {
     } on ApiException catch (error) {
       Toast.error(error.message);
     } catch (_) {
-      Toast.error('Failed to issue product');
+      Toast.error('Failed to issue engineering stock');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -1654,7 +1686,7 @@ class _IssueProductFormState extends State<_IssueProductForm> {
   @override
   Widget build(BuildContext context) {
     return _FormSheet(
-      title: 'Issue Product',
+      title: 'Issue Engineering Stock',
       titleIcon: Icons.send_outlined,
       titleIconColor: AppColors.warning,
       submitLabel: 'Issue Now',
@@ -1680,7 +1712,7 @@ class _IssueProductFormState extends State<_IssueProductForm> {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'This action immediately reduces the product quantity. '
+                  'This action immediately reduces the engineering stock quantity. '
                   'No admin approval required.',
                   style: TextStyle(color: AppColors.warning, fontSize: 11.5, height: 1.45),
                 ),
@@ -2184,7 +2216,7 @@ class _ScrapValuePreview extends StatelessWidget {
             SizedBox(width: 8),
             Expanded(
               child: Text(
-                'This product has no unit cost recorded, so the scrap cannot be '
+                'This engineering stock has no unit cost recorded, so the scrap cannot be '
                 'valued. The quantity is still logged.',
                 style: TextStyle(
                   color: AppColors.textSecondary,

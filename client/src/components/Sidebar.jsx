@@ -12,6 +12,7 @@ import {
   PackageOpen,
   Warehouse,
   ClipboardCheck,
+  Gauge,
   KeyRound,
   Contact,
   TrendingDown,
@@ -40,7 +41,7 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
       icon: LayoutDashboard,
     },
     {
-      name: "Products & Stock",
+      name: "Engineering Stock",
       path: "/admin/products",
       icon: Boxes,
     },
@@ -58,6 +59,11 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
       name: "Scrap & Consumption",
       path: "/admin/scrap",
       icon: TrendingDown,
+    },
+    {
+      name: "Stock Audits",
+      path: "/admin/audits",
+      icon: Gauge,
     },
     {
       name: "SAP Hand-off",
@@ -88,7 +94,7 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
       icon: LayoutDashboard,
     },
     {
-      name: "Browse Products",
+      name: "Browse Engineering Stock",
       path: "/supervisor/products",
       icon: Boxes,
     },
@@ -111,6 +117,11 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
       name: "Branch Approvals",
       path: "/supervisor/branch-approvals",
       icon: ClipboardCheck,
+    },
+    {
+      name: "Monthly Audit",
+      path: "/supervisor/audit",
+      icon: Gauge,
     },
   ];
 
