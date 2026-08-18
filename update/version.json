@@ -1,14 +1,16 @@
 {
-  "latestVersion": "1.0.2",
-  "versionCode": 3,
-  "apkUrl": "https://github.com/Manna-Group-of-Companies/Manna_CMMS/releases/download/v1.0.2/stockmaster-1.0.2.apk",
+  "latestVersion": "1.0.3",
+  "versionCode": 4,
+  "apkUrl": "https://github.com/Manna-Group-of-Companies/Manna_CMMS/releases/download/v1.0.3/stockmaster-1.0.3.apk",
   "releaseNotes": [
-    "The product name can be typed when editing an item",
-    "Store rooms are now called companies",
-    "The Engineer Room is now Manna Rubber Park"
+    "Merge your own returns straight away, even while the weekly merge is open",
+    "Returned stock always has a company to go back to",
+    "Red Stock shows who merged each item and when",
+    "An item's name is set when it is taken in and is no longer edited",
+    "The old Engineer Room no longer appears when choosing a company"
   ],
   "fileSize": 54690600,
-  "sha256": "51130dadcd006168db2defe24ea6ab5da6c006ea9a865e939a07e221316bd7e7",
+  "sha256": "673234a876baa9f24d49254992be594fbccaa079e40df57aa29de2574799dfdf",
   "mandatory": false,
   "minSupportedVersion": "1.0.0"
 }
