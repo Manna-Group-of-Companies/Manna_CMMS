@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { AUDIT_FREQUENCY_NAMES } from "../utils/auditSchedule.js";
 
 /**
  * One physical size and its unit, e.g. `{ value: "50", uom: "SQMM" }`, which
@@ -106,6 +107,22 @@ const productSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: [0, "Unit cost cannot be negative"],
+    },
+    /**
+     * How often this item has to be physically counted: every month, every
+     * three months, or twice a year.
+     *
+     * Defaults to Monthly so nothing silently drops off a count sheet the day
+     * this field appears — the catalog that predates it keeps behaving exactly
+     * as it did, and an item is only counted less often once somebody has
+     * deliberately said so. The schedule itself is worked out per store room
+     * in `utils/auditSchedule.js`, from when this item was last counted on
+     * that particular shelf.
+     */
+    auditFrequency: {
+      type: String,
+      enum: AUDIT_FREQUENCY_NAMES,
+      default: "Monthly",
     },
     // Where the item physically sits on the shelving, e.g. "A-1". The store
     // room says which room; this says where to walk to inside it.

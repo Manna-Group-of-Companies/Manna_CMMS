@@ -186,6 +186,7 @@ const SAP_COLUMNS = [
   ["Unit Cost", (p) => p.unitCost ?? 0],
   ["Plant / Store Room", (p) => p.storeRoom],
   ["Rack", (p) => p.rackNumber || ""],
+  ["Audit Frequency", (p) => p.auditFrequency || "Monthly"],
   ["Stock", (p) => p.quantity ?? 0],
   ["Added On", (p) => new Date(p.createdAt).toISOString().slice(0, 10)],
 ];
@@ -296,6 +297,7 @@ const EDITABLE_FIELDS = [
   "unit",
   "minStock",
   "unitCost",
+  "auditFrequency",
   "description",
   "image",
 ];

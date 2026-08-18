@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { AUDIT_FREQUENCY_NAMES, VARIANCE_REASONS } from "../utils/auditSchedule.js";
 
 /**
  * One line of a count sheet: what the system says a room holds of a product,
@@ -43,6 +44,30 @@ const auditLineSchema = new mongoose.Schema(
       trim: true,
     },
     /**
+     * The cadence this item was on when the sheet was drawn up, and the month
+     * it was last counted in this room.
+     *
+     * Snapshotted rather than read back off the product, because the whole
+     * point of showing them is to explain why this line is on this sheet —
+     * and a frequency changed in the catalog three weeks later would rewrite
+     * that explanation.
+     */
+    auditFrequency: {
+      type: String,
+      enum: AUDIT_FREQUENCY_NAMES,
+      default: "Monthly",
+    },
+    lastCountedPeriod: {
+      type: String,
+      default: "",
+    },
+    /** One line for the counter: "Never counted", "Last counted 2026-02". */
+    dueReason: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    /**
      * The room's balance to compare the count against.
      *
      * Written when the sheet is drawn up and rewritten to the live balance the
@@ -80,6 +105,21 @@ const auditLineSchema = new mongoose.Schema(
       type: String,
       default: "",
       trim: true,
+    },
+    /**
+     * Why this line did not match, chosen from a fixed list.
+     *
+     * Required on every discrepancy before the sheet can be submitted. A
+     * variance with no reason beside it is a number the Admin has to go and
+     * ask about a week later, by which time nobody remembers the shelf; asking
+     * while the counter is still standing at it costs one tap and is the only
+     * moment the answer is actually known. "Unexplained" is a valid answer —
+     * see VARIANCE_REASONS.
+     */
+    varianceReason: {
+      type: String,
+      enum: ["", ...VARIANCE_REASONS],
+      default: "",
     },
     /**
      * True for a line the counter added because they found stock the sheet did
@@ -160,6 +200,26 @@ const stockAuditSchema = new mongoose.Schema(
       enum: ["In Progress", "Submitted", "Reviewed"],
       default: "In Progress",
     },
+    /**
+     * "Due" for the normal sheet — the items the frequency schedule says are
+     * owed a count this month — or "Full" for a wall-to-wall count of
+     * everything the room holds.
+     *
+     * Recorded because it changes what a score means: 100% of a due sheet says
+     * every item that was owed a check passed, which is not the same claim as
+     * 100% of a full count, and a report that could not tell them apart would
+     * flatter the smaller one.
+     */
+    scope: {
+      type: String,
+      enum: ["Due", "Full"],
+      default: "Due",
+    },
+    /** Items in the room the schedule held back this month — not yet due. */
+    linesSkipped: {
+      type: Number,
+      default: 0,
+    },
     lines: {
       type: [auditLineSchema],
       default: [],
@@ -184,6 +244,29 @@ const stockAuditSchema = new mongoose.Schema(
     netVarianceQuantity: { type: Number, default: 0 },
     /** Rupee value of the discrepancies, at the unit cost snapshotted per line. */
     varianceValue: { type: Number, default: 0 },
+    /** Counted lines that did not match and carry no reason yet. */
+    linesUnreasoned: { type: Number, default: 0 },
+    /** Discrepancies the counter could not account for at the shelf. */
+    linesUnexplained: { type: Number, default: 0 },
+    /**
+     * Discrepancies grouped by the reason given — lines, units and rupees.
+     *
+     * Totalled here rather than in the report so every screen that shows it
+     * agrees, and so a month closed under an older list of reasons still reads
+     * back exactly as it was recorded.
+     */
+    varianceByReason: {
+      type: [
+        {
+          _id: false,
+          reason: { type: String, default: "" },
+          lines: { type: Number, default: 0 },
+          quantity: { type: Number, default: 0 },
+          value: { type: Number, default: 0 },
+        },
+      ],
+      default: [],
+    },
     /** How much of the sheet was counted, 0–100. */
     coverage: { type: Number, default: 0 },
     /** How much of what was counted was right, 0–100. */
@@ -258,6 +341,9 @@ stockAuditSchema.pre("validate", function computeScore() {
   let varianceQuantity = 0;
   let netVariance = 0;
   let varianceValue = 0;
+  let unreasoned = 0;
+  let unexplained = 0;
+  const byReason = new Map();
 
   for (const line of lines) {
     if (line.countedQuantity === null || line.countedQuantity === undefined) continue;
@@ -271,9 +357,22 @@ stockAuditSchema.pre("validate", function computeScore() {
     if (variance > 0) over += 1;
     else short += 1;
 
-    varianceQuantity += Math.abs(variance);
+    const units = Math.abs(variance);
+    const value = units * (line.unitCost || 0);
+    varianceQuantity += units;
     netVariance += variance;
-    varianceValue += Math.abs(variance) * (line.unitCost || 0);
+    varianceValue += value;
+
+    const reason = line.varianceReason || "";
+    if (!reason) unreasoned += 1;
+    if (reason === "Unexplained") unexplained += 1;
+    if (!byReason.has(reason)) {
+      byReason.set(reason, { reason, lines: 0, quantity: 0, value: 0 });
+    }
+    const bucket = byReason.get(reason);
+    bucket.lines += 1;
+    bucket.quantity += units;
+    bucket.value += value;
   }
 
   this.linesTotal = lines.length;
@@ -284,6 +383,11 @@ stockAuditSchema.pre("validate", function computeScore() {
   this.varianceQuantity = varianceQuantity;
   this.netVarianceQuantity = netVariance;
   this.varianceValue = Math.round(varianceValue * 100) / 100;
+  this.linesUnreasoned = unreasoned;
+  this.linesUnexplained = unexplained;
+  this.varianceByReason = [...byReason.values()]
+    .map((bucket) => ({ ...bucket, value: Math.round(bucket.value * 100) / 100 }))
+    .sort((a, b) => b.lines - a.lines);
   this.coverage = percent(counted, lines.length);
   this.accuracy = percent(matched, counted);
   this.score = percent(matched, lines.length);

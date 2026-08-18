@@ -4,6 +4,14 @@ import StockRoom from "../models/StockRoom.js";
 import StockRoomInventory from "../models/StockRoomInventory.js";
 import Product from "../models/Product.js";
 import Notification from "../models/Notification.js";
+import StockMovement from "../models/StockMovement.js";
+import {
+  AUDIT_FREQUENCY_NAMES,
+  VARIANCE_REASONS,
+  dueState,
+  intervalOf,
+  periodPlus,
+} from "../utils/auditSchedule.js";
 
 const generateAuditNumber = (period) =>
   `AUD-${period.replace("-", "")}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -26,35 +34,67 @@ const isPeriod = (value) => /^\d{4}-\d{2}$/.test(String(value ?? ""));
 /** The three-field summary of a user, as every other list here returns it. */
 const USER_FIELDS = "name email role";
 
+/** Everything a room is holding, with the product details a line needs. */
+const roomHoldings = (room) =>
+  StockRoomInventory.find({ stockRoom: room._id, quantity: { $gt: 0 } })
+    .populate("product", "name code unit category rackNumber unitCost auditFrequency")
+    .sort({ quantity: -1 });
+
+/** One count sheet line from a room's inventory row. */
+const lineFrom = (row, due) => ({
+  product: row.product._id,
+  productName: row.product.name,
+  productCode: row.product.code || "",
+  unit: row.product.unit || "",
+  category: row.product.category || "",
+  rackNumber: row.product.rackNumber || "",
+  auditFrequency: row.product.auditFrequency || "Monthly",
+  lastCountedPeriod: row.lastCountedPeriod || "",
+  dueReason: due.reason,
+  systemQuantity: row.quantity,
+  countedQuantity: null,
+  unitCost: row.product.unitCost || 0,
+});
+
 /**
  * Draws up the count sheet for a room: one line per product the room is
- * holding stock of.
+ * holding that the schedule says is owed a count this month.
  *
  * Products the room holds nothing of are left off. The catalog runs to several
  * thousand items and all but a handful of them sit in one room, so listing
  * every product against every room would bury the count that matters under
  * pages of zeroes. Stock that turns up on a shelf the system did not expect is
  * added to the sheet as it is found — see `addAuditLine`.
+ *
+ * Items on a quarterly or half-yearly cadence are held back in the months
+ * between their turns, and counted in `skipped` so the sheet can say what it
+ * chose not to ask for. A full count takes everything regardless, for the
+ * wall-to-wall stock take the schedule is not meant to replace.
  */
-const buildLines = async (room) => {
-  const rows = await StockRoomInventory.find({ stockRoom: room._id, quantity: { $gt: 0 } })
-    .populate("product", "name code unit category rackNumber unitCost")
-    .sort({ quantity: -1 });
+const buildLines = async (room, period, { full = false } = {}) => {
+  // A row whose product was deleted has nothing left to count.
+  const rows = (await roomHoldings(room)).filter((row) => row.product);
 
-  return rows
-    // A row whose product was deleted has nothing left to count.
-    .filter((row) => row.product)
-    .map((row) => ({
-      product: row.product._id,
-      productName: row.product.name,
-      productCode: row.product.code || "",
-      unit: row.product.unit || "",
-      category: row.product.category || "",
-      rackNumber: row.product.rackNumber || "",
-      systemQuantity: row.quantity,
-      countedQuantity: null,
-      unitCost: row.product.unitCost || 0,
-    }));
+  const lines = [];
+  let skipped = 0;
+
+  for (const row of rows) {
+    const due = dueState({
+      frequency: row.product.auditFrequency,
+      lastCountedPeriod: row.lastCountedPeriod,
+      period,
+    });
+    if (!due.due && !full) {
+      skipped += 1;
+      continue;
+    }
+    lines.push({
+      ...lineFrom(row, due),
+      dueReason: due.due ? due.reason : `Full count — ${due.reason}`,
+    });
+  }
+
+  return { lines, skipped };
 };
 
 /** Loads an audit and answers 404 itself, so every route below reads the same. */
@@ -116,6 +156,35 @@ const asCountSheet = (audit) => {
 };
 
 /**
+ * Turns an open due-sheet into a full count by appending the room's remaining
+ * holdings.
+ *
+ * Only ever adds. Dropping the lines a full count would not have listed would
+ * throw away counts already entered against them, and the sheet is somebody's
+ * afternoon on the shop floor.
+ */
+const widenToFullCount = async (audit, room, period) => {
+  const onSheet = new Set(audit.lines.map((line) => String(line.product)));
+  const rows = (await roomHoldings(room)).filter(
+    (row) => row.product && !onSheet.has(String(row.product._id))
+  );
+
+  for (const row of rows) {
+    const due = dueState({
+      frequency: row.product.auditFrequency,
+      lastCountedPeriod: row.lastCountedPeriod,
+      period,
+    });
+    audit.lines.push({ ...lineFrom(row, due), dueReason: `Full count — ${due.reason}` });
+  }
+
+  audit.scope = "Full";
+  audit.linesSkipped = 0;
+  await audit.save();
+  return rows.length;
+};
+
+/**
  * @desc    Open this month's audit for a store room, or resume the open one
  *          (ST-36).
  * @route   POST /api/audits
@@ -126,9 +195,16 @@ const asCountSheet = (audit) => {
  * who joins the count, has to land on the same sheet rather than open a rival
  * one. A month that has already been submitted is the one case that refuses —
  * reopening it is the Admin's call.
+ *
+ * `scope` picks what goes on the sheet: "due" (the default) asks the frequency
+ * schedule which items are owed a count this month, "full" walks the whole
+ * room. Asking for a full count of a room that already has a due sheet open
+ * widens that sheet rather than starting a second one — the extra lines are
+ * appended and nothing already counted is disturbed.
  */
 export const openAudit = async (req, res) => {
-  const { stockRoomId, period: requestedPeriod } = req.body;
+  const { stockRoomId, period: requestedPeriod, scope } = req.body || {};
+  const full = String(scope || "").toLowerCase() === "full";
 
   try {
     const period = requestedPeriod || periodOf();
@@ -156,16 +232,29 @@ export const openAudit = async (req, res) => {
           auditId: existing._id,
         });
       }
+
+      let message = `Resuming the ${period} count of ${room.name}`;
+      if (full && existing.scope !== "Full") {
+        const added = await widenToFullCount(existing, room, period);
+        message = added
+          ? `${added} more ${added === 1 ? "line" : "lines"} added — ${room.name} is now a full count`
+          : `${room.name} was already holding nothing beyond the due sheet`;
+      }
+
       return res.json({
-        message: `Resuming the ${period} count of ${room.name}`,
+        message,
         audit: asCountSheet(await populated(StockAudit.findById(existing._id))),
       });
     }
 
-    const lines = await buildLines(room);
+    const { lines, skipped } = await buildLines(room, period, { full });
     if (lines.length === 0) {
       return res.status(400).json({
-        message: `${room.name} holds no stock, so there is nothing to count`,
+        message: skipped
+          ? `Nothing is due for counting in ${room.name} this month — ${skipped} ${
+              skipped === 1 ? "item is" : "items are"
+            } on a longer cycle and not due yet. Start a full count to walk the whole room.`
+          : `${room.name} holds no stock, so there is nothing to count`,
       });
     }
 
@@ -176,6 +265,8 @@ export const openAudit = async (req, res) => {
         period,
         stockRoom: room._id,
         stockRoomName: room.name,
+        scope: full ? "Full" : "Due",
+        linesSkipped: skipped,
         lines,
         openedBy: req.user._id,
         openedAt: new Date(),
@@ -197,7 +288,9 @@ export const openAudit = async (req, res) => {
     }
 
     res.status(201).json({
-      message: `${period} count of ${room.name} opened with ${lines.length} lines`,
+      message: `${period} ${full ? "full count" : "count"} of ${room.name} opened with ${
+        lines.length
+      } lines${skipped ? `; ${skipped} not due yet` : ""}`,
       audit: asCountSheet(await populated(StockAudit.findById(audit._id))),
     });
   } catch (error) {
@@ -290,13 +383,19 @@ export const getAudit = async (req, res) => {
  * or a laptop out on the floor, often on a connection that drops, and a screen
  * full of figures has to survive as one save rather than forty.
  *
+ * A line that does not match takes a `varianceReason` alongside the figure —
+ * recorded at the shelf, while the counter can still see why. It is not
+ * demanded here, because a count entered in a hurry and explained a minute
+ * later is still a count; `submitAudit` is where the sheet refuses to close
+ * with a discrepancy nobody has accounted for.
+ *
  * Each saved line's `systemQuantity` is refreshed to the room's balance as it
  * stands now. The count is a statement about this moment, so it is scored
  * against what the system believes at this moment — otherwise stock issued
  * while the count was under way reads as a counting error.
  */
 export const saveAuditCounts = async (req, res) => {
-  const { counts } = req.body;
+  const { counts } = req.body || {};
 
   try {
     const audit = await loadAudit(req.params.id, res);
@@ -340,6 +439,8 @@ export const saveAuditCounts = async (req, res) => {
         line.countedQuantity = null;
         line.countedAt = null;
         line.countedBy = null;
+        // The reason explained a variance that no longer exists.
+        line.varianceReason = "";
       } else {
         const counted = Number(entry.countedQuantity);
         if (!Number.isInteger(counted) || counted < 0) {
@@ -353,6 +454,26 @@ export const saveAuditCounts = async (req, res) => {
         line.countedBy = req.user._id;
       }
 
+      if (entry.varianceReason !== undefined) {
+        const reason = String(entry.varianceReason || "").trim();
+        if (reason && !VARIANCE_REASONS.includes(reason)) {
+          return res.status(400).json({
+            message: `"${reason}" is not one of the variance reasons`,
+          });
+        }
+        line.varianceReason = reason;
+      }
+
+      // A line that has come back into agreement has nothing left to explain,
+      // so a reason left over from an earlier figure is dropped rather than
+      // left to be totalled into next month's report.
+      if (
+        line.countedQuantity !== null &&
+        line.countedQuantity === (line.systemQuantity || 0)
+      ) {
+        line.varianceReason = "";
+      }
+
       if (entry.note !== undefined) {
         line.note = String(entry.note || "").trim();
       }
@@ -363,7 +484,7 @@ export const saveAuditCounts = async (req, res) => {
       return res.status(400).json({ message: "None of those lines are on this sheet" });
     }
 
-    if (req.body.note !== undefined) {
+    if (req.body?.note !== undefined) {
       audit.note = String(req.body.note || "").trim();
     }
 
@@ -391,7 +512,7 @@ export const saveAuditCounts = async (req, res) => {
  * than a note nobody can total.
  */
 export const addAuditLine = async (req, res) => {
-  const { productId, countedQuantity, note } = req.body;
+  const { productId, countedQuantity, note, varianceReason } = req.body || {};
 
   try {
     const audit = await loadAudit(req.params.id, res);
@@ -429,6 +550,13 @@ export const addAuditLine = async (req, res) => {
         .json({ message: "The count must be a whole number of 0 or more" });
     }
 
+    const reason = String(varianceReason || "").trim();
+    if (reason && !VARIANCE_REASONS.includes(reason)) {
+      return res
+        .status(400)
+        .json({ message: `"${reason}" is not one of the variance reasons` });
+    }
+
     // Whatever the room says it holds — normally nothing, which is exactly the
     // discrepancy being recorded.
     const row = await StockRoomInventory.findOne({
@@ -443,12 +571,16 @@ export const addAuditLine = async (req, res) => {
       unit: product.unit || "",
       category: product.category || "",
       rackNumber: product.rackNumber || "",
+      auditFrequency: product.auditFrequency || "Monthly",
+      lastCountedPeriod: row?.lastCountedPeriod || "",
+      dueReason: "Found on the shelf during the count",
       systemQuantity: row?.quantity ?? 0,
       countedQuantity: counted,
       unitCost: product.unitCost || 0,
       countedAt: new Date(),
       countedBy: req.user._id,
       note: String(note || "").trim(),
+      varianceReason: reason,
       addedDuringCount: true,
     });
 
@@ -465,6 +597,45 @@ export const addAuditLine = async (req, res) => {
 };
 
 /**
+ * Records, on each room inventory row, that this month's count reached it.
+ *
+ * Deliberately narrow: it writes only when the row has not already been
+ * stamped with a later month, so re-submitting a reopened sheet is harmless
+ * while a back-dated audit closed after a newer one cannot pull the schedule
+ * backwards and make fresh stock look stale.
+ *
+ * It touches no balance. An audit never moves stock — putting a wrong balance
+ * right stays the Admin's separate act on the stock room screen — so all this
+ * leaves behind is the fact that somebody walked the shelf.
+ */
+const stampCountedLines = async (audit) => {
+  const counted = audit.lines.filter(
+    (line) => line.countedQuantity !== null && line.countedQuantity !== undefined
+  );
+  if (counted.length === 0) return;
+
+  await StockRoomInventory.bulkWrite(
+    counted.map((line) => ({
+      updateOne: {
+        filter: {
+          stockRoom: audit.stockRoom,
+          product: line.product,
+          lastCountedPeriod: { $lte: audit.period },
+        },
+        update: {
+          $set: {
+            lastCountedPeriod: audit.period,
+            lastCountedAt: line.countedAt || audit.submittedAt || new Date(),
+            lastCountedQuantity: line.countedQuantity,
+          },
+        },
+      },
+    })),
+    { ordered: false }
+  );
+};
+
+/**
  * @desc    Close the count and post its score (ST-37).
  * @route   POST /api/audits/:id/submit
  * @access  Private (Admin, Supervisor — the counter or an Admin)
@@ -472,6 +643,15 @@ export const addAuditLine = async (req, res) => {
  * Submitting freezes the sheet. The score is not recomputed here — the hook on
  * the model has kept it in step with every save — so what the counter saw on
  * screen is exactly what the Admin is shown.
+ *
+ * Every discrepancy has to carry a reason first. This is the last moment the
+ * counter is still in the room, and an unaccounted variance found a week later
+ * is a question nobody can answer; "Unexplained" is an accepted answer, so the
+ * check costs an honest counter one tap and costs a careless sheet the right
+ * to be closed.
+ *
+ * Closing also stamps every counted line onto the room's inventory row, which
+ * is what the quarterly and half-yearly schedule measures the next count from.
  */
 export const submitAudit = async (req, res) => {
   try {
@@ -494,7 +674,30 @@ export const submitAudit = async (req, res) => {
         .json({ message: "Count at least one line before submitting" });
     }
 
-    if (req.body.note !== undefined) {
+    const unreasoned = audit.lines.filter(
+      (line) =>
+        line.countedQuantity !== null &&
+        line.countedQuantity !== undefined &&
+        line.countedQuantity !== (line.systemQuantity || 0) &&
+        !line.varianceReason
+    );
+    if (unreasoned.length > 0) {
+      const named = unreasoned
+        .slice(0, 3)
+        .map((line) => `"${line.productName}"`)
+        .join(", ");
+      return res.status(400).json({
+        message: `${unreasoned.length} ${
+          unreasoned.length === 1 ? "discrepancy needs" : "discrepancies need"
+        } a reason before this sheet can be submitted — ${named}${
+          unreasoned.length > 3 ? " and others" : ""
+        }`,
+        lineIds: unreasoned.map((line) => String(line._id)),
+      });
+    }
+
+    // Submitted from the sheet with no body at all, so this cannot assume one.
+    if (req.body?.note !== undefined) {
       audit.note = String(req.body.note || "").trim();
     }
     audit.status = "Submitted";
@@ -502,8 +705,10 @@ export const submitAudit = async (req, res) => {
     audit.submittedAt = new Date();
     await audit.save();
 
+    await stampCountedLines(audit);
+
     await Notification.create({
-      message: `${audit.period} audit of ${audit.stockRoomName} submitted by ${req.user.name}: scored ${audit.score}% over ${audit.linesTotal} lines, ${audit.linesOver + audit.linesShort} discrepancies worth ${audit.varianceValue} (${audit.auditNumber})`,
+      message: `${audit.period} audit of ${audit.stockRoomName} submitted by ${req.user.name}: scored ${audit.score}% over ${audit.linesTotal} lines, ${audit.linesOver + audit.linesShort} discrepancies worth ${audit.varianceValue}${audit.linesUnexplained ? `, ${audit.linesUnexplained} unexplained` : ""} (${audit.auditNumber})`,
       type: "AUDIT_SUBMITTED",
     });
 
@@ -545,7 +750,7 @@ export const reviewAudit = async (req, res) => {
     audit.status = "Reviewed";
     audit.reviewedBy = req.user._id;
     audit.reviewedAt = new Date();
-    audit.reviewNote = String(req.body.note || "").trim();
+    audit.reviewNote = String(req.body?.note || "").trim();
     await audit.save();
 
     await Notification.create({
@@ -742,4 +947,280 @@ export const getAuditScoreboard = async (req, res) => {
     console.error("Error building the audit scoreboard:", error);
     res.status(500).json({ message: error.message });
   }
+};
+
+/**
+ * @desc    What the frequency schedule owes a room this month, and what it is
+ *          holding back.
+ * @route   GET /api/audits/schedule?stockRoomId=&period=
+ * @access  Private (Admin, Supervisor)
+ *
+ * Answers the question a supervisor asks before opening a sheet — "how much of
+ * this room am I being asked to walk?" — and the one the Admin asks after it:
+ * how much of the room the count did not cover, and when it comes round again.
+ *
+ * Quantities are left out entirely. This is readable while a count is open, so
+ * anything it returned about how much a shelf holds would put the expected
+ * figure back in front of the counter the blind sheet exists to keep it from.
+ */
+export const getAuditSchedule = async (req, res) => {
+  try {
+    const period = isPeriod(req.query.period) ? req.query.period : periodOf();
+    if (!mongoose.isValidObjectId(req.query.stockRoomId)) {
+      return res.status(400).json({ message: "A store room must be named" });
+    }
+    const room = await StockRoom.findById(req.query.stockRoomId);
+    if (!room) {
+      return res.status(404).json({ message: "Store room not found" });
+    }
+
+    const rows = (await roomHoldings(room)).filter((row) => row.product);
+
+    const byFrequency = new Map(
+      AUDIT_FREQUENCY_NAMES.map((name) => [
+        name,
+        {
+          frequency: name,
+          intervalMonths: intervalOf(name),
+          items: 0,
+          due: 0,
+          notDue: 0,
+          neverCounted: 0,
+          overdue: 0,
+        },
+      ])
+    );
+    /** How many items fall due in each future month, for the load ahead. */
+    const upcoming = new Map();
+
+    for (const row of rows) {
+      const frequency = AUDIT_FREQUENCY_NAMES.includes(row.product.auditFrequency)
+        ? row.product.auditFrequency
+        : "Monthly";
+      const bucket = byFrequency.get(frequency);
+      const state = dueState({
+        frequency,
+        lastCountedPeriod: row.lastCountedPeriod,
+        period,
+      });
+
+      bucket.items += 1;
+      if (!state.due) {
+        bucket.notDue += 1;
+        upcoming.set(state.dueFrom, (upcoming.get(state.dueFrom) || 0) + 1);
+        continue;
+      }
+
+      bucket.due += 1;
+      if (!row.lastCountedPeriod) bucket.neverCounted += 1;
+      // Its turn came round in an earlier month and the count never happened.
+      else if (state.dueFrom < period) bucket.overdue += 1;
+    }
+
+    const buckets = [...byFrequency.values()];
+
+    res.json({
+      period,
+      stockRoom: { _id: room._id, name: room.name },
+      itemsHeld: rows.length,
+      due: buckets.reduce((sum, bucket) => sum + bucket.due, 0),
+      notDue: buckets.reduce((sum, bucket) => sum + bucket.notDue, 0),
+      overdue: buckets.reduce((sum, bucket) => sum + bucket.overdue, 0),
+      neverCounted: buckets.reduce((sum, bucket) => sum + bucket.neverCounted, 0),
+      byFrequency: buckets,
+      upcoming: [...upcoming.entries()]
+        .map(([month, items]) => ({ period: month, items }))
+        .sort((a, b) => a.period.localeCompare(b.period))
+        .slice(0, 6),
+    });
+  } catch (error) {
+    console.error("Error building the audit schedule:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/**
+ * The effect one ledger entry had on one room's shelf.
+ *
+ * The ledger records the room a movement came from and went to, but not every
+ * flow that writes to it fills those in — an issue raised against a request
+ * names the room in its note rather than in its fields. So a movement is one
+ * of three things here, and the difference matters enough to be reported
+ * rather than averaged away: it moved this room's stock, it demonstrably moved
+ * another room's, or nobody can tell.
+ */
+const roomEffectOf = (movement, roomName) => {
+  const from = (movement.fromRoom || "").trim();
+  const to = (movement.toRoom || "").trim();
+  const here = (name) => name.toLowerCase() === String(roomName || "").toLowerCase();
+
+  if (to && here(to)) return { effect: movement.quantity, attributed: true };
+  if (from && here(from)) return { effect: -movement.quantity, attributed: true };
+  if (from || to) return { effect: 0, attributed: true };
+  return { effect: null, attributed: false };
+};
+
+/**
+ * @desc    Reconcile one counted line against the stock movement ledger.
+ * @route   GET /api/audits/:id/lines/:lineId/trail
+ * @access  Private (Admin, Supervisor)
+ *
+ * A variance on its own says the shelf and the system disagree. It does not
+ * say which of them is wrong, and that is the whole of what the Admin needs
+ * before deciding whether to correct a balance or go and find out who took
+ * something. So this walks back to the last time the item was counted in this
+ * room, lists everything the ledger says happened to it since, and does the
+ * arithmetic out loud:
+ *
+ *     what the last count found
+ *   + everything the ledger moved since
+ *   = what should be on the shelf now
+ *
+ * Held against this month's count, the leftover is stock that moved without
+ * anybody recording it — the only figure here that is a finding in itself.
+ * Held against the system balance instead, it says whether the balance has
+ * drifted from its own ledger, which is a software problem rather than a store
+ * one, and the two must not be shown as the same thing.
+ *
+ * The reconciliation is honest about what it cannot see. Movements the ledger
+ * did not attribute to a room are listed and counted separately, and the
+ * result is flagged partial rather than quietly folded in as though the sum
+ * still held.
+ */
+export const getAuditLineTrail = async (req, res) => {
+  try {
+    const audit = await loadAudit(req.params.id, res);
+    if (!audit) return undefined;
+
+    const line = mongoose.isValidObjectId(req.params.lineId)
+      ? audit.lines.id(req.params.lineId)
+      : null;
+    if (!line) {
+      return res.status(404).json({ message: "That line is not on this sheet" });
+    }
+
+    // The blind count holds while the sheet is open, and the ledger carries
+    // running balances, so an uncounted line's trail would hand over exactly
+    // the figure the sheet is withholding.
+    const counted = line.countedQuantity !== null && line.countedQuantity !== undefined;
+    if (audit.status === "In Progress" && !counted) {
+      return res.status(403).json({
+        message: "Count this line first — its history stays hidden until then",
+      });
+    }
+
+    // The most recent closed count of this item in this room.
+    const previousAudit = await StockAudit.findOne({
+      stockRoom: audit.stockRoom,
+      period: { $lt: audit.period },
+      status: { $in: ["Submitted", "Reviewed"] },
+      lines: {
+        $elemMatch: { product: line.product, countedQuantity: { $ne: null } },
+      },
+    })
+      .sort({ period: -1 })
+      .select("auditNumber period submittedAt lines");
+
+    const previousLine = previousAudit?.lines.find(
+      (row) =>
+        String(row.product) === String(line.product) &&
+        row.countedQuantity !== null &&
+        row.countedQuantity !== undefined
+    );
+
+    const from = previousLine ? previousLine.countedAt || previousAudit.submittedAt : null;
+    const to = line.countedAt || new Date();
+
+    // Without a previous count there is no baseline to reconcile from, so the
+    // trail becomes plain history: the last stretch of movements, which is
+    // still the thing worth reading when a line comes up short.
+    const rows = await StockMovement.find({
+      product: line.product,
+      createdAt: { ...(from && { $gt: from }), $lte: to },
+    })
+      .populate("performedBy", USER_FIELDS)
+      .sort({ createdAt: from ? 1 : -1 })
+      .limit(200);
+
+    const movements = (from ? rows : rows.reverse()).map((row) => {
+      const { effect, attributed } = roomEffectOf(row, audit.stockRoomName);
+      return {
+        _id: row._id,
+        type: row.type,
+        direction: row.direction,
+        quantity: row.quantity,
+        fromRoom: row.fromRoom || "",
+        toRoom: row.toRoom || "",
+        reference: row.reference || "",
+        note: row.note || "",
+        performedBy: row.performedBy || null,
+        createdAt: row.createdAt,
+        roomEffect: effect,
+        attributed,
+      };
+    });
+
+    const netMovement = movements.reduce((sum, row) => sum + (row.roomEffect || 0), 0);
+    const unattributed = movements.filter((row) => !row.attributed).length;
+
+    const baseline = previousLine ? previousLine.countedQuantity : null;
+    const expectedQuantity = baseline === null ? null : baseline + netMovement;
+    const systemQuantity = line.systemQuantity || 0;
+
+    res.json({
+      auditId: audit._id,
+      auditNumber: audit.auditNumber,
+      period: audit.period,
+      stockRoom: audit.stockRoomName,
+      line: {
+        _id: line._id,
+        product: line.product,
+        productName: line.productName,
+        productCode: line.productCode,
+        unit: line.unit,
+        auditFrequency: line.auditFrequency,
+        systemQuantity,
+        countedQuantity: counted ? line.countedQuantity : null,
+        variance: counted ? line.countedQuantity - systemQuantity : null,
+        varianceReason: line.varianceReason || "",
+        note: line.note || "",
+      },
+      previousCount: previousLine
+        ? {
+            auditNumber: previousAudit.auditNumber,
+            period: previousAudit.period,
+            countedQuantity: previousLine.countedQuantity,
+            countedAt: previousLine.countedAt || previousAudit.submittedAt,
+          }
+        : null,
+      window: { from, to },
+      movements,
+      netMovement,
+      unattributed,
+      /** The sum only holds if every movement could be placed in a room. */
+      partial: unattributed > 0,
+      expectedQuantity,
+      /** Count minus expected: stock that moved with nothing written down. */
+      unrecordedMovement:
+        expectedQuantity === null || !counted ? null : line.countedQuantity - expectedQuantity,
+      /** System minus expected: the balance has drifted from its own ledger. */
+      systemDrift: expectedQuantity === null ? null : systemQuantity - expectedQuantity,
+      truncated: movements.length === 200,
+    });
+  } catch (error) {
+    console.error("Error reconciling the audit line:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+/**
+ * @desc    The vocabulary a count sheet is allowed to use.
+ * @route   GET /api/audits/vocabulary
+ * @access  Private (Admin, Supervisor)
+ *
+ * Served rather than restated in the client, so a sheet can never offer a
+ * reason the API would reject, and so the list can grow in one place.
+ */
+export const getAuditVocabulary = (req, res) => {
+  res.json({ varianceReasons: VARIANCE_REASONS, frequencies: AUDIT_FREQUENCY_NAMES });
 };

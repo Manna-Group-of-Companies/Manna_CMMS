@@ -9,6 +9,9 @@ import {
   reviewAudit,
   reopenAudit,
   getAuditScoreboard,
+  getAuditSchedule,
+  getAuditLineTrail,
+  getAuditVocabulary,
 } from "../controllers/auditController.js";
 import { protect, authorizeRoles } from "../middleware/auth.js";
 
@@ -18,14 +21,20 @@ const router = express.Router();
 // reports on it. A Branch account is stock-only and takes no part in auditing.
 router.use(protect, authorizeRoles("Admin", "Supervisor"));
 
-// The scoreboard. Registered before "/:id" so "scoreboard" is not read as an
-// audit id.
+// The fixed paths go first, so "scoreboard" and the rest are not read as
+// audit ids by the "/:id" route below.
 router.get("/scoreboard", getAuditScoreboard);
+// What the frequency schedule says a room owes this month, before a sheet for
+// it exists.
+router.get("/schedule", getAuditSchedule);
+router.get("/vocabulary", getAuditVocabulary);
 
 router.route("/").get(getAudits).post(openAudit);
 
 router.get("/:id", getAudit);
 router.route("/:id/lines").put(saveAuditCounts).post(addAuditLine);
+// What the ledger says happened to one line since it was last counted.
+router.get("/:id/lines/:lineId/trail", getAuditLineTrail);
 router.post("/:id/submit", submitAudit);
 
 // Signing a count off, and putting a mis-submitted one back, are the Admin's.

@@ -26,6 +26,30 @@ const stockRoomInventorySchema = new mongoose.Schema(
       default: 0,
       min: [0, "Room quantity cannot be negative"],
     },
+
+    /**
+     * The month this product was last physically counted on this shelf, as
+     * "YYYY-MM", and what that count found.
+     *
+     * Stamped when an audit is submitted — not when a count is saved, because
+     * a figure entered against the wrong line and cleared again was never a
+     * count. This is what the quarterly and half-yearly schedule is measured
+     * from, so it is per room rather than per product: the same item can be
+     * monthly-fresh in Main Stock and six months stale in the Red Stock Room.
+     */
+    lastCountedPeriod: {
+      type: String,
+      default: "",
+    },
+    lastCountedAt: {
+      type: Date,
+      default: null,
+    },
+    /** What the shelf held at that count — the baseline reconciliation runs from. */
+    lastCountedQuantity: {
+      type: Number,
+      default: null,
+    },
   },
   {
     timestamps: true,
