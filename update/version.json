@@ -1,16 +1,12 @@
 {
-  "latestVersion": "1.0.4",
-  "versionCode": 5,
-  "apkUrl": "https://github.com/Manna-Group-of-Companies/Manna_CMMS/releases/download/v1.0.4/stockmaster-1.0.4.apk",
+  "latestVersion": "1.0.5",
+  "versionCode": 6,
+  "apkUrl": "https://github.com/Manna-Group-of-Companies/Manna_CMMS/releases/download/v1.0.5/stockmaster-1.0.5.apk",
   "releaseNotes": [
-    "Products are now called Engineering Stock throughout the app",
-    "An item shows how much of it each company holds, not just one total",
-    "Stock waiting in the Red Stock Room is shown on the item it belongs to",
-    "Take stock in against any company the Admin has added, and filter the catalog by it",
-    "Branch approvals are decided on the web console and no longer appear on the phone"
+    "Returning stock picks where it is coming back from, from the Admin's list, instead of typing the department"
   ],
   "fileSize": 54690528,
-  "sha256": "089ee00c19d01a393db4097566dd2c123ecac18102e9c3dd5419c0755a273f2b",
+  "sha256": "37da1ac87e3fbc6220bac36dd3c3d14987ca53b6487292f865b582d8ffe139ee",
   "mandatory": false,
   "minSupportedVersion": "1.0.0"
 }
