@@ -66,3 +66,48 @@ export const scoreTone = (score) =>
         bar: "bg-rose-500",
         ring: "border-rose-500/20 bg-rose-50/40",
       };
+
+/**
+ * How often an item is counted. Kept in step with `AUDIT_FREQUENCIES` on the
+ * server — the API rejects anything else, and the sheet shows what it was told
+ * rather than deciding for itself.
+ */
+export const AUDIT_FREQUENCIES = ["Monthly", "Quarterly", "Half-Yearly"];
+
+export const FREQUENCY_BADGES = {
+  Monthly: "bg-slate-100 text-slate-600 border border-slate-200",
+  Quarterly: "bg-sky-500/10 text-sky-600 border border-sky-500/20",
+  "Half-Yearly": "bg-violet-500/10 text-violet-600 border border-violet-500/20",
+};
+
+/** Short forms for the count sheet, where the column is a few characters wide. */
+export const FREQUENCY_SHORT = {
+  Monthly: "1M",
+  Quarterly: "3M",
+  "Half-Yearly": "6M",
+};
+
+/**
+ * The reasons a discrepancy can be recorded under, in the order the server
+ * lists them. Every one of them has to be accounted for before a sheet closes,
+ * so "Unexplained" is a real choice rather than an omission.
+ */
+export const VARIANCE_REASONS = [
+  "Explained by movement",
+  "Issued but not recorded",
+  "Damaged or scrapped",
+  "Found on another shelf",
+  "Data entry error",
+  "Unexplained",
+];
+
+/**
+ * Unexplained variance is the finding worth chasing, so it is the one reason
+ * that is coloured as a problem rather than as an answer.
+ */
+export const reasonTone = (reason) =>
+  !reason
+    ? "bg-rose-500/10 text-rose-600 border border-rose-500/20"
+    : reason === "Unexplained"
+    ? "bg-amber-500/10 text-amber-700 border border-amber-500/20"
+    : "bg-slate-100 text-slate-600 border border-slate-200";

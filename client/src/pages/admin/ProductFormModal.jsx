@@ -13,6 +13,7 @@ import TaxonomySelect, {
   useCategoryOptions,
   useSubCategoryOptions,
 } from "../../components/TaxonomySelect";
+import { AUDIT_FREQUENCIES } from "../../utils/audit";
 
 const EMPTY = {
   code: "",
@@ -26,6 +27,7 @@ const EMPTY = {
   unit: "Pcs",
   minStock: 5,
   unitCost: 0,
+  auditFrequency: "Monthly",
   storeRoom: "",
   description: "",
   image: "",
@@ -108,6 +110,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         unit: product.unit || "Pcs",
         minStock: product.minStock ?? 5,
         unitCost: product.unitCost ?? 0,
+        auditFrequency: product.auditFrequency || "Monthly",
         storeRoom: product.storeRoom || "",
         description: product.description || "",
         image: product.image || "",
@@ -230,6 +233,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
             quantity,
             minStock: Number(form.minStock),
             unitCost: Number(form.unitCost) || 0,
+            auditFrequency: form.auditFrequency,
             // Only sent when there is something to send. An empty sub-document
             // would overwrite the naming fields of a product created with them.
             ...(isNamingBlank(naming) ? {} : { naming }),
@@ -469,6 +473,27 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                   onChange={set("unitCost")}
                   className={field}
                 />
+              </div>
+              <div>
+                <label className={label}>Audit Frequency</label>
+                <select
+                  value={form.auditFrequency}
+                  onChange={set("auditFrequency")}
+                  className={field}
+                >
+                  {AUDIT_FREQUENCIES.map((frequency) => (
+                    <option key={frequency} value={frequency}>
+                      {frequency}
+                    </option>
+                  ))}
+                </select>
+                {/* Monthly is the default and the safe answer. Moving an item
+                    to a longer cycle is a decision about how often it is worth
+                    walking to, so it is said here rather than inferred from
+                    how fast the item moves. */}
+                <p className="mt-1 text-[10px] text-slate-500">
+                  How often this item has to be physically counted.
+                </p>
               </div>
             </>
           )}

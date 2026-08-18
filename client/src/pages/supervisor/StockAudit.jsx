@@ -3,10 +3,15 @@ import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import useStockRooms from "../../hooks/useStockRooms";
 import { formatCurrency } from "../../utils/currency";
+import AuditTrailModal from "../../components/AuditTrailModal";
 import {
   AUDIT_STATUS_BADGES,
+  FREQUENCY_BADGES,
+  FREQUENCY_SHORT,
+  VARIANCE_REASONS,
   currentPeriod,
   periodLabel,
+  reasonTone,
   scoreTone,
 } from "../../utils/audit";
 import {
@@ -21,11 +26,20 @@ import {
   CheckCircle2,
   AlertTriangle,
   Calendar,
+  CalendarClock,
+  ScrollText,
+  Layers,
   X,
 } from "lucide-react";
 
 /**
  * The monthly count of one store room (ST-36).
+ *
+ * The sheet lists what the frequency schedule says is owed a count this month
+ * — everything monthly, plus the quarterly and half-yearly items whose turn
+ * has come round — rather than everything on the shelves. A full count is
+ * still one button away for the wall-to-wall stock take; it is just no longer
+ * what the store is asked for every single month.
  *
  * The sheet is counted blind: what the system believes a line holds stays
  * hidden until that line has been saved. A counter who can see the expected
@@ -50,7 +64,13 @@ const StockAudit = () => {
   const [filter, setFilter] = useState("All"); // All | Counted | Uncounted | Variance
   /** lineId → what is in the input, before it is saved. */
   const [drafts, setDrafts] = useState({});
+  /** lineId → the reason picked for a discrepancy, before it is saved. */
+  const [reasonDrafts, setReasonDrafts] = useState({});
   const [adding, setAdding] = useState(false);
+  /** The line whose ledger history is open, if any. */
+  const [trailLineId, setTrailLineId] = useState(null);
+  /** What the schedule says this room owes, before a sheet exists for it. */
+  const [schedule, setSchedule] = useState(null);
 
   /** This month's audits across every room, for the room strip at the top. */
   const fetchMonth = useCallback(async () => {
@@ -91,6 +111,27 @@ const StockAudit = () => {
     })();
   }, [fetchMonth]);
 
+  // What the room owes this month. Read whether or not a sheet is open: before
+  // one exists it says how much work opening it means, and afterwards it says
+  // how much of the room the count is deliberately not asking about.
+  useEffect(() => {
+    if (!roomId) {
+      setSchedule(null);
+      return;
+    }
+    (async () => {
+      try {
+        const { data } = await API.get("/audits/schedule", {
+          params: { stockRoomId: roomId, period },
+        });
+        setSchedule(data);
+      } catch (error) {
+        console.error("Error reading the audit schedule:", error);
+        setSchedule(null);
+      }
+    })();
+  }, [roomId, period]);
+
   /** This room's audit for the month, if it has one. */
   const monthAuditId = useMemo(() => {
     const existing = monthAudits.find((row) => String(row.stockRoom?._id) === String(roomId));
@@ -108,14 +149,15 @@ const StockAudit = () => {
     fetchAudit(monthAuditId);
   }, [roomId, monthAuditId, fetchAudit]);
 
-  const openCount = async () => {
+  const openCount = async (scope = "due") => {
     try {
       setOpening(true);
-      const { data } = await API.post("/audits", { stockRoomId: roomId, period });
+      const { data } = await API.post("/audits", { stockRoomId: roomId, period, scope });
       showToast(data.message, "success");
       await fetchMonth();
       setAudit(data.audit);
       setDrafts({});
+      setReasonDrafts({});
     } catch (error) {
       console.error("Error opening the count:", error);
       showToast(error.response?.data?.message || "Could not open the count", "error");
@@ -125,9 +167,24 @@ const StockAudit = () => {
   };
 
   const saveCounts = async () => {
-    const counts = Object.entries(drafts)
-      .filter(([, value]) => value !== "")
-      .map(([lineId, value]) => ({ lineId, countedQuantity: Number(value) }));
+    // A figure and the reason beside it go up as one edit per line, so a
+    // reason picked for a line saved a minute ago is not sent as a second,
+    // countless save the API would have to guess at.
+    const counted = Object.entries(drafts).filter(([, value]) => value !== "");
+    const withFigure = new Set(counted.map(([lineId]) => lineId));
+
+    const counts = [
+      ...counted.map(([lineId, value]) => ({
+        lineId,
+        countedQuantity: Number(value),
+        ...(reasonDrafts[lineId] !== undefined && {
+          varianceReason: reasonDrafts[lineId],
+        }),
+      })),
+      ...Object.entries(reasonDrafts)
+        .filter(([lineId]) => !withFigure.has(lineId))
+        .map(([lineId, reason]) => ({ lineId, varianceReason: reason })),
+    ];
 
     if (counts.length === 0) {
       showToast("Nothing to save yet", "info");
@@ -147,6 +204,13 @@ const StockAudit = () => {
         }
         return next;
       });
+      setReasonDrafts((prev) => {
+        const next = { ...prev };
+        for (const { lineId } of counts) {
+          if (next[lineId] === reasonDrafts[lineId]) delete next[lineId];
+        }
+        return next;
+      });
       // Re-read rather than trusting the local copy: the server refreshes each
       // line's system quantity as it saves, and those are what the variance is
       // drawn from.
@@ -161,8 +225,29 @@ const StockAudit = () => {
   };
 
   const submitCount = async () => {
-    if (Object.keys(drafts).length > 0) {
-      showToast("Save the counts you have entered before submitting", "error");
+    if (Object.keys(drafts).length + Object.keys(reasonDrafts).length > 0) {
+      showToast("Save what you have entered before submitting", "error");
+      return;
+    }
+
+    // The API refuses a sheet with an unaccounted discrepancy on it. Saying so
+    // here saves a round trip and, more to the point, can point at the filter
+    // that shows exactly which lines are still owed a reason.
+    const unreasoned = lines.filter(
+      (line) =>
+        line.countedQuantity !== null &&
+        line.countedQuantity !== undefined &&
+        line.countedQuantity !== line.systemQuantity &&
+        !line.varianceReason
+    );
+    if (unreasoned.length > 0) {
+      setFilter("Unexplained");
+      showToast(
+        `${unreasoned.length} ${
+          unreasoned.length === 1 ? "discrepancy needs" : "discrepancies need"
+        } a reason before this sheet can be submitted`,
+        "error"
+      );
       return;
     }
     const uncounted = audit.linesTotal - audit.linesCounted;
@@ -204,14 +289,16 @@ const StockAudit = () => {
         if (!haystack.includes(needle)) return false;
       }
       const counted = line.countedQuantity !== null && line.countedQuantity !== undefined;
+      const varies = counted && line.countedQuantity !== line.systemQuantity;
       if (filter === "Counted") return counted;
       if (filter === "Uncounted") return !counted;
-      if (filter === "Variance") return counted && line.countedQuantity !== line.systemQuantity;
+      if (filter === "Variance") return varies;
+      if (filter === "Unexplained") return varies && !line.varianceReason;
       return true;
     });
   }, [lines, search, filter]);
 
-  const pending = Object.keys(drafts).length;
+  const pending = Object.keys(drafts).length + Object.keys(reasonDrafts).length;
   const editable = audit?.status === "In Progress" && audit?.canCount !== false;
   const tone = scoreTone(audit?.score || 0);
 
@@ -295,6 +382,46 @@ const StockAudit = () => {
         </div>
       </div>
 
+      {/* What the schedule owes this room, and what it is holding back. The
+          counter sees the size of the job before committing to it, and the
+          Admin can see afterwards how much of the room a count did not ask
+          about — a figure a sheet of its own lines can never show. */}
+      {roomId && schedule && (
+        <div className="p-4 rounded-2xl glass-premium border border-slate-200 flex flex-wrap items-center gap-x-6 gap-y-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+            <CalendarClock className="h-4 w-4 text-brand-600" />
+            {schedule.stockRoom.name} — {periodLabel(period)}
+          </div>
+          <Tally label="Due now" value={schedule.due} tone="text-slate-900" />
+          <Tally label="Not due yet" value={schedule.notDue} />
+          <Tally
+            label="Overdue"
+            value={schedule.overdue}
+            tone={schedule.overdue ? "text-rose-600" : "text-slate-400"}
+          />
+          <Tally
+            label="Never counted"
+            value={schedule.neverCounted}
+            tone={schedule.neverCounted ? "text-amber-600" : "text-slate-400"}
+          />
+          <div className="flex flex-wrap gap-1.5 sm:ml-auto">
+            {schedule.byFrequency
+              .filter((bucket) => bucket.items > 0)
+              .map((bucket) => (
+                <span
+                  key={bucket.frequency}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-semibold ${
+                    FREQUENCY_BADGES[bucket.frequency]
+                  }`}
+                  title={`${bucket.items} items on a ${bucket.intervalMonths}-month cycle`}
+                >
+                  {bucket.frequency} {bucket.due}/{bucket.items}
+                </span>
+              ))}
+          </div>
+        </div>
+      )}
+
       {!roomId ? (
         <div className="glass-premium rounded-2xl border border-slate-200 p-12 text-center">
           <Warehouse className="h-10 w-10 text-slate-400 mx-auto mb-3" />
@@ -309,17 +436,35 @@ const StockAudit = () => {
           <h3 className="text-base font-bold text-slate-900 mb-1">
             {periodLabel(period)} has not been counted yet
           </h3>
-          <p className="text-xs text-slate-500 mb-5">
-            Opening the count takes a snapshot of everything the room is holding right now.
+          <p className="text-xs text-slate-500 mb-5 max-w-lg mx-auto">
+            {schedule
+              ? `${schedule.due} of the ${schedule.itemsHeld} items on these shelves ${schedule.due===1?"is":"are"} owed a count this month. The other ${schedule.notDue} ${schedule.notDue===1?"is":"are"} on a longer cycle and not due yet.`
+              : "Opening the count takes a snapshot of what the room is holding right now."}
           </p>
-          <button
-            onClick={openCount}
-            disabled={opening}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold shadow hover:bg-brand-700 disabled:opacity-60 cursor-pointer"
-          >
-            {opening ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Start the count
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              onClick={() => openCount("due")}
+              disabled={opening || schedule?.due === 0}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold shadow hover:bg-brand-700 disabled:opacity-60 cursor-pointer"
+            >
+              {opening ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Count what is due{schedule ? ` (${schedule.due})` : ""}
+            </button>
+            <button
+              onClick={() => openCount("full")}
+              disabled={opening}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:border-brand-300 disabled:opacity-60 cursor-pointer"
+            >
+              <Layers className="h-4 w-4" />
+              Full count{schedule ? ` (${schedule.itemsHeld})` : ""}
+            </button>
+          </div>
+          {schedule?.due === 0 && (
+            <p className="mt-4 text-[11px] text-slate-500">
+              Nothing is due here this month. A full count is still available if the room is
+              being stock-taken wall to wall.
+            </p>
+          )}
         </div>
       ) : (
         <>
@@ -348,7 +493,10 @@ const StockAudit = () => {
                 {audit.linesCounted}
                 <span className="text-base font-bold text-slate-400">/{audit.linesTotal}</span>
               </div>
-              <p className="mt-2 text-[10px] text-slate-500">{audit.coverage}% of the sheet</p>
+              <p className="mt-2 text-[10px] text-slate-500">
+                {audit.coverage}% of the sheet
+                {audit.linesSkipped ? ` • ${audit.linesSkipped} not due` : ""}
+              </p>
             </div>
             <div className="glass-premium p-5 rounded-2xl border border-slate-200">
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">
@@ -359,6 +507,11 @@ const StockAudit = () => {
               </div>
               <p className="mt-2 text-[10px] text-slate-500">
                 {audit.linesShort} short • {audit.linesOver} over
+                {audit.linesUnreasoned
+                  ? ` • ${audit.linesUnreasoned} still unaccounted for`
+                  : audit.linesUnexplained
+                  ? ` • ${audit.linesUnexplained} unexplained`
+                  : ""}
               </p>
             </div>
             <div className="glass-premium p-5 rounded-2xl border border-slate-200">
@@ -389,6 +542,15 @@ const StockAudit = () => {
                   </span>
                 </h4>
                 <p className="text-[11px] font-mono text-brand-700">{audit.auditNumber}</p>
+                <p className="text-[10px] text-slate-500">
+                  {audit.scope === "Full"
+                    ? "Full count — every item the room holds"
+                    : `Due this month${
+                        audit.linesSkipped
+                          ? ` — ${audit.linesSkipped} not due and left off`
+                          : ""
+                      }`}
+                </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -402,7 +564,7 @@ const StockAudit = () => {
                   />
                 </div>
                 <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-200">
-                  {["All", "Uncounted", "Counted", "Variance"].map((option) => (
+                  {["All", "Uncounted", "Counted", "Variance", "Unexplained"].map((option) => (
                     <button
                       key={option}
                       onClick={() => setFilter(option)}
@@ -419,6 +581,17 @@ const StockAudit = () => {
 
                 {editable && (
                   <>
+                    {audit.scope !== "Full" && (
+                      <button
+                        onClick={() => openCount("full")}
+                        disabled={opening}
+                        title="Add the items that were not due, without disturbing anything already counted"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:border-brand-300 disabled:opacity-60 cursor-pointer"
+                      >
+                        <Layers className="h-3.5 w-3.5" />
+                        Widen to full
+                      </button>
+                    )}
                     <button
                       onClick={() => setAdding(true)}
                       className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:border-brand-300 cursor-pointer"
@@ -481,6 +654,7 @@ const StockAudit = () => {
                     <th className="py-4 px-5 text-center">Counted</th>
                     <th className="py-4 px-5 text-center">Variance</th>
                     <th className="py-4 px-5 text-right">Value</th>
+                    <th className="py-4 px-5">Why, and what moved</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 text-slate-700">
@@ -505,10 +679,29 @@ const StockAudit = () => {
                                 Found
                               </span>
                             )}
+                            {line.auditFrequency && line.auditFrequency !== "Monthly" && (
+                              <span
+                                className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold ${
+                                  FREQUENCY_BADGES[line.auditFrequency]
+                                }`}
+                                title={`Counted every ${
+                                  line.auditFrequency === "Quarterly"
+                                    ? "three months"
+                                    : "six months"
+                                }`}
+                              >
+                                {FREQUENCY_SHORT[line.auditFrequency]}
+                              </span>
+                            )}
                           </div>
                           <div className="text-[10px] font-mono text-brand-700">
                             {line.productCode || "—"}
                           </div>
+                          {/* Why this item is being asked for this month, so
+                              nobody is walking to a shelf on faith. */}
+                          {line.dueReason && (
+                            <div className="text-[10px] text-slate-400">{line.dueReason}</div>
+                          )}
                         </td>
                         <td className="py-3 px-5 text-xs font-mono text-slate-600">
                           {line.rackNumber || "—"}
@@ -588,6 +781,65 @@ const StockAudit = () => {
                         <td className="py-3 px-5 text-right text-xs font-semibold text-slate-900">
                           {variance ? formatCurrency(Math.abs(variance) * line.unitCost) : "—"}
                         </td>
+                        <td className="py-3 px-5">
+                          <div className="flex items-center gap-1.5">
+                            {variance !== null && variance !== 0 ? (
+                              editable ? (
+                                <select
+                                  value={reasonDrafts[line._id] ?? line.varianceReason ?? ""}
+                                  onChange={(event) => {
+                                    const value = event.target.value;
+                                    setReasonDrafts((prev) => {
+                                      const next = { ...prev };
+                                      // Choosing what is already saved is not
+                                      // an edit, so it stops being pending.
+                                      if (value === (line.varianceReason || "")) {
+                                        delete next[line._id];
+                                      } else {
+                                        next[line._id] = value;
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className={`px-2 py-1.5 rounded-lg border text-[11px] font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500/30 cursor-pointer ${
+                                    reasonDrafts[line._id] !== undefined
+                                      ? "border-brand-400 bg-brand-50 text-slate-900"
+                                      : line.varianceReason
+                                      ? "border-slate-200 bg-white text-slate-700"
+                                      : "border-rose-300 bg-rose-50 text-rose-700"
+                                  }`}
+                                >
+                                  <option value="">Needs a reason</option>
+                                  {VARIANCE_REASONS.map((reason) => (
+                                    <option key={reason} value={reason}>
+                                      {reason}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${reasonTone(
+                                    line.varianceReason
+                                  )}`}
+                                >
+                                  {line.varianceReason || "No reason recorded"}
+                                </span>
+                              )
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+
+                            {counted && (
+                              <button
+                                onClick={() => setTrailLineId(line._id)}
+                                title="What the ledger says moved since this line was last counted"
+                                className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-brand-300 hover:text-brand-600 cursor-pointer"
+                              >
+                                <ScrollText className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
@@ -605,6 +857,14 @@ const StockAudit = () => {
         </>
       )}
 
+      {trailLineId && (
+        <AuditTrailModal
+          auditId={audit._id}
+          lineId={trailLineId}
+          onClose={() => setTrailLineId(null)}
+        />
+      )}
+
       {adding && (
         <FoundItemModal
           auditId={audit._id}
@@ -619,6 +879,14 @@ const StockAudit = () => {
     </div>
   );
 };
+
+/** One figure from the schedule strip, with what it counts underneath. */
+const Tally = ({ label, value, tone = "text-slate-700" }) => (
+  <div>
+    <div className={`text-lg font-extrabold leading-none ${tone}`}>{value}</div>
+    <div className="text-[10px] uppercase tracking-wide text-slate-500 mt-1">{label}</div>
+  </div>
+);
 
 /**
  * Adds a line for stock found on a shelf the sheet did not list.

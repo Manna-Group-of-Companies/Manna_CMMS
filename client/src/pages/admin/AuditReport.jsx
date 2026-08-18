@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import { formatCurrency } from "../../utils/currency";
+import AuditTrailModal from "../../components/AuditTrailModal";
 import {
   AUDIT_STATUS_BADGES,
   currentPeriod,
   periodBefore,
   periodLabel,
+  reasonTone,
   scoreTone,
   shortPeriodLabel,
 } from "../../utils/audit";
@@ -21,6 +23,7 @@ import {
   RotateCcw,
   X,
   HelpCircle,
+  ScrollText,
   TrendingUp,
 } from "lucide-react";
 
@@ -486,6 +489,8 @@ const AuditSheetModal = ({ auditId, onClose, onChanged }) => {
   const [working, setWorking] = useState(false);
   const [note, setNote] = useState("");
   const [onlyVariance, setOnlyVariance] = useState(true);
+  /** The line whose ledger history the Admin is reading, if any. */
+  const [trailLineId, setTrailLineId] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -545,6 +550,19 @@ const AuditSheetModal = ({ auditId, onClose, onChanged }) => {
               )}
             </h4>
             <p className="text-[11px] font-mono text-brand-700">{audit?.auditNumber}</p>
+            {audit && (
+              <p className="text-[10px] text-slate-500">
+                {audit.scope === "Full"
+                  ? "Full count — every item the room held"
+                  : `Scheduled count${
+                      audit.linesSkipped
+                        ? ` — ${audit.linesSkipped} item${
+                            audit.linesSkipped === 1 ? " was" : "s were"
+                          } not due and left off the sheet`
+                        : ""
+                    }`}
+              </p>
+            )}
           </div>
           <button
             onClick={onClose}
@@ -607,6 +625,42 @@ const AuditSheetModal = ({ auditId, onClose, onChanged }) => {
               </div>
             )}
 
+            {/* What the store said about its own discrepancies. Grouped
+                rather than left line by line, because the shape of the answers
+                is the finding: a month of "explained by movement" is a store
+                keeping up, and a month of "unexplained" is one that is not. */}
+            {audit.varianceByReason?.length > 0 && (
+              <div className="px-5 py-4 border-b border-slate-200 bg-slate-50">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2.5">
+                  What the discrepancies were put down to
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {audit.varianceByReason.map((bucket) => (
+                    <div
+                      key={bucket.reason || "none"}
+                      className={`px-3 py-2 rounded-xl ${reasonTone(bucket.reason)}`}
+                    >
+                      <div className="text-xs font-bold">
+                        {bucket.reason || "No reason recorded"}
+                      </div>
+                      <div className="text-[10px] opacity-90">
+                        {bucket.lines} {bucket.lines === 1 ? "line" : "lines"} •{" "}
+                        {bucket.quantity} units • {formatCurrency(bucket.value)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {audit.linesUnexplained > 0 && (
+                  <p className="mt-3 text-[11px] text-amber-700">
+                    {audit.linesUnexplained}{" "}
+                    {audit.linesUnexplained === 1 ? "line" : "lines"} the store could not
+                    account for at the shelf. Open the ledger beside one to see whether a
+                    recorded movement explains it after all.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="px-5 py-2.5 border-b border-slate-200 flex items-center justify-between gap-3">
               <span className="text-[11px] text-slate-500">
                 Opened by {audit.openedBy?.name || "—"}
@@ -634,6 +688,7 @@ const AuditSheetModal = ({ auditId, onClose, onChanged }) => {
                     <th className="py-3 px-5 text-center">Counted</th>
                     <th className="py-3 px-5 text-center">Variance</th>
                     <th className="py-3 px-5 text-right">Value</th>
+                    <th className="py-3 px-5">Reason given</th>
                     <th className="py-3 px-5">Note</th>
                   </tr>
                 </thead>
@@ -689,6 +744,30 @@ const AuditSheetModal = ({ auditId, onClose, onChanged }) => {
                         <td className="py-2.5 px-5 text-right text-xs font-semibold">
                           {variance ? formatCurrency(Math.abs(variance) * line.unitCost) : "—"}
                         </td>
+                        <td className="py-2.5 px-5">
+                          <div className="flex items-center gap-1.5">
+                            {variance ? (
+                              <span
+                                className={`px-2 py-0.5 rounded-md text-[10px] font-semibold whitespace-nowrap ${reasonTone(
+                                  line.varianceReason
+                                )}`}
+                              >
+                                {line.varianceReason || "No reason recorded"}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+                            {counted && (
+                              <button
+                                onClick={() => setTrailLineId(line._id)}
+                                title="Reconcile this line against the movement ledger"
+                                className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-brand-300 hover:text-brand-600 cursor-pointer"
+                              >
+                                <ScrollText className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
                         <td className="py-2.5 px-5 text-[11px] italic text-slate-600 max-w-[200px] truncate">
                           {line.note || "—"}
                         </td>
@@ -707,6 +786,14 @@ const AuditSheetModal = ({ auditId, onClose, onChanged }) => {
                 </div>
               )}
             </div>
+
+            {trailLineId && (
+              <AuditTrailModal
+                auditId={auditId}
+                lineId={trailLineId}
+                onClose={() => setTrailLineId(null)}
+              />
+            )}
 
             <div className="px-5 py-4 border-t border-slate-200 flex flex-wrap items-center justify-end gap-2">
               {audit.status === "Submitted" && (
