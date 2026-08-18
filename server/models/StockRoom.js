@@ -32,8 +32,21 @@ const stockRoomSchema = new mongoose.Schema(
   }
 );
 
-/** The rooms every install starts with, in display order. */
-stockRoomSchema.statics.DEFAULT_ROOMS = ["Manna Rubber Park", "Consumables Room"];
+/**
+ * The rooms every install starts with, in display order (ST-33).
+ *
+ * The first is the group's main store: a supervisor's merge goes there when
+ * nobody names a room, and the seeded Branch account is scoped to it.
+ *
+ * More can be added at runtime and nothing here has to change for that — this
+ * list only says what a fresh database is given.
+ */
+stockRoomSchema.statics.DEFAULT_ROOMS = [
+  "Manna Rubber Products",
+  "Hi-Tech Rubber Industries",
+  "Manna Treads",
+  "Consumables Room",
+];
 
 /**
  * Rooms that have been renamed, old name → new. The room record is renamed in
@@ -49,6 +62,9 @@ stockRoomSchema.statics.RENAMED_ROOMS = [
   ["Store Room 1", "Engineer Room"],
   ["Store Room 2", "Consumables Room"],
   ["Engineer Room", "Manna Rubber Park"],
+  // The park is the site; the store belongs to the company on it, and there
+  // are three of those now. Its stock follows the name.
+  ["Manna Rubber Park", "Manna Rubber Products"],
 ];
 
 const StockRoom = mongoose.model("StockRoom", stockRoomSchema);

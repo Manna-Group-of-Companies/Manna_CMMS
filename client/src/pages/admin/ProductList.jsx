@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
+import useStockRooms from "../../hooks/useStockRooms";
 import ProductFormModal from "./ProductFormModal";
+import CompanyBreakdown from "../../components/CompanyBreakdown";
 import { statusTone } from "../../utils/productStatus";
 import {
   Search,
@@ -18,6 +20,8 @@ import {
 } from "lucide-react";
 
 const ProductList = () => {
+  // The companies stock can be filed against, read from the API (ST-33).
+  const rooms = useStockRooms();
   const { showToast } = useNotifications();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -40,13 +44,13 @@ const ProductList = () => {
     try {
       setDeleting(true);
       const { data } = await API.delete(`/products/${selectedProduct._id}`);
-      showToast(data.message || "Product deleted", "success");
+      showToast(data.message || "Engineering Stock deleted", "success");
       setActiveModal(null);
       setSelectedProduct(null);
       fetchProducts();
     } catch (error) {
       console.error("Error deleting product:", error);
-      showToast(error.response?.data?.message || "Failed to delete product", "error");
+      showToast(error.response?.data?.message || "Failed to delete engineering stock", "error");
     } finally {
       setDeleting(false);
     }
@@ -67,7 +71,7 @@ const ProductList = () => {
       setProducts(data);
     } catch (error) {
       console.error("Error loading products:", error);
-      if (!silent) showToast("Could not load product list", "error");
+      if (!silent) showToast("Could not load engineering stock list", "error");
     } finally {
       if (!silent) setLoading(false);
     }
@@ -132,7 +136,7 @@ const ProductList = () => {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="field field-search"
-              aria-label="Search products"
+              aria-label="Search engineering stock"
             />
           </div>
 
@@ -177,8 +181,11 @@ const ProductList = () => {
               aria-label="Filter by company"
             >
               <option value="">All Companies</option>
-              <option value="Manna Rubber Park">Manna Rubber Park</option>
-              <option value="Consumables Room">Consumables Room</option>
+              {rooms.map((room) => (
+                <option key={room._id} value={room.name}>
+                  {room.name}
+                </option>
+              ))}
             </select>
 
             {/* Stock Level Select */}
@@ -203,7 +210,7 @@ const ProductList = () => {
           className="btn btn-primary w-full sm:w-auto"
         >
           <Plus className="h-4 w-4" />
-          Add Product
+          Add Engineering Stock
         </button>
       </div>
 
@@ -215,7 +222,7 @@ const ProductList = () => {
       ) : products.length === 0 ? (
         <div className="empty">
           <HelpCircle className="h-10 w-10 text-slate-300 mb-3" />
-          <h3 className="empty-title">No products found</h3>
+          <h3 className="empty-title">No engineering stock found</h3>
           <p className="empty-sub">Try adjusting your search query or filters.</p>
         </div>
       ) : (
@@ -224,7 +231,7 @@ const ProductList = () => {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>Product</th>
+                  <th>Engineering Stock</th>
                   <th>Category</th>
                   <th>Condition</th>
                   <th>Rack</th>
@@ -313,7 +320,7 @@ const ProductList = () => {
                               setActiveModal("details");
                             }}
                             className="icon-btn"
-                            title="Product Details"
+                            title="Engineering Stock Details"
                             aria-label={`Details for ${product.name}`}
                           >
                             <Eye className="h-4 w-4" />
@@ -325,7 +332,7 @@ const ProductList = () => {
                               setActiveModal("form");
                             }}
                             className="icon-btn icon-btn-brand"
-                            title="Edit Product"
+                            title="Edit Stock"
                             aria-label={`Edit ${product.name}`}
                           >
                             <Edit className="h-4 w-4" />
@@ -337,7 +344,7 @@ const ProductList = () => {
                               setActiveModal("delete");
                             }}
                             className="icon-btn icon-btn-danger"
-                            title="Delete Product"
+                            title="Delete Engineering Stock"
                             aria-label={`Delete ${product.name}`}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -374,7 +381,7 @@ const ProductList = () => {
           {activeModal === "delete" && selectedProduct && (
             <div className="modal max-w-md">
               <div className="modal-head">
-                <h3 className="modal-title">Delete Product</h3>
+                <h3 className="modal-title">Delete Engineering Stock</h3>
                 <button onClick={() => setActiveModal(null)} className="modal-close" aria-label="Close">
                   <X className="h-5 w-5" />
                 </button>
@@ -413,7 +420,7 @@ const ProductList = () => {
               <div className="modal-head">
                 <h3 className="modal-title">
                   <Boxes className="h-[18px] w-[18px] text-brand-700" />
-                  Product Specifications
+                  Engineering Stock Specifications
                 </h3>
                 <button onClick={() => setActiveModal(null)} className="modal-close" aria-label="Close">
                   <X className="h-5 w-5" />
@@ -487,6 +494,14 @@ const ProductList = () => {
                     </span>
                   </div>
                 </div>
+
+                {/* ST-35 — the quantity above is the total across companies;
+                    this says which company it is actually in. */}
+                <CompanyBreakdown
+                  productId={selectedProduct._id}
+                  unit={selectedProduct.unit}
+                  rack={selectedProduct.rackNumber}
+                />
 
                 <div className="kv">
                   <span className="kv-label">Description</span>

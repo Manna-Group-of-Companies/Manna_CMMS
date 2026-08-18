@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
+import useStockRooms from "../../hooks/useStockRooms";
 import { COMMON_STATUSES, statusTone } from "../../utils/productStatus";
 import TaxonomySelect, {
   useCategoryOptions,
@@ -13,6 +14,7 @@ import ItemNameBuilder, {
   isNamingBlank,
 } from "../../components/ItemNameBuilder";
 import DuplicateWarning, { useDuplicateCheck } from "../../components/DuplicateWarning";
+import CompanyBreakdown from "../../components/CompanyBreakdown";
 import {
   Search,
   Filter,
@@ -58,12 +60,14 @@ const ProductList = () => {
   const [activeModal, setActiveModal] = useState(null); // 'add' | 'edit' | 'details' | 'issue' | null
   const [selectedProduct, setSelectedProduct] = useState(null);
 
-  // Issue Product Form State
+  // Issue Engineering Stock Form State
   const [issueQty, setIssueQty] = useState(1);
   const [issueRecipient, setIssueRecipient] = useState("");
   const [issuePurpose, setIssuePurpose] = useState("");
   // Who stock may be issued to, as the Admin keeps them.
   const [recipients, setRecipients] = useState([]);
+  // The companies stock can be filed against, read from the API (ST-33).
+  const rooms = useStockRooms();
 
   /**
    * The add / edit form.
@@ -83,7 +87,7 @@ const ProductList = () => {
     quantity: 0,
     unit: "Pcs",
     minStock: 5,
-    storeRoom: "Manna Rubber Park",
+    storeRoom: "",
     description: "",
     image: "",
   });
@@ -131,7 +135,7 @@ const ProductList = () => {
       setProducts(data);
     } catch (error) {
       console.error("Error loading products:", error);
-      if (!silent) showToast("Could not load product list", "error");
+      if (!silent) showToast("Could not load engineering stock list", "error");
     } finally {
       if (!silent) setLoading(false);
     }
@@ -226,7 +230,7 @@ const ProductList = () => {
     setActiveModal("edit");
   };
 
-  // Open Issue Product Form
+  // Open Issue Engineering Stock Form
   const openIssueModal = (product) => {
     setSelectedProduct(product);
     setIssueQty(1);
@@ -238,7 +242,7 @@ const ProductList = () => {
     setActiveModal("issue");
   };
 
-  // Submit Issue Product (direct stock decrement)
+  // Submit Issue Engineering Stock (direct stock decrement)
   const handleIssueProduct = async (e) => {
     e.preventDefault();
     if (issueQty < 1) {
@@ -260,7 +264,7 @@ const ProductList = () => {
       setActiveModal(null);
       fetchProducts(); // Refresh to show updated quantity
     } catch (error) {
-      showToast(error.response?.data?.message || "Failed to issue product", "error");
+      showToast(error.response?.data?.message || "Failed to issue engineering stock", "error");
     }
   };
 
@@ -281,7 +285,7 @@ const ProductList = () => {
         },
         ...overrides,
       });
-      showToast("Product ADD request submitted successfully!", "success");
+      showToast("Engineering Stock ADD request submitted successfully!", "success");
       setActiveModal(null);
       resetProductForm();
     } catch (error) {
@@ -353,7 +357,7 @@ const ProductList = () => {
       const retry = intakeOverrideFor(error, overrides);
       if (retry) return handleEditProduct(null, { ...overrides, ...retry });
 
-      showToast(error.response?.data?.message || "Failed to save the product", "error");
+      showToast(error.response?.data?.message || "Failed to save the engineering stock", "error");
     }
   };
 
@@ -367,7 +371,7 @@ const ProductList = () => {
       quantity: 0,
       unit: "Pcs",
       minStock: 5,
-      storeRoom: "Manna Rubber Park",
+      storeRoom: "",
       description: "",
       image: "",
     });
@@ -449,8 +453,11 @@ const ProductList = () => {
               className="px-3 py-2 text-xs rounded-xl bg-white border border-slate-200 text-slate-700 focus:outline-none focus:border-brand-500"
             >
               <option value="">All Companies</option>
-              <option value="Manna Rubber Park">Manna Rubber Park</option>
-              <option value="Consumables Room">Consumables Room</option>
+              {rooms.map((room) => (
+                <option key={room._id} value={room.name}>
+                  {room.name}
+                </option>
+              ))}
             </select>
 
             {/* Stock Level Select */}
@@ -475,7 +482,7 @@ const ProductList = () => {
           className="w-full md:w-auto flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg cursor-pointer active:scale-98 transition-all shrink-0"
         >
           <Plus className="h-4 w-4" />
-          Request Add Product
+          Request Add Engineering Stock
         </button>
       </div>
 
@@ -487,7 +494,7 @@ const ProductList = () => {
       ) : products.length === 0 ? (
         <div className="glass-premium p-12 text-center rounded-2xl border border-slate-200 flex flex-col items-center justify-center">
           <HelpCircle className="h-10 w-10 text-slate-400 mb-3" />
-          <h3 className="text-base font-bold text-slate-900 mb-1">No products found</h3>
+          <h3 className="text-base font-bold text-slate-900 mb-1">No engineering stock found</h3>
           <p className="text-xs text-slate-500">
             Try adjusting your search query or filters.
           </p>
@@ -498,7 +505,7 @@ const ProductList = () => {
             <table className="w-full text-left text-sm border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-medium text-xs uppercase tracking-wider">
-                  <th className="py-4 px-6">Product</th>
+                  <th className="py-4 px-6">Engineering Stock</th>
                   <th className="py-4 px-6">Category</th>
                   <th className="py-4 px-6">Condition</th>
                   <th className="py-4 px-6">Rack</th>
@@ -577,7 +584,7 @@ const ProductList = () => {
                               setActiveModal("details");
                             }}
                             className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-slate-900 transition-all cursor-pointer"
-                            title="Product Details"
+                            title="Engineering Stock Details"
                           >
                             <Eye className="h-4 w-4" />
                           </button>
@@ -586,17 +593,17 @@ const ProductList = () => {
                           <button
                             onClick={() => openEditModal(product)}
                             className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-brand-700 transition-all cursor-pointer"
-                            title="Edit Product"
+                            title="Edit Stock"
                           >
                             <Edit className="h-4 w-4" />
                           </button>
 
 
-                          {/* Issue Product (direct) */}
+                          {/* Issue Engineering Stock (direct) */}
                           <button
                             onClick={() => openIssueModal(product)}
                             className="p-1.5 hover:bg-slate-100 rounded-lg text-amber-600 hover:text-amber-600 transition-all cursor-pointer"
-                            title="Issue Product"
+                            title="Issue Engineering Stock"
                           >
                             <Send className="h-4 w-4" />
                           </button>
@@ -623,7 +630,7 @@ const ProductList = () => {
           {activeModal === "details" && selectedProduct && (
             <div className="glass-premium w-full max-w-lg rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-                <h3 className="font-bold text-lg text-slate-900">Product Specifications</h3>
+                <h3 className="font-bold text-lg text-slate-900">Engineering Stock Specifications</h3>
                 <button
                   onClick={() => setActiveModal(null)}
                   className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 cursor-pointer"
@@ -686,6 +693,14 @@ const ProductList = () => {
                   </div>
                 </div>
 
+                {/* ST-35 — the quantity above is the total across companies;
+                    this says which company it is actually in. */}
+                <CompanyBreakdown
+                  productId={selectedProduct._id}
+                  unit={selectedProduct.unit}
+                  rack={selectedProduct.rackNumber}
+                />
+
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
                   <span className="text-slate-500 block mb-1">Description</span>
                   <p className="text-slate-700 leading-relaxed">{selectedProduct.description || "No description provided."}</p>
@@ -699,7 +714,7 @@ const ProductList = () => {
             <div className="glass-premium w-full max-w-2xl rounded-2xl border border-slate-200 max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in text-left">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="font-bold text-lg text-slate-900">
-                  {activeModal === "add" ? "Request Add New Product" : `Edit Product: ${selectedProduct?.name}`}
+                  {activeModal === "add" ? "Request Add New Engineering Stock" : `Edit Stock: ${selectedProduct?.name}`}
                 </h3>
                 <button
                   onClick={() => setActiveModal(null)}
@@ -742,7 +757,7 @@ const ProductList = () => {
                   <div className="md:col-span-2">
                     {/* No asterisk on an edit: nothing is being asked for. */}
                     <label className="block text-xs font-semibold text-slate-600 mb-1">
-                      Product Name{activeModal === "edit" ? "" : " *"}
+                      Engineering Stock Name{activeModal === "edit" ? "" : " *"}
                     </label>
                     {activeModal === "edit" ? (
                       <>
@@ -898,8 +913,11 @@ const ProductList = () => {
                           required
                           className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
                         >
-                          <option value="Manna Rubber Park">Manna Rubber Park</option>
-                          <option value="Consumables Room">Consumables Room</option>
+                          {rooms.map((room) => (
+                            <option key={room._id} value={room.name}>
+                              {room.name}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </>
@@ -907,7 +925,7 @@ const ProductList = () => {
 
                   {/* Image URL / Quick Select */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Product Image URL</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Engineering Stock Image URL</label>
                     <input
                       type="text"
                       name="image"
@@ -1012,7 +1030,7 @@ const ProductList = () => {
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
                   <Send className="h-5 w-5 text-amber-600" />
-                  Issue Product
+                  Issue Engineering Stock
                 </h3>
                 <button
                   onClick={() => setActiveModal(null)}

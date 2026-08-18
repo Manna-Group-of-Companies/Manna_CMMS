@@ -152,8 +152,8 @@ const AdminIssueHistory = () => {
 
     const columns = [
       ["Issue #", (i) => i.issueNumber],
-      ["Product Code", (i) => i.product?.code || ""],
-      ["Product", (i) => i.product?.name || "Deleted Product"],
+      ["Engineering Stock Code", (i) => i.product?.code || ""],
+      ["Engineering Stock", (i) => i.product?.name || "Deleted Engineering Stock"],
       ["From Room", (i) => roomsOf(i).join(", ")],
       ["Issued Qty", (i) => i.quantity],
       ["Unit", (i) => i.product?.unit || ""],
@@ -205,11 +205,23 @@ const AdminIssueHistory = () => {
     "Partially Returned": { tone: "badge-amber", label: "Part returned" },
   };
 
-  // Rooms are admin-configurable, so only the two an install ships with get
-  // their own colour; anything added later falls back to slate.
-  const ROOM_TONE = {
-    "Manna Rubber Park": "badge-indigo",
-    "Consumables Room": "badge-cyan",
+  // Companies are admin-configurable and there is no fixed set of them, so a
+  // colour is derived from the name rather than listed against it: the same
+  // company keeps the same badge everywhere without anyone maintaining a map.
+  const ROOM_TONES = [
+    "badge-indigo",
+    "badge-cyan",
+    "badge-emerald",
+    "badge-amber",
+    "badge-rose",
+  ];
+
+  const roomTone = (name) => {
+    let hash = 0;
+    for (const character of String(name)) {
+      hash = (hash * 31 + character.charCodeAt(0)) % 997;
+    }
+    return ROOM_TONES[hash % ROOM_TONES.length];
   };
 
   /**
@@ -330,12 +342,12 @@ const AdminIssueHistory = () => {
         <div className="empty">
           <HelpCircle className="h-10 w-10 text-slate-300 mb-3" />
           <h3 className="empty-title">
-            {filtersApplied ? "No issues match these filters" : "No products have been issued yet"}
+            {filtersApplied ? "No issues match these filters" : "No engineering stock has been issued yet"}
           </h3>
           <p className="empty-sub">
             {filtersApplied
               ? "Try a wider date range, or a different supervisor."
-              : "When a supervisor issues a product, it will appear here."}
+              : "When a supervisor issues engineering stock, it will appear here."}
           </p>
         </div>
       ) : (
@@ -345,7 +357,7 @@ const AdminIssueHistory = () => {
               <thead>
                 <tr>
                   <th>Issue #</th>
-                  <th>Product</th>
+                  <th>Engineering Stock</th>
                   <th>From Room</th>
                   <th className="text-center">Issued</th>
                   <th className="text-center">Returned</th>
@@ -386,7 +398,7 @@ const AdminIssueHistory = () => {
                             className="flex items-center gap-3 min-w-[190px] text-left rounded-lg -mx-1.5 px-1.5 py-1 transition-colors hover:bg-slate-100 cursor-pointer disabled:cursor-default disabled:hover:bg-transparent"
                             onClick={() => issue.product && setSelectedProduct(issue.product)}
                             disabled={!issue.product}
-                            title={issue.product ? "View product specifications" : undefined}
+                            title={issue.product ? "View engineering stock specifications" : undefined}
                           >
                             <img
                               src={
@@ -398,7 +410,7 @@ const AdminIssueHistory = () => {
                             />
                             <span className="min-w-0">
                               <span className="cell-title block truncate">
-                                {issue.product?.name || "Deleted Product"}
+                                {issue.product?.name || "Deleted Engineering Stock"}
                               </span>
                               <span className="mono block text-brand-700">
                                 {issue.product?.code || "—"}
@@ -416,7 +428,7 @@ const AdminIssueHistory = () => {
                               rooms.map((room) => (
                                 <span
                                   key={room}
-                                  className={`badge badge-soft ${ROOM_TONE[room] || "badge-slate"}`}
+                                  className={`badge badge-soft ${roomTone(room)}`}
                                 >
                                   {room}
                                 </span>
@@ -613,14 +625,14 @@ const AdminIssueHistory = () => {
         </div>
       )}
 
-      {/* Product Details Modal */}
+      {/* Engineering Stock Details Modal */}
       {selectedProduct && (
         <div className="modal-backdrop">
           <div className="modal max-w-lg">
             <div className="modal-head">
               <h3 className="modal-title">
                 <Boxes className="h-[18px] w-[18px] text-brand-700" />
-                Product Specifications
+                Engineering Stock Specifications
               </h3>
               <button
                 onClick={() => setSelectedProduct(null)}

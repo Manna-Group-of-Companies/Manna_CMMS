@@ -8,7 +8,7 @@
  *
  *   node scripts/importProducts.js <file.csv> [options]
  *
- *   --room "<name>"  Room for rows with no store room column (default: Manna Rubber Park)
+ *   --room "<name>"  Room for rows with no store room column (default: Manna Rubber Products)
  *   --update         Overwrite the fields of products whose code already exists
  *   --dry-run        Parse and validate only; write nothing
  *   --tidy           Repair rows the store take left rough instead of rejecting
@@ -36,7 +36,7 @@ import {
 
 dotenv.config();
 
-const DEFAULT_ROOM = "Manna Rubber Park";
+const DEFAULT_ROOM = "Manna Rubber Products";
 
 /** What a row falls back to under --tidy when the sheet left the cell empty. */
 const TIDY_UNIT = "Units";
@@ -250,7 +250,7 @@ const run = async () => {
   const options = parseArgs(process.argv.slice(2));
 
   if (!options.file) {
-    console.error("Usage: node scripts/importProducts.js <file.csv> [--room \"Manna Rubber Park\"] [--update] [--dry-run]");
+    console.error("Usage: node scripts/importProducts.js <file.csv> [--room \"Manna Rubber Products\"] [--update] [--dry-run]");
     process.exit(1);
   }
 
