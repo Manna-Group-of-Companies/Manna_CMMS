@@ -19,6 +19,96 @@ import {
   HelpCircle,
 } from "lucide-react";
 
+/** The two intake flags. Only shown when they say something: a null
+    nameCompliant means "never checked", which is not a finding. */
+const ProductFlags = ({ product }) => {
+  const offName = product.nameCompliant === false;
+  const sapPending = product.sap?.status === "Pending";
+  const sapCode = product.sap?.status === "Created" && product.sap.code;
+  if (!offName && !sapPending && !sapCode) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1 mt-0.5">
+      {offName && (
+        <span className="badge badge-amber badge-soft text-[10px]">Name not SOI1/SOP1</span>
+      )}
+      {sapPending && (
+        <span className="badge badge-indigo badge-soft text-[10px]">Pending SAP</span>
+      )}
+      {sapCode && (
+        <span className="badge badge-emerald badge-soft text-[10px]">SAP {product.sap.code}</span>
+      )}
+    </div>
+  );
+};
+
+/** What is on the shelf, over the limit it is judged against. Without the
+    limit an amber badge only says "low" — this says how low, and against
+    what, without opening the item. */
+const StockBadge = ({ product }) => {
+  const isLowStock = product.quantity <= product.minStock;
+  return (
+    <div className="whitespace-nowrap">
+      <span
+        className={`badge badge-pill ${
+          product.quantity === 0 ? "badge-rose" : isLowStock ? "badge-amber" : "badge-emerald"
+        }`}
+      >
+        {isLowStock && <AlertCircle className="h-3 w-3" />}
+        {product.quantity} {product.unit}
+      </span>
+      <div className="text-[11px] text-slate-500 mt-0.5">
+        min {product.minStock ?? 0} {product.unit}
+      </div>
+    </div>
+  );
+};
+
+/** Details / edit / delete. Shared so the table row and the phone card offer
+    the same three actions in the same order. */
+const RowActions = ({ product, onOpen }) => (
+  <div className="flex items-center justify-end gap-1">
+    <button
+      onClick={() => onOpen(product, "details")}
+      className="icon-btn"
+      title="Engineering Stock Details"
+      aria-label={`Details for ${product.name}`}
+    >
+      <Eye className="h-4 w-4" />
+    </button>
+    <button
+      onClick={() => onOpen(product, "form")}
+      className="icon-btn icon-btn-brand"
+      title="Edit Stock"
+      aria-label={`Edit ${product.name}`}
+    >
+      <Edit className="h-4 w-4" />
+    </button>
+    <button
+      onClick={() => onOpen(product, "delete")}
+      className="icon-btn icon-btn-danger"
+      title="Delete Engineering Stock"
+      aria-label={`Delete ${product.name}`}
+    >
+      <Trash2 className="h-4 w-4" />
+    </button>
+  </div>
+);
+
+/** One labelled line inside a phone card: a table cell carrying the column
+    header it lost when the table was taken away. */
+const CardRow = ({ label, children }) => (
+  <div className="flex items-start justify-between gap-3 py-1.5">
+    <dt className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+      {label}
+    </dt>
+    <dd className="min-w-0 text-right text-[13px] text-slate-800">{children}</dd>
+  </div>
+);
+
+const PLACEHOLDER_IMAGE =
+  "https://images.unsplash.com/photo-1595246140707-1e5b22b271d4?w=100&auto=format&fit=crop";
+
 const ProductList = () => {
   // The companies stock can be filed against, read from the API (ST-33).
   const rooms = useStockRooms();
@@ -39,6 +129,12 @@ const ProductList = () => {
   const [activeModal, setActiveModal] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [deleting, setDeleting] = useState(false);
+
+  /** Every row action opens a modal for one product; this is all three. */
+  const openModal = (product, modal) => {
+    setSelectedProduct(product);
+    setActiveModal(modal);
+  };
 
   const handleDelete = async () => {
     try {
@@ -124,9 +220,9 @@ const ProductList = () => {
     <div className="space-y-4 sm:space-y-6">
       {/* Search and Action Bar */}
       <div className="panel">
-        <div className="flex-1 w-full flex flex-col sm:flex-row sm:items-center gap-2.5 min-w-0">
+        <div className="flex-1 w-full flex flex-col 2xl:flex-row 2xl:items-center gap-2.5 min-w-0">
           {/* Search Box */}
-          <div className="relative w-full sm:max-w-xs">
+          <div className="relative w-full 2xl:max-w-xs">
             <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400 pointer-events-none">
               <Search className="h-4 w-4" />
             </span>
@@ -141,12 +237,12 @@ const ProductList = () => {
           </div>
 
           {/* Filters */}
-          <div className="grid grid-cols-2 sm:flex gap-2">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4 2xl:flex">
             {/* Category Select */}
             <select
               value={selectedCategory}
               onChange={(e) => handleCategoryChange(e.target.value)}
-              className="field field-sm w-full sm:w-auto cursor-pointer"
+              className="field field-sm w-full 2xl:w-auto cursor-pointer"
               aria-label="Filter by category"
             >
               <option value="">All Categories</option>
@@ -162,7 +258,7 @@ const ProductList = () => {
               value={selectedSubCategory}
               onChange={(e) => setSelectedSubCategory(e.target.value)}
               disabled={subCategories.length === 0}
-              className="field field-sm w-full sm:w-auto cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+              className="field field-sm w-full 2xl:w-auto cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
               aria-label="Filter by sub-category"
             >
               <option value="">All Sub-Categories</option>
@@ -177,7 +273,7 @@ const ProductList = () => {
             <select
               value={selectedStoreRoom}
               onChange={(e) => setSelectedStoreRoom(e.target.value)}
-              className="field field-sm w-full sm:w-auto cursor-pointer"
+              className="field field-sm w-full 2xl:w-auto cursor-pointer"
               aria-label="Filter by company"
             >
               <option value="">All Companies</option>
@@ -192,7 +288,7 @@ const ProductList = () => {
             <select
               value={stockStatus}
               onChange={(e) => setStockStatus(e.target.value)}
-              className="field field-sm w-full sm:w-auto cursor-pointer col-span-2"
+              className="field field-sm w-full 2xl:w-auto cursor-pointer col-span-2 md:col-span-1"
               aria-label="Filter by stock level"
             >
               <option value="">All Stock Levels</option>
@@ -226,55 +322,87 @@ const ProductList = () => {
           <p className="empty-sub">Try adjusting your search query or filters.</p>
         </div>
       ) : (
-        <div className="table-card">
-          <div className="table-scroll">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Engineering Stock</th>
-                  <th>Category</th>
-                  <th>Condition</th>
-                  <th>Rack</th>
-                  <th>Company</th>
-                  <th className="text-center">Stock</th>
-                  <th className="text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((product) => {
-                  const isLowStock = product.quantity <= product.minStock;
-                  return (
+        <>
+          {/* Phone: the same rows, re-laid as cards. Seven columns on a 390px
+              screen is a sideways scroll and nothing else, so each item gets a
+              card and every cell keeps its column header as a label. */}
+          <div className="space-y-3 md:hidden">
+            {products.map((product) => (
+              <div key={product._id} className="card p-4">
+                <div className="flex items-start gap-3">
+                  <img
+                    src={product.image || PLACEHOLDER_IMAGE}
+                    alt=""
+                    className="h-11 w-11 shrink-0 rounded-lg border border-slate-200 object-cover"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="cell-title break-words leading-snug">{product.name}</div>
+                    <div className="mono text-brand-700">{product.code}</div>
+                    <ProductFlags product={product} />
+                  </div>
+                </div>
+
+                <dl className="mt-3 divide-y divide-slate-100 border-t border-slate-100 pt-1">
+                  <CardRow label="Category">
+                    <div>{product.category}</div>
+                    {product.subCategory && (
+                      <div className="text-[11px] text-slate-500">{product.subCategory}</div>
+                    )}
+                  </CardRow>
+                  <CardRow label="Condition">
+                    {product.status ? (
+                      <span className={`badge badge-soft ${statusTone(product.status)}`}>
+                        {product.status}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </CardRow>
+                  <CardRow label="Rack">
+                    <span className="mono text-slate-600">{product.rackNumber || "—"}</span>
+                  </CardRow>
+                  <CardRow label="Company">
+                    <span className="badge badge-slate badge-soft">{product.storeRoom}</span>
+                  </CardRow>
+                </dl>
+
+                <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
+                  <StockBadge product={product} />
+                  <RowActions product={product} onOpen={openModal} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Tablet and up: the full table. */}
+          <div className="table-card hidden md:block">
+            <div className="table-scroll">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Engineering Stock</th>
+                    <th>Category</th>
+                    <th>Condition</th>
+                    <th>Rack</th>
+                    <th>Company</th>
+                    <th className="text-center">Stock</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.map((product) => (
                     <tr key={product._id}>
                       <td>
                         <div className="flex items-center gap-3 min-w-[200px]">
                           <img
-                            src={product.image || "https://images.unsplash.com/photo-1595246140707-1e5b22b271d4?w=50&auto=format&fit=crop"}
+                            src={product.image || PLACEHOLDER_IMAGE}
                             alt=""
                             className="w-9 h-9 rounded-lg object-cover border border-slate-200 shrink-0"
                           />
                           <div className="min-w-0">
                             <div className="cell-title truncate">{product.name}</div>
                             <div className="mono text-brand-700">{product.code}</div>
-                            {/* The two intake flags. Only shown when they say
-                                something: a null nameCompliant means "never
-                                checked", which is not a finding. */}
-                            <div className="flex flex-wrap gap-1 mt-0.5">
-                              {product.nameCompliant === false && (
-                                <span className="badge badge-amber badge-soft text-[10px]">
-                                  Name not SOI1/SOP1
-                                </span>
-                              )}
-                              {product.sap?.status === "Pending" && (
-                                <span className="badge badge-indigo badge-soft text-[10px]">
-                                  Pending SAP
-                                </span>
-                              )}
-                              {product.sap?.status === "Created" && product.sap.code && (
-                                <span className="badge badge-emerald badge-soft text-[10px]">
-                                  SAP {product.sap.code}
-                                </span>
-                              )}
-                            </div>
+                            <ProductFlags product={product} />
                           </div>
                         </div>
                       </td>
@@ -297,73 +425,19 @@ const ProductList = () => {
                       <td>
                         <span className="badge badge-slate badge-soft">{product.storeRoom}</span>
                       </td>
-                      <td className="text-center whitespace-nowrap">
-                        <span
-                          className={`badge badge-pill ${
-                            product.quantity === 0
-                              ? "badge-rose"
-                              : isLowStock
-                              ? "badge-amber"
-                              : "badge-emerald"
-                          }`}
-                        >
-                          {isLowStock && <AlertCircle className="h-3 w-3" />}
-                          {product.quantity} {product.unit}
-                        </span>
-                        {/* The limit the badge is judged against. Without it,
-                            an amber row only says "low" — this says how low,
-                            and against what, without opening the item. */}
-                        <div className="text-[11px] text-slate-500 mt-0.5">
-                          min {product.minStock ?? 0} {product.unit}
-                        </div>
+                      <td className="text-center">
+                        <StockBadge product={product} />
                       </td>
                       <td>
-                        <div className="flex items-center justify-end gap-1">
-                          {/* Details */}
-                          <button
-                            onClick={() => {
-                              setSelectedProduct(product);
-                              setActiveModal("details");
-                            }}
-                            className="icon-btn"
-                            title="Engineering Stock Details"
-                            aria-label={`Details for ${product.name}`}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
-                          {/* Edit */}
-                          <button
-                            onClick={() => {
-                              setSelectedProduct(product);
-                              setActiveModal("form");
-                            }}
-                            className="icon-btn icon-btn-brand"
-                            title="Edit Stock"
-                            aria-label={`Edit ${product.name}`}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </button>
-                          {/* Delete */}
-                          <button
-                            onClick={() => {
-                              setSelectedProduct(product);
-                              setActiveModal("delete");
-                            }}
-                            className="icon-btn icon-btn-danger"
-                            title="Delete Engineering Stock"
-                            aria-label={`Delete ${product.name}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
+                        <RowActions product={product} onOpen={openModal} />
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* ==============================================
@@ -436,7 +510,7 @@ const ProductList = () => {
               <div className="modal-body space-y-5">
                 <div className="flex gap-4">
                   <img
-                    src={selectedProduct.image || "https://images.unsplash.com/photo-1595246140707-1e5b22b271d4?w=100&auto=format"}
+                    src={selectedProduct.image || PLACEHOLDER_IMAGE}
                     alt=""
                     className="w-20 h-20 shrink-0 rounded-xl object-cover border border-slate-200"
                   />
@@ -460,7 +534,7 @@ const ProductList = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="kv">
                     <span className="kv-label">Category</span>
                     <span className="kv-value">{selectedProduct.category}</span>
