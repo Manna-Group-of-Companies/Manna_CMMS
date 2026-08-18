@@ -38,6 +38,18 @@ const asRequestRow = (merge) => ({
   merge,
 });
 
+/**
+ * A supervisor's own returns, merged by them.
+ *
+ * There is no decision in one of these: it is applied the moment it is raised,
+ * so it reaches this console already settled. One still reading Pending was
+ * claimed by an older server and is settled by the server itself on its next
+ * start — approving it here would only credit the stock to a room the
+ * supervisor never chose, so the decision is not offered.
+ */
+const isSupervisorMerge = (request) =>
+  request?.rawType === "merge" && request.merge?.createdVia === "Supervisor";
+
 const RequestManagement = () => {
   const { showToast } = useNotifications();
   const [requests, setRequests] = useState([]);
@@ -400,15 +412,25 @@ const RequestManagement = () => {
                           : "Weekly merge"}{" "}
                         • {selectedRequest.merge.weekKey}
                       </strong>
-                      <span>
-                        Approving moves{" "}
-                        <strong>{selectedRequest.merge.totalQuantity} pcs</strong> out of the
-                        Red Stock Room and into the store room you choose. Rejecting moves
-                        nothing — the stock stays in Red Stock for the next merge.
-                      </span>
+                      {isSupervisorMerge(selectedRequest) ? (
+                        <span>
+                          <strong>{selectedRequest.merge.totalQuantity} pcs</strong> the
+                          supervisor merged themselves — their own returns, going back to the
+                          main store. There is nothing to approve. One still reading Pending
+                          was held by an older server and settles itself when that server
+                          next starts.
+                        </span>
+                      ) : (
+                        <span>
+                          Approving moves{" "}
+                          <strong>{selectedRequest.merge.totalQuantity} pcs</strong> out of the
+                          Red Stock Room and into the store room you choose. Rejecting moves
+                          nothing — the stock stays in Red Stock for the next merge.
+                        </span>
+                      )}
                     </div>
 
-                    {selectedRequest.status === "Pending" && (
+                    {selectedRequest.status === "Pending" && !isSupervisorMerge(selectedRequest) && (
                       <div className="note note-brand flex-col sm:flex-row sm:items-center gap-3 sm:justify-between">
                         <div>
                           <strong className="text-brand-700 flex items-center gap-1.5">
@@ -704,8 +726,9 @@ const RequestManagement = () => {
                 )}
               </div>
 
-              {/* Action Buttons for Pending request */}
-              {selectedRequest.status === "Pending" && (
+              {/* Action Buttons for Pending request. A supervisor's merge is
+                  not among them — see isSupervisorMerge. */}
+              {selectedRequest.status === "Pending" && !isSupervisorMerge(selectedRequest) && (
                 <div className="modal-foot flex-wrap">
                   {/* A merge is decided outright — there is no pending state to
                       return it to without releasing the stock it holds. */}

@@ -370,6 +370,19 @@ export const approveMergeRequest = async (req, res) => {
     if (!request) {
       return res.status(404).json({ message: "Merge request not found" });
     }
+
+    // A supervisor's merge is applied where it is raised, so there is no
+    // decision to make over one. An older server could still leave one at
+    // Pending Approval; those are settled by the boot sweep, and approving one
+    // here would credit the stock to a room the supervisor never chose.
+    if (request.createdVia === "Supervisor") {
+      return res.status(403).json({
+        message:
+          "A supervisor's merge is applied when they raise it — there is nothing here to " +
+          "decide. It settles itself the next time the server starts.",
+      });
+    }
+
     if (request.status !== "Pending Approval") {
       return res.status(400).json({
         message: `This merge request has already been resolved (${request.status})`,
@@ -443,6 +456,17 @@ export const rejectMergeRequest = async (req, res) => {
     if (!request) {
       return res.status(404).json({ message: "Merge request not found" });
     }
+
+    // Nothing to reject either: the stock left Red Stock when the supervisor
+    // merged it, so a rejection here would release a claim that is already gone.
+    if (request.createdVia === "Supervisor") {
+      return res.status(403).json({
+        message:
+          "A supervisor's merge is applied when they raise it — there is nothing here to " +
+          "decide. It settles itself the next time the server starts.",
+      });
+    }
+
     if (request.status !== "Pending Approval") {
       return res.status(400).json({
         message: `This merge request has already been resolved (${request.status})`,

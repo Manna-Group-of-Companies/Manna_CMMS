@@ -56,13 +56,13 @@ const projectBalances = (items, destinationOf) => {
 };
 
 /**
- * The merge review — the only Admin approval in the return flow. Merges arrive
- * from the weekly run and from supervisors asking for their own returns to be
- * moved early; both are decided here.
+ * The merge review — the only Admin approval in the return flow, and only over
+ * the weekly run. Approving moves the quantity out of Red Stock into the store
+ * room the Admin picks here; rejecting moves nothing and leaves it in Red Stock
+ * for next week.
  *
- * Approving moves the quantity out of Red Stock into the store room the Admin
- * picks here; rejecting moves nothing and leaves it in Red Stock for next
- * week.
+ * A supervisor's own merge also lands in this list, but as history: it is
+ * applied where it is raised and there is nothing here to decide about it.
  */
 const MergeRequests = () => {
   const { showToast } = useNotifications();
@@ -207,7 +207,15 @@ const MergeRequests = () => {
 
   // Recomputed each render rather than memoised, so the projected balances
   // follow the destination dropdowns the moment the Admin changes one.
-  const isPending = detail?.status === "Pending Approval";
+  //
+  // A supervisor's merge is applied the moment they raise it, so it is never
+  // waiting on a decision here — it is history. One still reading Pending
+  // Approval was claimed by an older server and is settled by the server itself
+  // on its next start; approving it here would credit the stock to a room the
+  // supervisor never chose, so neither the destination pickers nor the buttons
+  // are offered for one.
+  const isSupervisorMerge = detail?.createdVia === "Supervisor";
+  const isPending = detail?.status === "Pending Approval" && !isSupervisorMerge;
   const projections = detail?.items ? projectBalances(detail.items, destinationFor) : [];
 
   return (
@@ -509,7 +517,7 @@ const MergeRequests = () => {
                 </div>
 
                 {/* Destination for the whole merge */}
-                {detail.status === "Pending Approval" && (
+                {isPending && (
                   <div className="p-4 rounded-xl bg-brand-50 border border-brand-500/20 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
                     <div className="text-[11px] text-slate-700 leading-relaxed">
                       <strong className="text-brand-700 flex items-center gap-1.5">
@@ -609,7 +617,7 @@ const MergeRequests = () => {
                                 </td>
                               )}
                               <td className="py-3 px-4">
-                                {detail.status === "Pending Approval" ? (
+                                {isPending ? (
                                   <select
                                     value={destinationFor(line)}
                                     onChange={(e) =>
@@ -692,7 +700,7 @@ const MergeRequests = () => {
                 )}
               </div>
 
-              {detail.status === "Pending Approval" && (
+              {isPending && (
                 <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-3">
                   <button
                     onClick={() => {
