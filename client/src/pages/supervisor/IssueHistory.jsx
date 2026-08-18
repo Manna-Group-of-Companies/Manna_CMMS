@@ -14,6 +14,7 @@ import {
   UserRound,
   Flame,
   Trash2,
+  AlertCircle,
 } from "lucide-react";
 import {
   formatCurrency,
@@ -23,6 +24,9 @@ import {
 } from "../../utils/currency";
 
 const RETURN_CONDITIONS = ["Good", "Damaged", "Repairable", "Expired"];
+
+/** The two headings the recipient picker groups its names under. */
+const RECIPIENT_GROUPS = ["Our Company", "Outside Company"];
 
 /**
  * What the store has issued and not yet had back, by any supervisor — what
@@ -49,6 +53,11 @@ const SupervisorIssueHistory = () => {
   });
   const [submitting, setSubmitting] = useState(false);
 
+  // The departments and outside companies the Admin keeps. Stock is returned
+  // from one of them rather than from a name typed into the box, so the Red
+  // Stock Room reads the same way the issue did.
+  const [recipients, setRecipients] = useState([]);
+
   // Consume / scrap flow. Neither restores stock: the quantity left the store
   // room when it was issued, so this only closes it out against the issue.
   // `disposal` holds both the issue and which of the two is being recorded.
@@ -69,8 +78,23 @@ const SupervisorIssueHistory = () => {
     }
   };
 
+  /**
+   * A server that does not serve the list yet answers 404. The return still
+   * has to work, so the list is simply empty and the form falls back to the
+   * name the issue was made out to.
+   */
+  const fetchRecipients = async () => {
+    try {
+      const { data } = await API.get("/recipients");
+      setRecipients(data);
+    } catch (error) {
+      console.error("Error loading recipients:", error);
+    }
+  };
+
   useEffect(() => {
     fetchIssues();
+    fetchRecipients();
   }, []);
 
   // Paused while either form is open so the outstanding quantity the form was
@@ -86,6 +110,10 @@ const SupervisorIssueHistory = () => {
       condition: "Good",
       department: issue.recipient || "",
     });
+
+    // Re-read on open, so a recipient the Admin added a minute ago is offered
+    // without the page being reloaded.
+    fetchRecipients();
   };
 
   const handleReturnSubmit = async (e) => {
@@ -471,14 +499,45 @@ const SupervisorIssueHistory = () => {
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   Returning Department *
                 </label>
-                <input
-                  type="text"
+                <select
                   value={returnForm.department}
                   onChange={(e) => setReturnForm({ ...returnForm, department: e.target.value })}
                   required
-                  placeholder="e.g. Maintenance"
-                  className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
-                />
+                  className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500 cursor-pointer"
+                >
+                  <option value="">Choose where it is coming back from…</option>
+
+                  {/* The name this issue was made out to, when it is not on the
+                      list any more — an issue raised before the Admin kept one,
+                      or to a recipient since retired. Dropping it would make the
+                      supervisor pick a department the stock never came from. */}
+                  {Boolean(returnIssue.recipient) &&
+                    !recipients.some((one) => one.name === returnIssue.recipient) && (
+                      <option value={returnIssue.recipient}>
+                        {returnIssue.recipient} (issued to)
+                      </option>
+                    )}
+
+                  {RECIPIENT_GROUPS.map((group) => {
+                    const names = recipients.filter((one) => one.type === group);
+                    if (names.length === 0) return null;
+                    return (
+                      <optgroup key={group} label={group}>
+                        {names.map((one) => (
+                          <option key={one._id} value={one.name}>
+                            {one.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+                </select>
+                {recipients.length === 0 && (
+                  <div className="text-amber-600 text-[10px] mt-1 flex items-center gap-1 font-medium">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    No recipients yet — ask the Admin to add them.
+                  </div>
+                )}
               </div>
 
               <div className="pt-4 border-t border-slate-200 flex justify-end gap-3">

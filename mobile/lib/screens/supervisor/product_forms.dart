@@ -1826,19 +1826,57 @@ class _ReturnStockForm extends StatefulWidget {
 class _ReturnStockFormState extends State<_ReturnStockForm> {
   late final TextEditingController _quantity =
       TextEditingController(text: '${widget.issue.outstanding}');
-  late final TextEditingController _department =
-      TextEditingController(text: widget.issue.recipient);
   String _condition = 'Good';
   bool _submitting = false;
+
+  /// Where the stock is coming back from, as the Admin keeps the names.
+  /// Picked rather than typed, so a return reads the same way the issue did
+  /// and the Red Stock Room can be grouped by who had the stock.
+  List<Recipient> _recipients = const [];
+  late String _department = widget.issue.recipient;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRecipients();
+  }
+
+  Future<void> _loadRecipients() async {
+    try {
+      final recipients = await context.read<StockRepository>().recipients();
+      if (!mounted) return;
+      recipients.sort((a, b) {
+        final byGroup = Recipient.groups
+            .indexOf(a.type)
+            .compareTo(Recipient.groups.indexOf(b.type));
+        return byGroup != 0 ? byGroup : a.name.compareTo(b.name);
+      });
+      setState(() => _recipients = recipients);
+    } catch (error) {
+      // A server that does not serve the list yet, or a phone that is offline:
+      // the sheet still opens on the name the issue was made out to.
+      debugPrint('Could not load recipients: $error');
+    }
+  }
 
   int get _qty => int.tryParse(_quantity.text.trim()) ?? 0;
   int get _outstanding => widget.issue.outstanding;
   bool get _exceedsOutstanding => _qty > _outstanding;
 
+  /// The Admin's list, with the name this issue was made out to kept at the
+  /// front when the list no longer carries it — an issue raised before the
+  /// list existed, or made out to a recipient since retired. Dropping it would
+  /// make the supervisor name a department the stock never came back from.
+  List<String> get _departmentNames {
+    final names = _recipients.map((one) => one.name).toList();
+    final issued = widget.issue.recipient;
+    if (issued.isNotEmpty && !names.contains(issued)) names.insert(0, issued);
+    return names;
+  }
+
   @override
   void dispose() {
     _quantity.dispose();
-    _department.dispose();
     super.dispose();
   }
 
@@ -1858,7 +1896,7 @@ class _ReturnStockFormState extends State<_ReturnStockForm> {
             issueId: widget.issue.id,
             quantity: _qty,
             condition: _condition,
-            department: _department.text.trim(),
+            department: _department,
           );
       Toast.success(message);
       if (mounted) Navigator.of(context).pop(true);
@@ -1883,7 +1921,7 @@ class _ReturnStockFormState extends State<_ReturnStockForm> {
       submitLabel: 'Send to Red Stock',
       submitColor: AppColors.accentDeep,
       submitting: _submitting,
-      canSubmit: !_exceedsOutstanding && _qty >= 1,
+      canSubmit: !_exceedsOutstanding && _qty >= 1 && _department.isNotEmpty,
       initialSize: 0.85,
       onSubmit: _submit,
       children: [
@@ -1970,10 +2008,41 @@ class _ReturnStockFormState extends State<_ReturnStockForm> {
         _Field(
           label: 'Returning Department',
           required: true,
-          child: TextField(
-            controller: _department,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(hintText: 'e.g. Maintenance'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DropdownShell(
+                child: AppDropdown<String>(
+                  value: _department,
+                  // The empty first entry is "nothing picked yet", which only
+                  // appears when the issue carried no recipient to start on;
+                  // AppDropdown takes a non-null value, and a return with no
+                  // department is refused by [canSubmit] rather than offered.
+                  items: [
+                    if (_department.isEmpty) '',
+                    ..._departmentNames,
+                  ],
+                  groupOf: (name) => name.isEmpty
+                      ? null
+                      : _recipients
+                              .where((one) => one.name == name)
+                              .firstOrNull
+                              ?.type ??
+                          'Issued to',
+                  labelBuilder: (name) =>
+                      name.isEmpty ? 'Choose where it is coming back from…' : name,
+                  onChanged: (value) =>
+                      setState(() => _department = value ?? ''),
+                ),
+              ),
+              if (_recipients.isEmpty) ...[
+                const SizedBox(height: 7),
+                const Text(
+                  'No recipients yet — ask the Admin to add them.',
+                  style: TextStyle(color: AppColors.warning, fontSize: 11.5),
+                ),
+              ],
+            ],
           ),
         ),
       ],
