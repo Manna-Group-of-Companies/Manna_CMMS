@@ -458,15 +458,17 @@ class StockRepository {
 
   // ------------------------------------------------------------------ merges
 
-  /// Merges this supervisor's Red Stock back into the store rooms, applied
-  /// immediately — it no longer waits on the Admin. Each item returns to its
-  /// own store room, since nobody is asked to name a destination.
+  /// Merges the Red Stock Room back into the store rooms, applied immediately —
+  /// it no longer waits on the Admin. Each item returns to its own store room,
+  /// since nobody is asked to name a destination.
   ///
-  /// The Admin's weekly merge still needs approval: it sweeps every
-  /// supervisor's returns at once, and that one does need a decision.
+  /// Any supervisor may merge any return, not only the ones they booked in.
+  ///
+  /// The Admin's weekly merge still needs approval: it sweeps the room into one
+  /// request, and that one does need a decision.
   ///
   /// [restockItemIds] narrows the merge to specific returns; omit it to take
-  /// everything the supervisor has sitting in Red Stock.
+  /// everything sitting in Red Stock.
   Future<String> requestMerge({List<String>? restockItemIds, String comment = ''}) async {
     final data = await _api.post('/merge-requests/mine', {
       'restockItemIds': ?restockItemIds,

@@ -4,9 +4,9 @@ import mongoose from "mongoose";
  * Red Stock gathered into a single request for the Admin.
  *
  * Two things raise one: the weekly run over everything in Red Stock, and a
- * Supervisor asking for their own returns to be moved without waiting for the
- * week. Weekly merges wait for Admin approval; supervisor merges are approved
- * and moved directly to the main store room. A return itself creates nothing.
+ * Supervisor merging the room back without waiting for the week. Weekly merges
+ * wait for Admin approval; supervisor merges are approved and moved directly to
+ * the main store room. A return itself creates nothing.
  */
 const mergeRequestItemSchema = new mongoose.Schema(
   {
@@ -97,7 +97,7 @@ const mergeRequestSchema = new mongoose.Schema(
       default: "Pending Approval",
     },
     // Who set this merge going: the weekly scheduler, an Admin running the
-    // week early, or a Supervisor asking for their own returns to be moved.
+    // week early, or a Supervisor merging the Red Stock Room back.
     // A "Supervisor" merge sits outside the weekly cycle — see
     // utils/weeklyMerge.js.
     createdVia: {

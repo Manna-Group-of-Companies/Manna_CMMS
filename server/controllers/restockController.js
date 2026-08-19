@@ -124,9 +124,9 @@ export const returnIssuedStock = async (req, res) => {
  * @route   GET /api/red-stock?status=In%20Red%20Stock&scope=all|mine
  * @access  Private
  *
- * Reading is open; asking for a merge is not. `requestSupervisorMerge` only
- * ever picks up the caller's own items, so a supervisor cannot move someone
- * else's stock out of Red Stock from here.
+ * Reading is open and so is merging: `requestSupervisorMerge` sweeps the room
+ * whoever returned it, the same way any supervisor can book a return in. The
+ * scope is a filter on this list, not a rule about who may move what.
  */
 export const getRestockItems = async (req, res) => {
   try {

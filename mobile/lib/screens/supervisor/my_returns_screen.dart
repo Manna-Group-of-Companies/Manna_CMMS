@@ -18,9 +18,9 @@ import 'product_forms.dart';
 /// supervisor's returned stock and how far each batch has moved through the
 /// merge, plus the live per-room stock balances on a second tab.
 ///
-/// The room is shared but a merge is not: a supervisor can only send their own
-/// batches. Their merge moves the stock into the main store immediately, with
-/// no Admin approval step.
+/// The room is shared and so is the merge: any supervisor can send any batch,
+/// the same way any of them can book a return in. The merge moves the stock
+/// into the main store immediately, with no Admin approval step.
 class MyReturnsScreen extends StatefulWidget {
   const MyReturnsScreen({super.key});
 
@@ -97,7 +97,7 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
           // anything — the weekly run may claim it — so drop anything that is
           // no longer mergeable rather than sending a stale id.
           final mergeable = items
-              .where((item) => item.isMine && item.awaitingMerge)
+              .where((item) => item.awaitingMerge)
               .map((item) => item.id)
               .toSet();
           _selected.retainAll(mergeable);
@@ -119,17 +119,17 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
     return scoped.where((item) => statuses.contains(item.status)).toList();
   }
 
-  /// The room is shared, but only the caller's own batches can go into a merge
-  /// they raise, so everything about selecting and merging counts those.
-  List<RestockRecord> get _mine => _items.where((item) => item.isMine).toList();
+  /// The room is shared and any supervisor may merge any of it, so selecting
+  /// and merging count the whole room rather than the caller's own returns.
+  List<RestockRecord> get _room => _items;
 
-  int get _awaitingMerge => _mine.where((item) => item.canMerge).length;
+  int get _awaitingMerge => _room.where((item) => item.canMerge).length;
 
   /// Nothing held: the merge covers everything in Red Stock.
   bool get _selecting => _selected.isNotEmpty;
 
   /// The returns the next merge request would carry.
-  List<RestockRecord> get _mergeable => _mine
+  List<RestockRecord> get _mergeable => _room
       .where((item) => item.canMerge && (!_selecting || _selected.contains(item.id)))
       .toList();
 
@@ -138,13 +138,9 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
       _mergeable.fold(0, (sum, item) => sum + item.quantity);
 
   /// Holding a return picks it out; holding or tapping again puts it back.
-  /// Only the Red Stock Room can be picked — anything already moved, or returned
-  /// by another supervisor, is not this supervisor's to merge.
+  /// Only the Red Stock Room can be picked — who returned it does not matter,
+  /// but stock that has already moved is no longer there to merge.
   void _toggle(RestockRecord item) {
-    if (!item.isMine) {
-      Toast.error('Only the supervisor who returned this can merge it');
-      return;
-    }
     if (!item.canMerge) {
       Toast.error('Only stock still in Red Stock can be merged');
       return;
@@ -296,7 +292,7 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
                 selectable: _awaitingMerge,
                 onSelectAll: () => setState(() => _selected
                   ..clear()
-                  ..addAll(_mine.where((item) => item.canMerge).map((item) => item.id))),
+                  ..addAll(_room.where((item) => item.canMerge).map((item) => item.id))),
                 onClear: () => setState(_selected.clear),
               ),
               if (_latestMerge case final merge?) ...[
@@ -377,7 +373,7 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
         AppTableColumn('Status', width: 82, center: true),
       ],
       cellsOf: (context, item) {
-        final pickable = item.isMine && item.canMerge;
+        final pickable = item.canMerge;
 
         return [
           Row(

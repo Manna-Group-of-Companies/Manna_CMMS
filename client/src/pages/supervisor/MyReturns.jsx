@@ -15,11 +15,11 @@ import {
 const STATUS_TABS = ["All", "In Red Stock", "Weekly Merge Pending", "Moved to Stock Room"];
 
 /**
- * Returns of the caller's own this screen will offer to merge.
+ * The returns this screen will offer to merge.
  *
  * "Weekly Merge Pending" is in here because a supervisor is never blocked by the
- * Admin's sweep: the server takes their returns back out of an open weekly merge
- * and applies their merge on the spot. Leaving it out would grey the button
+ * Admin's sweep: the server takes the returns back out of an open weekly merge
+ * and applies the merge on the spot. Leaving it out would grey the button
  * out — the one moment they most need it — over a claim the server gives up.
  */
 const MERGEABLE_STATUSES = ["In Red Stock", "Weekly Merge Pending"];
@@ -28,8 +28,9 @@ const MERGEABLE_STATUSES = ["In Red Stock", "Weekly Merge Pending"];
  * The whole Red Stock Room — every supervisor's returns, what came back, who
  * returned it and when. A return needs no approval, it is in the room straight
  * away, so this screen tracks how far each one has moved through the merge
- * afterwards. Asking for a merge stays own-scoped: the server only ever picks
- * up the caller's own items, so the button is counted against those.
+ * afterwards. Merging is room-wide too: any supervisor can send any return back
+ * to the store rooms, so the button counts everything still sitting here — the
+ * scope tabs only narrow what is listed.
  */
 const MyReturns = () => {
   const { showToast } = useNotifications();
@@ -60,8 +61,9 @@ const MyReturns = () => {
   };
 
   /**
-   * Merges this supervisor's Red Stock into the main store room, applied
-   * immediately without waiting for Admin approval.
+   * Merges the Red Stock Room into the main store room, applied immediately
+   * without waiting for Admin approval. Whoever returned it, any supervisor can
+   * send it back — the room is run between them.
    */
   const requestMerge = async () => {
     try {
@@ -127,12 +129,10 @@ const MyReturns = () => {
   const inRedStock = items.filter((item) => item.status !== "Moved to Stock Room").length;
   const myItemCount = items.filter((item) => item.isMine).length;
 
-  // What a merge would cover: the caller's own returns still in the Red Stock
-  // Room. Someone else's returns are visible here but not mergeable —
-  // `requestSupervisorMerge` filters on `returnedBy` server-side.
-  const awaiting = items.filter(
-    (item) => item.isMine && MERGEABLE_STATUSES.includes(item.status)
-  );
+  // What a merge would cover: everything still sitting in the Red Stock Room,
+  // whoever returned it. `requestSupervisorMerge` sweeps the room server-side,
+  // so this is counted the same way.
+  const awaiting = items.filter((item) => MERGEABLE_STATUSES.includes(item.status));
   const awaitingQuantity = awaiting.reduce((sum, item) => sum + item.quantity, 0);
 
   // A supervisor's own merge applies on the spot, so this is the last one and it
@@ -204,8 +204,8 @@ const MyReturns = () => {
             disabled={merging || awaiting.length === 0}
             title={
               awaiting.length === 0
-                ? "Nothing of yours is sitting in Red Stock"
-                : "Merge your Red Stock back into the store rooms"
+                ? "Nothing is sitting in Red Stock"
+                : "Merge the Red Stock Room back into the store rooms"
             }
             className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed inline-flex items-center gap-2 cursor-pointer shadow active:scale-98 transition-all"
           >

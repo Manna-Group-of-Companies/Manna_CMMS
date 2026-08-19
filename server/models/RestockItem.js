@@ -5,9 +5,9 @@ import mongoose from "mongoose";
  *
  * A supervisor's return needs no approval: it lands here as "In Red Stock"
  * immediately. It never touches a store room on its own — a merge moves it, and
- * the supervisor who returned it can raise that merge themselves, at which point
- * the quantity is credited on the spot. The weekly merge is the Admin's sweep of
- * whatever nobody merged; that one they approve, naming the room.
+ * any supervisor can raise that merge, at which point the quantity is credited
+ * on the spot. The weekly merge is the Admin's sweep of whatever nobody merged;
+ * that one they approve, naming the room.
  */
 const restockItemSchema = new mongoose.Schema(
   {

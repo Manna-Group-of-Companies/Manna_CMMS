@@ -15,11 +15,11 @@ import User from "../models/User.js";
  *
  * so no quantity can be merged — and credited to a store room — twice.
  *
- * A Supervisor can also ask for their own returns to be merged early. Those
- * requests sit outside the weekly cycle: they claim only that supervisor's
- * items, and they neither use up the week nor hold up the scheduler. The
- * second rule still applies, and it is the one that keeps a quantity from
- * being credited twice.
+ * A Supervisor can also merge the room early, whoever returned what is in it.
+ * Those requests sit outside the weekly cycle: they neither use up the week nor
+ * hold up the scheduler. The second rule still applies, and it is the one that
+ * keeps a quantity from being credited twice — including when two supervisors
+ * merge at the same moment.
  */
 
 const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
@@ -125,27 +125,43 @@ export const openMergeRequest = () =>
 const raiseMerge = async ({ candidates, user, now, comment, createdVia, notify }) => {
   const { weekKey, weekStart, weekEnd } = weekWindowFor(now);
 
-  const requestId = await generateRequestId();
+  const lines = candidates.map((item) => ({
+    restockItem: item._id,
+    product: item.product,
+    productName: item.productName,
+    unit: item.unit,
+    quantity: item.quantity,
+  }));
 
-  const mergeRequest = await MergeRequest.create({
-    requestId,
-    weekKey,
-    weekStart,
-    weekEnd,
-    items: candidates.map((item) => ({
-      restockItem: item._id,
-      product: item.product,
-      productName: item.productName,
-      unit: item.unit,
-      quantity: item.quantity,
-    })),
-    itemCount: candidates.length,
-    totalQuantity: candidates.reduce((sum, item) => sum + item.quantity, 0),
-    requestedBy: user?._id || null,
-    requestedAt: now,
-    createdVia,
-    comment: (comment || "").trim(),
-  });
+  // Two merges raised in the same instant read the same highest sequence, and
+  // the unique index rejects whichever writes second. Take the next number and
+  // try again rather than failing the merge on it: the room is open to every
+  // supervisor, so two of them merging at once is ordinary, and the loser
+  // should end up at rule 2 below being told its stock was already claimed —
+  // not at a duplicate key.
+  let mergeRequest = null;
+  let requestId = "";
+
+  for (let attempt = 1; !mergeRequest; attempt++) {
+    requestId = await generateRequestId();
+    try {
+      mergeRequest = await MergeRequest.create({
+        requestId,
+        weekKey,
+        weekStart,
+        weekEnd,
+        items: lines,
+        itemCount: candidates.length,
+        totalQuantity: candidates.reduce((sum, item) => sum + item.quantity, 0),
+        requestedBy: user?._id || null,
+        requestedAt: now,
+        createdVia,
+        comment: (comment || "").trim(),
+      });
+    } catch (error) {
+      if (error?.code !== 11000 || attempt >= 5) throw error;
+    }
+  }
 
   // Rule 2: claim the items. The status guard is inside the filter, so if a
   // second merge ran at the same moment only one of them can take an item.
@@ -290,15 +306,15 @@ export const withdrawMerge = async (request) => {
 };
 
 /**
- * Takes [user]'s own returns back out of any weekly merge still waiting on the
- * Admin, so they can merge them themselves.
+ * Takes the returns a supervisor is merging back out of any weekly merge still
+ * waiting on the Admin, so they can merge them on the spot.
  *
  * Without this the weekly sweep decides who may place stock: it claims
- * *everything* in Red Stock, and from that moment a supervisor's own returns
- * could only reach a store room by the Admin approving them. Their own stock,
- * going back to the room it came from, waiting on someone else. So the claim is
- * given up instead — the supervisor's merge applies immediately and the Admin's
- * request shrinks to what is left.
+ * *everything* in Red Stock, and from that moment a return could only reach a
+ * store room by the Admin approving it. Stock going back to the room it came
+ * from, waiting on someone else. So the claim is given up instead — the
+ * supervisor's merge applies immediately and the Admin's request shrinks to
+ * what is left.
  *
  * The status guard sits in the update filter, so an approval landing at the same
  * moment simply wins: it moves the item, this reclaim then matches nothing, and
@@ -306,24 +322,25 @@ export const withdrawMerge = async (request) => {
  *
  * Returns the request ids that gave stock up, for the caller to report.
  */
-const reclaimFromWeeklyMerge = async ({ user, restockItemIds = null }) => {
+const reclaimFromWeeklyMerge = async ({ restockItemIds = null }) => {
   const open = await MergeRequest.find({ ...WEEKLY_CYCLE, status: "Pending Approval" });
   const reclaimedFrom = [];
 
   for (const request of open) {
-    const mine = {
+    // Not scoped to who returned it: any supervisor may merge anything in the
+    // Red Stock Room, so a reclaim covers whatever this merge is about to take.
+    const reclaimable = {
       mergeRequest: request._id,
       status: "Weekly Merge Pending",
-      returnedBy: user._id,
     };
     if (Array.isArray(restockItemIds) && restockItemIds.length > 0) {
-      mine._id = { $in: restockItemIds };
+      reclaimable._id = { $in: restockItemIds };
     }
 
-    const claimed = await RestockItem.find(mine).select("_id");
+    const claimed = await RestockItem.find(reclaimable).select("_id");
     if (claimed.length === 0) continue;
 
-    await RestockItem.updateMany(mine, { status: "In Red Stock", mergeRequest: null });
+    await RestockItem.updateMany(reclaimable, { status: "In Red Stock", mergeRequest: null });
 
     // Only what this actually released — an approval may have taken some of it
     // first, and those lines still belong to the request.
@@ -365,19 +382,27 @@ const reclaimFromWeeklyMerge = async ({ user, restockItemIds = null }) => {
 };
 
 /**
- * Claims a Supervisor's own Red Stock into a merge request, ready to be applied.
+ * Claims Red Stock into a merge request, ready to be applied.
  *
- * Only their own returns are ever claimed, so two supervisors can merge at once
- * and neither blocks the scheduler. This writes and claims but does not move
- * anything — `createSupervisorMergeRequest` applies the result immediately, so a
- * supervisor never waits on the Admin.
+ * Any supervisor may merge any return, not only the ones they booked in
+ * themselves. The supervisors run one store between them — the same reason
+ * whoever is on shift takes the stock back in (`returnIssuedStock`) — so
+ * waiting for the supervisor who happened to book a return to come on shift
+ * would leave that stock sitting in Red Stock, countable in no store room.
+ * `requestedBy` records who merged it, which is not necessarily who returned it.
  *
- * Anything of theirs the weekly sweep has already claimed is taken back first,
- * which is what stops that sweep from turning their own stock into an Admin
- * decision.
+ * Two supervisors merging at once is safe: `raiseMerge` claims under a status
+ * guard, so an item can only be taken once and the loser is told another merge
+ * claimed it first.
+ *
+ * This writes and claims but does not move anything — `createSupervisorMergeRequest`
+ * applies the result immediately, so a supervisor never waits on the Admin.
+ *
+ * Anything the weekly sweep has already claimed is taken back first, which is
+ * what stops that sweep from turning a supervisor merge into an Admin decision.
  *
  * [restockItemIds] narrows the merge to specific returns; omit it to take
- * everything the supervisor has sitting in Red Stock.
+ * everything sitting in Red Stock.
  */
 export const requestSupervisorMerge = async ({
   user,
@@ -389,12 +414,9 @@ export const requestSupervisorMerge = async ({
     return { created: false, reason: "A supervisor is required to raise this merge", mergeRequest: null };
   }
 
-  const reclaimedFrom = await reclaimFromWeeklyMerge({ user, restockItemIds });
+  const reclaimedFrom = await reclaimFromWeeklyMerge({ restockItemIds });
 
-  const filter = {
-    status: { $in: RestockItem.MERGEABLE_STATUSES },
-    returnedBy: user._id,
-  };
+  const filter = { status: { $in: RestockItem.MERGEABLE_STATUSES } };
   if (Array.isArray(restockItemIds) && restockItemIds.length > 0) {
     filter._id = { $in: restockItemIds };
   }
@@ -403,7 +425,7 @@ export const requestSupervisorMerge = async ({
   if (candidates.length === 0) {
     return {
       created: false,
-      reason: "You have nothing in Red Stock to merge.",
+      reason: "There is nothing in Red Stock to merge.",
       mergeRequest: null,
       reclaimedFrom,
     };

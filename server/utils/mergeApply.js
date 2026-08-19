@@ -12,7 +12,7 @@ import { withdrawMerge } from "./weeklyMerge.js";
  * Putting merged stock on the shelf.
  *
  * Two callers apply a merge: the Admin approving the weekly one, and a
- * Supervisor merging their own returns — which is applied where it is raised,
+ * Supervisor merging the Red Stock Room — which is applied where it is raised,
  * with no approval in it at all. They share `applyMerge` so the two cannot
  * drift apart: the same idempotency guard, the same movements, the same
  * destination rules.
@@ -23,8 +23,8 @@ import { withdrawMerge } from "./weeklyMerge.js";
  * ledger entries, and closes the request as Approved.
  *
  * Shared by the Admin's approval of the weekly merge and the Supervisor's
- * direct merge of their own returns, so the two cannot drift apart — the same
- * idempotency guard, the same movements, the same destination rules.
+ * direct merge, so the two cannot drift apart — the same idempotency guard, the
+ * same movements, the same destination rules.
  *
  * A line's destination is the first of: an explicit per-line override,
  * [defaultRoom], the product's own home room, or — for a product carrying no

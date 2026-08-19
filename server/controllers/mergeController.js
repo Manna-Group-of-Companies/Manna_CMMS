@@ -59,24 +59,27 @@ export const createWeeklyMergeRequest = async (req, res) => {
 };
 
 /**
- * @desc    Supervisor merges their own Red Stock back into the main store room
+ * @desc    Supervisor merges Red Stock back into the main store room
  * @route   POST /api/merge-requests/mine
  * @access  Private (Supervisor)
  *
  * Applied where it is raised, and never handed to the Admin: one call, and the
- * stock is in the main store. A supervisor is returning stock they issued
- * themselves, so there is nothing for an approval to decide — the quantity is
- * on the shelf and countable by the time this responds.
+ * stock is in the main store. It is stock the supervisors issued between them
+ * coming back to the room it came from, so there is nothing for an approval to
+ * decide — the quantity is on the shelf and countable by the time this responds.
+ *
+ * Any supervisor may merge any return, the same way any supervisor may book one
+ * in. `requestedBy` records who merged it, not who returned it.
  *
  * Every line goes straight to the main store room. The MergeRequest is still
  * written and closed as Approved, so the merge keeps its request id, its
  * ledger entries and its place in the Admin's history — the record is
  * unchanged, only the waiting is gone.
  *
- * The Admin's weekly merge still needs approval: it sweeps every supervisor's
- * returns at once, and that one does need a decision. It cannot lock a
- * supervisor out of their own stock, though — `requestSupervisorMerge` takes
- * their returns back out of an open weekly merge first.
+ * The Admin's weekly merge still needs approval: it sweeps the whole room into
+ * one request, and that one does need a decision. It cannot lock a supervisor
+ * out of the room, though — `requestSupervisorMerge` takes the returns it is
+ * merging back out of an open weekly merge first.
  */
 export const createSupervisorMergeRequest = async (req, res) => {
   const { comment, restockItemIds } = req.body || {};
@@ -115,9 +118,10 @@ export const createSupervisorMergeRequest = async (req, res) => {
  * @access  Private (Supervisor)
  *
  * Nothing a current client does reaches this: `/mine` merges as it is raised.
- * It is here for the merges an interim build claimed and parked — the
- * supervisor whose merge it is can put their own stock away rather than
- * waiting on an Admin who was never meant to be asked.
+ * It is here for the merges an interim build claimed and parked — any
+ * supervisor can put that stock away rather than leaving it waiting on an Admin
+ * who was never meant to be asked. Only the merge's own `createdVia` matters:
+ * the weekly sweep stays the Admin's to decide.
  */
 export const confirmSupervisorMerge = async (req, res) => {
   try {
@@ -127,16 +131,12 @@ export const confirmSupervisorMerge = async (req, res) => {
       return res.status(404).json({ message: "Merge request not found" });
     }
 
-    // The weekly merge is the Admin's to decide; only a supervisor's own
-    // returns go straight to the shelf.
+    // The weekly merge is the Admin's to decide; only a supervisor-raised
+    // merge goes straight to the shelf.
     if (request.createdVia !== "Supervisor") {
       return res
         .status(403)
-        .json({ message: "Only a supervisor's own merge can be applied this way" });
-    }
-
-    if (String(request.requestedBy) !== String(req.user._id)) {
-      return res.status(403).json({ message: "You can only merge your own returns" });
+        .json({ message: "Only a supervisor merge can be applied this way" });
     }
 
     // Already settled: say where the stock went rather than re-reviewing a
