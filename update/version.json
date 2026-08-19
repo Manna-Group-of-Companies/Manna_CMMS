@@ -1,12 +1,13 @@
 {
-  "latestVersion": "1.0.5",
-  "versionCode": 6,
-  "apkUrl": "https://github.com/Manna-Group-of-Companies/Manna_CMMS/releases/download/v1.0.5/stockmaster-1.0.5.apk",
+  "latestVersion": "1.0.6",
+  "versionCode": 7,
+  "apkUrl": "https://github.com/Manna-Group-of-Companies/Manna_CMMS/releases/download/v1.0.6/stockmaster-1.0.6.apk",
   "releaseNotes": [
-    "Returning stock picks where it is coming back from, from the Admin's list, instead of typing the department"
+    "Adding stock is applied straight away instead of waiting for the Admin to take delivery",
+    "Stock sitting in the Red Stock Room can be scrapped from the returns list"
   ],
-  "fileSize": 54690528,
-  "sha256": "37da1ac87e3fbc6220bac36dd3c3d14987ca53b6487292f865b582d8ffe139ee",
+  "fileSize": 54706908,
+  "sha256": "2ba4e820f258bb84d98e5944344450314824d4139f976278feff3e041136b403",
   "mandatory": false,
   "minSupportedVersion": "1.0.0"
 }
