@@ -8,6 +8,7 @@ import {
   updateProduct,
   deleteProduct,
   getProductRooms,
+  addStock,
   previewItemName,
   checkDuplicates,
   getSapPending,
@@ -41,11 +42,14 @@ router.post("/", authorizeRoles("Admin"), createProduct);
 
 router.get("/:id", getProductById);
 router.get("/:id/rooms", getProductRooms);
+// Add Stock. Applies straight away — stock coming in no longer waits for an
+// Admin, so it is done on the product rather than raised at /api/requests.
+router.post("/:id/stock-in", addStock);
 router.put("/:id/sap", authorizeRoles("Admin"), updateSapStatus);
 // An edit is saved straight to the product — supervisors no longer raise an
-// EDIT request for it. Quantity is the exception: only an Admin may set it from
-// here, because stock still comes in through a Stock In request (see
-// updateProduct).
+// EDIT request for it. Quantity is the exception: only an Admin may set a new
+// total from here; a supervisor adds stock through /:id/stock-in, which credits
+// a named room instead (see updateProduct).
 router.put("/:id", authorizeRoles("Admin", "Supervisor"), updateProduct);
 router.delete("/:id", authorizeRoles("Admin"), deleteProduct);
 

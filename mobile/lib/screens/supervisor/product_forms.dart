@@ -63,8 +63,9 @@ Future<bool> showProductForm(BuildContext context, {Product? product}) async {
   return result ?? false;
 }
 
-/// Stock In request — the one stock change that waits for the Admin.
-Future<bool> showStockInRequestForm(
+/// Add Stock — credits a room straight away, no approval.
+/// Resolves to `true` when stock was added, so the caller can reload.
+Future<bool> showAddStockForm(
   BuildContext context, {
   required Product product,
 }) async {
@@ -72,7 +73,7 @@ Future<bool> showStockInRequestForm(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => _StockInRequestForm(product: product),
+    builder: (_) => _AddStockForm(product: product),
   );
   return result ?? false;
 }
@@ -118,7 +119,29 @@ Future<bool> showDisposalForm(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => _DisposalForm(issue: issue, type: type),
+    builder: (_) => _DisposalForm(source: _DisposalSource.issue(issue), type: type),
+  );
+  return result ?? false;
+}
+
+/// Writes off a batch sitting in the Red Stock Room.
+///
+/// Unlike a disposal against an issue this one does move a balance: the stock
+/// is physically in the room, so scrapping it comes off the batch itself
+/// rather than closing out something already issued. Red Stock can only ever
+/// be scrapped — stock that came back is re-shelved by a merge, never consumed
+/// in place — so there is no type to choose. Resolves to `true` when the
+/// scrap was recorded.
+Future<bool> showRedStockScrapForm(
+  BuildContext context, {
+  required RestockRecord item,
+}) async {
+  final result = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) =>
+        _DisposalForm(source: _DisposalSource.redStock(item), type: 'Scrapped'),
   );
   return result ?? false;
 }
@@ -1346,7 +1369,7 @@ class _LockedFacts extends StatelessWidget {
       (
         label: 'Current Stock',
         value: '${product.quantity} ${product.unit}',
-        where: 'Stock In request',
+        where: 'Add Stock changes it',
       ),
       (label: 'Company', value: product.storeRoom, where: 'Admin moves it'),
       (
@@ -1453,24 +1476,23 @@ class _PhotoSourceButton extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Stock In request
+// Add Stock
 //
-// Stock arriving is the one movement a supervisor cannot make alone: the Admin
-// takes delivery of it and says which room it landed in. Stock leaving needs no
-// request — it is issued, consumed, scrapped or returned, and each of those
-// applies straight away.
+// Stock arriving is applied the moment it is saved, like every other movement
+// a supervisor makes: it credits the room chosen here rather than waiting for
+// an Admin to take delivery of it.
 // ---------------------------------------------------------------------------
 
-class _StockInRequestForm extends StatefulWidget {
-  const _StockInRequestForm({required this.product});
+class _AddStockForm extends StatefulWidget {
+  const _AddStockForm({required this.product});
 
   final Product product;
 
   @override
-  State<_StockInRequestForm> createState() => _StockInRequestFormState();
+  State<_AddStockForm> createState() => _AddStockFormState();
 }
 
-class _StockInRequestFormState extends State<_StockInRequestForm> {
+class _AddStockFormState extends State<_AddStockForm> {
   final _controller = TextEditingController(text: '1');
   bool _submitting = false;
 
@@ -1499,8 +1521,8 @@ class _StockInRequestFormState extends State<_StockInRequestForm> {
             rooms.firstOrNull?.id;
       });
     } catch (error) {
-      // A missing room list only costs the supervisor the preference; the
-      // Admin still picks the room that is credited.
+      // A missing room list only costs the supervisor the choice; the server
+      // falls back to the product's own room.
       debugPrint('Could not load stock rooms: $error');
     }
   }
@@ -1520,22 +1542,17 @@ class _StockInRequestFormState extends State<_StockInRequestForm> {
 
     setState(() => _submitting = true);
     try {
-      final requestNumber =
-          await context.read<StockRepository>().createStockInRequest(
-                productId: widget.product.id,
-                quantity: _quantity,
-                stockRoomId: _roomId,
-              );
-      Toast.success(
-        requestNumber.isEmpty
-            ? 'Stock In request submitted successfully!'
-            : 'Stock request $requestNumber submitted successfully.',
-      );
+      final message = await context.read<StockRepository>().addStock(
+            productId: widget.product.id,
+            quantity: _quantity,
+            stockRoomId: _roomId,
+          );
+      Toast.success(message);
       if (mounted) Navigator.of(context).pop(true);
     } on ApiException catch (error) {
       Toast.error(error.message);
     } catch (_) {
-      Toast.error('Failed to submit request');
+      Toast.error('Failed to add stock');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -1544,8 +1561,8 @@ class _StockInRequestFormState extends State<_StockInRequestForm> {
   @override
   Widget build(BuildContext context) {
     return _FormSheet(
-      title: 'Request Stock In',
-      submitLabel: 'Submit Request',
+      title: 'Add Stock',
+      submitLabel: 'Add Stock',
       submitting: _submitting,
       initialSize: 0.55,
       onSubmit: _submit,
@@ -1562,7 +1579,7 @@ class _StockInRequestFormState extends State<_StockInRequestForm> {
         ),
         if (_rooms.isNotEmpty)
           _Field(
-            label: 'Preferred Company',
+            label: 'Company',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1577,7 +1594,7 @@ class _StockInRequestFormState extends State<_StockInRequestForm> {
                 ),
                 const SizedBox(height: 7),
                 const Text(
-                  'The Admin confirms the company when accepting.',
+                  'The stock is added to this company.',
                   style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
                 ),
               ],
@@ -1585,8 +1602,8 @@ class _StockInRequestFormState extends State<_StockInRequestForm> {
           ),
         const SizedBox(height: 8),
         const Text(
-          'This request goes to the office Admin for approval; stock changes only '
-          'once it is approved.',
+          'The stock is added straight away — no Admin approval, and the item '
+          'total goes up as soon as this is saved.',
           style: TextStyle(color: AppColors.textMuted, fontSize: 11.5, height: 1.5),
         ),
       ],
@@ -2054,18 +2071,86 @@ class _ReturnStockFormState extends State<_ReturnStockForm> {
 // Consumption and scrap
 // ---------------------------------------------------------------------------
 
-/// Books an issued batch as Consumed or Scrapped.
+/// The batch a disposal is booked against: an issue with a quantity still
+/// outstanding, or a return sitting in the Red Stock Room.
+///
+/// The two differ only in what the API is keyed by, how the remaining quantity
+/// is worded, and whether a shelf moves — so the sheet takes one of these
+/// rather than one of each record.
+class _DisposalSource {
+  const _DisposalSource({
+    required this.reference,
+    required this.product,
+    required this.unit,
+    required this.available,
+    required this.remainingLine,
+    required this.limitMessage,
+    this.issueId,
+    this.restockItemId,
+  });
+
+  /// An issue, with whatever has not yet been returned, consumed or scrapped.
+  factory _DisposalSource.issue(IssueRecord issue) {
+    final unit = issue.product?.unit ?? 'unit(s)';
+    return _DisposalSource(
+      issueId: issue.id,
+      reference: issue.issueNumber,
+      product: issue.product,
+      unit: unit,
+      available: issue.outstanding,
+      remainingLine:
+          'Still outstanding: ${issue.outstanding} $unit of ${issue.quantity}',
+      limitMessage: 'Only ${issue.outstanding} still outstanding on this issue',
+    );
+  }
+
+  /// A return in the Red Stock Room. The server takes the scrap off the batch
+  /// itself, so what is left to scrap is simply what the batch still holds.
+  factory _DisposalSource.redStock(RestockRecord item) {
+    final unit =
+        item.unit.isEmpty ? (item.product?.unit ?? 'unit(s)') : item.unit;
+    return _DisposalSource(
+      restockItemId: item.id,
+      reference: item.restockNumber,
+      product: item.product,
+      unit: unit,
+      available: item.quantity,
+      remainingLine: 'Sitting in Red Stock: ${item.quantity} $unit',
+      limitMessage: 'Only ${item.quantity} left on ${item.restockNumber}',
+    );
+  }
+
+  /// Exactly one of the two is set — the API refuses a request naming both.
+  final String? issueId;
+  final String? restockItemId;
+
+  /// The issue or return number this is booked against.
+  final String reference;
+  final Product? product;
+  final String unit;
+
+  /// How much of the batch can still be disposed of.
+  final int available;
+
+  /// The line under the stepper, and the toast when the figure is over it.
+  final String remainingLine;
+  final String limitMessage;
+
+  bool get isRedStock => restockItemId != null;
+}
+
+/// Books a batch as Consumed or Scrapped.
 ///
 /// The two share a sheet because the operation is identical — close a quantity
-/// out against an issue, with a reason — and only the wording, the colour and
+/// out against a source, with a reason — and only the wording, the colour and
 /// the value line differ. Scrap additionally prices what is being written off,
 /// since that total is the metric the whole log exists to produce.
 class _DisposalForm extends StatefulWidget {
-  const _DisposalForm({required this.issue, required this.type});
+  const _DisposalForm({required this.source, required this.type});
 
-  final IssueRecord issue;
+  final _DisposalSource source;
 
-  /// `Consumed` or `Scrapped`.
+  /// `Consumed` or `Scrapped`. Red Stock only ever takes the latter.
   final String type;
 
   @override
@@ -2074,19 +2159,20 @@ class _DisposalForm extends StatefulWidget {
 
 class _DisposalFormState extends State<_DisposalForm> {
   late final TextEditingController _quantity =
-      TextEditingController(text: '${widget.issue.outstanding}');
+      TextEditingController(text: '${widget.source.available}');
   final TextEditingController _reason = TextEditingController();
   bool _submitting = false;
 
+  _DisposalSource get _source => widget.source;
   bool get _isScrap => widget.type == 'Scrapped';
   int get _qty => int.tryParse(_quantity.text.trim()) ?? 0;
-  int get _outstanding => widget.issue.outstanding;
-  bool get _exceedsOutstanding => _qty > _outstanding;
+  int get _available => _source.available;
+  bool get _exceedsAvailable => _qty > _available;
 
   /// Per-unit cost as the catalogue currently holds it. 0 means the product has
   /// never been costed, which is common on the imported rows — the scrap is
   /// still worth recording, it just cannot be priced.
-  num get _unitCost => widget.issue.product?.unitCost ?? 0;
+  num get _unitCost => _source.product?.unitCost ?? 0;
   bool get _isCosted => _unitCost > 0;
   num get _previewValue => _unitCost * _qty;
 
@@ -2106,8 +2192,8 @@ class _DisposalFormState extends State<_DisposalForm> {
       Toast.error('Quantity must be at least 1');
       return;
     }
-    if (_exceedsOutstanding) {
-      Toast.error('Only $_outstanding still outstanding on this issue');
+    if (_exceedsAvailable) {
+      Toast.error(_source.limitMessage);
       return;
     }
     if (_reasonMissing) {
@@ -2118,7 +2204,8 @@ class _DisposalFormState extends State<_DisposalForm> {
     try {
       final message = await context.read<StockRepository>().recordDisposal(
             type: widget.type,
-            issueId: widget.issue.id,
+            issueId: _source.issueId,
+            restockItemId: _source.restockItemId,
             quantity: _qty,
             reason: _reason.text.trim(),
           );
@@ -2133,10 +2220,30 @@ class _DisposalFormState extends State<_DisposalForm> {
     }
   }
 
+  /// What the write-off actually does, which is not the same on both sources:
+  /// issued stock left its shelf when it was issued, while Red Stock is still
+  /// on one and comes off it here.
+  String get _blurb {
+    if (!_isScrap) {
+      return 'This stock has been used up and will not come back. It was '
+          'already taken off the shelf when it was issued, so no company '
+          'changes here.';
+    }
+    if (_source.isRedStock) {
+      return 'This stock is being written off out of the Red Stock Room — it '
+          'leaves the room now and will not be merged back into a company. The '
+          'value below is recorded against the scrap metric and cannot be '
+          'edited afterwards.';
+    }
+    return 'This stock is being written off — it will not come back to a '
+        'shelf. The value below is recorded against the scrap metric and '
+        'cannot be edited afterwards.';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final product = widget.issue.product;
-    final unit = product?.unit ?? 'unit(s)';
+    final product = _source.product;
+    final unit = _source.unit;
     final accent = _isScrap ? AppColors.danger : AppColors.textSecondary;
 
     return _FormSheet(
@@ -2148,13 +2255,29 @@ class _DisposalFormState extends State<_DisposalForm> {
       submitLabel: _isScrap ? 'Record Scrap' : 'Record Consumption',
       submitColor: _isScrap ? AppColors.dangerDeep : AppColors.primary,
       submitting: _submitting,
-      canSubmit: !_exceedsOutstanding && _qty >= 1 && !_reasonMissing,
+      canSubmit: !_exceedsAvailable && _qty >= 1 && !_reasonMissing,
       initialSize: 0.85,
       onSubmit: _submit,
       children: [
         if (product != null) ...[
           _ProductSummary(product: product),
           const SizedBox(height: 14),
+        ],
+        // Which batch is being closed out. The product alone does not say it —
+        // the same item can be out on several issues and back in Red Stock on
+        // several returns at once.
+        if (_source.reference.isNotEmpty) ...[
+          Row(
+            children: [
+              const Text(
+                'Booked against',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+              ),
+              const SizedBox(width: 6),
+              MonoText(_source.reference, fontSize: 11.5),
+            ],
+          ),
+          const SizedBox(height: 12),
         ],
         Container(
           padding: const EdgeInsets.all(12),
@@ -2174,13 +2297,7 @@ class _DisposalFormState extends State<_DisposalForm> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  _isScrap
-                      ? 'This stock is being written off — it will not come back '
-                          'to a shelf. The value below is recorded against the '
-                          'scrap metric and cannot be edited afterwards.'
-                      : 'This stock has been used up and will not come back. '
-                          'It was already taken off the shelf when it was '
-                          'issued, so no company changes here.',
+                  _blurb,
                   style: TextStyle(color: accent, fontSize: 11.5, height: 1.45),
                 ),
               ),
@@ -2196,28 +2313,32 @@ class _DisposalFormState extends State<_DisposalForm> {
             children: [
               QuantityStepper(
                 controller: _quantity,
-                max: _outstanding,
+                max: _available,
                 onChanged: () => setState(() {}),
               ),
               const SizedBox(height: 7),
               Text(
-                'Still outstanding: $_outstanding $unit of ${widget.issue.quantity}',
+                _source.remainingLine,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+                style:
+                    const TextStyle(color: AppColors.textMuted, fontSize: 11.5),
               ),
             ],
           ),
         ),
-        if (_exceedsOutstanding)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 12),
+        if (_exceedsAvailable)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
             child: Row(
               children: [
-                Icon(Icons.error_outline, size: 14, color: AppColors.dangerDeep),
-                SizedBox(width: 6),
+                const Icon(Icons.error_outline,
+                    size: 14, color: AppColors.dangerDeep),
+                const SizedBox(width: 6),
                 Text(
-                  'Exceeds the outstanding quantity!',
-                  style: TextStyle(
+                  _source.isRedStock
+                      ? 'More than this return still holds!'
+                      : 'Exceeds the outstanding quantity!',
+                  style: const TextStyle(
                     color: AppColors.dangerDeep,
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,

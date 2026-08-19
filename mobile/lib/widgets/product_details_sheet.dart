@@ -8,7 +8,7 @@ import '../models/models.dart';
 import 'common.dart';
 
 /// A single action offered in the details sheet's footer (Issue Engineering Stock,
-/// Request Stock, ...). The catalog card itself carries no action menu — every
+/// Add Stock, ...). The catalog card itself carries no action menu — every
 /// operation is reached by opening the product first.
 class ProductAction {
   const ProductAction({
@@ -25,8 +25,8 @@ class ProductAction {
   final VoidCallback onSelected;
 
   /// Draws the button solid rather than tinted, and gives it a row of its own.
-  /// Reserved for the action that changes stock — everything else only raises
-  /// a request for the Admin to approve.
+  /// Reserved for the action a screen leads with — issuing, on the supervisor's
+  /// catalog.
   final bool filled;
 }
 

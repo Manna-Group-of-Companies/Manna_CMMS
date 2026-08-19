@@ -64,10 +64,15 @@ class _SupervisorProductListScreenState extends State<SupervisorProductListScree
             },
           ),
           ProductAction(
-            label: 'Request Stock',
+            label: 'Add Stock',
             icon: Icons.arrow_upward,
             color: AppColors.success,
-            onSelected: () => showStockInRequestForm(context, product: product),
+            onSelected: () async {
+              // Adding credits a room immediately, so the list has to re-read
+              // to show the new total.
+              final added = await showAddStockForm(context, product: product);
+              if (added) await reload();
+            },
           ),
           ProductAction(
             filled: true,

@@ -5,6 +5,7 @@ import { recordMovement } from "../utils/stockLedger.js";
 import {
   creditRoom,
   debitAcrossRooms,
+  homeRoomFor,
   resolveRoom,
   roomBreakdownFor,
 } from "../utils/stockRooms.js";
@@ -428,10 +429,11 @@ export const updateProduct = async (req, res) => {
     const { code, quantity, storeRoom, acknowledgeNaming = false, allowDuplicate = false } =
       req.body;
 
-    // A supervisor's edit changes the item's details, never how much of it there
-    // is: stock still comes in through a Stock In request the Admin approves. A
-    // payload that merely echoes the current total is let through, so a form
-    // that posts every field it rendered is not treated as an adjustment.
+    // A supervisor's edit changes the item's details, never how much of it
+    // there is: stock is added through Add Stock (POST /api/products/:id/stock-in),
+    // which credits one named room rather than assigning a new total. A payload
+    // that merely echoes the current total is let through, so a form that posts
+    // every field it rendered is not treated as an adjustment.
     const setsQuantity = quantity !== undefined && quantity !== null;
     if (
       req.user.role !== "Admin" &&
@@ -440,7 +442,7 @@ export const updateProduct = async (req, res) => {
     ) {
       return res.status(403).json({
         message:
-          "Quantity cannot be changed from an edit — raise a Stock In request instead",
+          "Quantity cannot be changed from an edit — use Add Stock instead",
       });
     }
 
@@ -593,6 +595,85 @@ export const updateProduct = async (req, res) => {
     res.json(await Product.findById(product._id));
   } catch (error) {
     console.error("Error updating product:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Reference for a direct addition. Stock coming in used to carry the number of
+// the request that brought it (`REQ-IN-…`); with no request in the way, the
+// ledger row still needs something to quote.
+const generateAdditionNumber = () => `ADD-${Math.floor(100000 + Math.random() * 900000)}`;
+
+// @desc    Add stock to a product. Applies immediately — no Admin approval.
+// @route   POST /api/products/:id/stock-in
+// @access  Private (Admin, Supervisor)
+//
+// Stock arriving used to be the one movement a supervisor could not make
+// alone. It is now direct, like issuing and scrapping: exactly one room is
+// credited, chosen here rather than by an Admin at approval time.
+export const addStock = async (req, res) => {
+  try {
+    const { quantity, stockRoomId, note } = req.body;
+
+    const reason = typeof note === "string" ? note.trim() : "";
+    const qty = Number(quantity);
+    if (!Number.isInteger(qty) || qty < 1) {
+      return res
+        .status(400)
+        .json({ message: "Quantity must be a whole number of at least 1" });
+    }
+
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ message: "Engineering Stock not found" });
+    }
+
+    // The named room, or the product's own when the caller did not pick one.
+    const targetRoom =
+      (stockRoomId ? await resolveRoom(stockRoomId) : null) ||
+      (await homeRoomFor(product));
+    if (!targetRoom) {
+      return res.status(400).json({ message: "Select a stock room to add the stock to" });
+    }
+
+    // Credits exactly one room, and recomputes the product total from the room
+    // rows — the same path every other stock change goes through.
+    const reference = generateAdditionNumber();
+    const { roomQuantity } = await creditRoom({
+      product,
+      room: targetRoom,
+      quantity: qty,
+    });
+
+    await recordMovement({
+      product,
+      type: "STOCK_IN",
+      direction: "IN",
+      quantity: qty,
+      reference,
+      performedBy: req.user._id,
+      toRoom: targetRoom.name,
+      note: reason || `Added by ${req.user.name} into ${targetRoom.name} (room now ${roomQuantity})`,
+    });
+
+    // The addition may not have cleared the threshold, and the Admin is told
+    // either way by the same alert the rest of the app raises.
+    if (product.quantity <= product.minStock) {
+      await Notification.create({
+        message: `Alert: "${product.name}" remains at or below minimum stock (${product.quantity} ${product.unit} total)`,
+        type: "LOW_STOCK",
+      });
+    }
+
+    res.status(201).json({
+      message: `${qty} ${product.unit} added to ${targetRoom.name}`,
+      reference,
+      room: targetRoom.name,
+      roomQuantity,
+      product: await Product.findById(product._id),
+    });
+  } catch (error) {
+    console.error("Error adding stock:", error);
     res.status(500).json({ message: error.message });
   }
 };

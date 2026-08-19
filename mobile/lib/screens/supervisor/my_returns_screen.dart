@@ -12,6 +12,7 @@ import '../../widgets/app_shell.dart';
 import '../../widgets/app_table.dart';
 import '../../widgets/common.dart';
 import '../../widgets/room_inventory_view.dart';
+import 'product_forms.dart';
 
 /// `pages/supervisor/MyReturns.jsx` — the whole Red Stock Room: every
 /// supervisor's returned stock and how far each batch has moved through the
@@ -208,6 +209,19 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
     } finally {
       if (mounted) setState(() => _merging = false);
     }
+  }
+
+  /// Writes a return off out of the Red Stock Room.
+  ///
+  /// The room is shared and so is this: a merge only moves a supervisor's own
+  /// batches, but scrap is a write-off of stock physically sitting in the room
+  /// and the server lets any supervisor book one. Only a batch still in Red
+  /// Stock can go — once the weekly sweep has claimed it, its quantity is
+  /// counted in a merge the Admin is being asked to approve.
+  Future<void> _scrap(RestockRecord item) async {
+    final recorded = await showRedStockScrapForm(context, item: item);
+    // The batch is smaller now, or gone from the room entirely.
+    if (recorded && mounted) await _load(silent: true);
   }
 
   @override
@@ -428,6 +442,17 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
               label: 'Merge rejected',
               value: item.rejectionReason,
               valueColor: AppColors.danger,
+            ),
+        ],
+        actions: [
+          // Only while the batch is still in the room and not spoken for by an
+          // open merge — the API refuses it in any other state.
+          if (item.awaitingMerge)
+            TableActionButton(
+              label: 'Scrap',
+              icon: Icons.delete_outline,
+              color: AppColors.danger,
+              onPressed: () => _scrap(item),
             ),
         ],
       ),

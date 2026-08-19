@@ -983,7 +983,7 @@ const ProductList = () => {
                         [
                           "Current Stock",
                           `${selectedProduct.quantity} ${selectedProduct.unit}`,
-                          "Stock In request",
+                          "Add Stock changes it",
                         ],
                         ["Company", selectedProduct.storeRoom, "Admin moves it"],
                       ].map(([term, value, why]) => (

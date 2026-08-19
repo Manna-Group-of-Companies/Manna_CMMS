@@ -254,31 +254,25 @@ class StockRepository {
         'allowDuplicate': allowDuplicate,
       });
 
-  /// Asks the Admin to take delivery of stock. This is the one stock change a
-  /// supervisor cannot make alone — issuing, consuming, scrapping and returning
-  /// all apply immediately.
+  /// Adds stock to a product. Applies immediately, like issuing, consuming,
+  /// scrapping and returning — stock coming in no longer waits for the Admin.
   ///
-  /// [stockRoomId] names the room the supervisor would like the stock placed
-  /// in. It is advisory — the Admin picks the room actually credited.
-  Future<String> createStockInRequest({
+  /// [stockRoomId] names the room credited. Left out, the stock lands in the
+  /// product's own room.
+  Future<String> addStock({
     required String productId,
     required int quantity,
     String? stockRoomId,
   }) async {
-    final data = await _api.post('/requests/stockin', {
-      'productId': productId,
+    final data = await _api.post('/products/$productId/stock-in', {
       'quantity': quantity,
       'stockRoomId': ?stockRoomId,
     });
-    // The create endpoint returns the request document itself, so the number
-    // is read from there rather than from a `message` field.
-    final requestNumber =
-        data is Map ? asString(data['requestNumber']) : '';
-    return requestNumber;
+    return _message(data, 'Stock added');
   }
 
-  /// Edits a still-pending stock request. [kind] is `stockin`, or `stockout` /
-  /// `stockreturn` for a row raised back when those were requests too. The API
+  /// Edits a still-pending stock request. [kind] is `stockin`, `stockout` or
+  /// `stockreturn` — all three raised back when those were requests. The API
   /// rejects this once an Admin has decided it.
   Future<String> updateStockRequest({
     required String kind,

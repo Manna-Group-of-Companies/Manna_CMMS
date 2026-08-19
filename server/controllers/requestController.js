@@ -35,10 +35,10 @@ const stampDecision = (request, { adminId, approved }) => {
 // ==========================================
 // SUPERVISOR: Create Requests
 //
-// Two things still need the Admin: a brand new catalog item, and stock coming
-// in. Everything else a supervisor does — editing an item, issuing it, sending
-// it back to Red Stock — is applied the moment it is saved, so there is no
-// request for it to raise.
+// One thing still needs the Admin: a brand new catalog item. Everything else a
+// supervisor does — editing an item, adding stock to it, issuing it, sending it
+// back to Red Stock — is applied the moment it is saved, so there is no request
+// for it to raise.
 // ==========================================
 
 // Create an ADD Product Request
@@ -145,45 +145,18 @@ export const createProductRequest = async (req, res) => {
   }
 };
 
-// Create Stock In Request
+// Stock In is no longer a request. Adding stock credits a room the moment it
+// is saved (POST /api/products/:id/stock-in), so nothing is queued for an
+// Admin. An older client still posting here is told where the change belongs
+// rather than having it silently queued for an approval that no longer comes.
+//
+// Rows raised before this are untouched: they still list below, and the
+// approval branch in processRequest still closes them.
 export const createStockInRequest = async (req, res) => {
-  const { productId, quantity, stockRoomId } = req.body;
-  const supervisorId = req.user._id;
-
-  try {
-    if (!productId || !quantity || quantity < 1) {
-      return res.status(400).json({ message: "Valid Engineering Stock ID and Quantity (>= 1) are required" });
-    }
-
-    const product = await Product.findById(productId);
-    if (!product) {
-      return res.status(404).json({ message: "Engineering Stock not found" });
-    }
-
-    // Advisory only: the Admin picks the room that is actually credited.
-    const requestedRoom = stockRoomId ? await resolveRoom(stockRoomId) : null;
-
-    const requestNumber = generateRequestNumber("REQ-IN");
-
-    const newRequest = await StockInRequest.create({
-      requestNumber,
-      product: productId,
-      quantity,
-      requestedStockRoom: requestedRoom?._id || null,
-      stockAtRequest: product.quantity,
-      supervisor: supervisorId,
-    });
-
-    // Notify admins
-    await Notification.create({
-      message: `New Stock In request (${requestNumber}) for "${product.name}" (Qty: ${quantity}) by ${req.user.name}`,
-      type: "REQUEST_CREATED",
-    });
-
-    res.status(201).json(newRequest);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
+  res.status(400).json({
+    message:
+      "Stock In no longer needs approval — add the stock on the product itself",
+  });
 };
 
 // Stock Out and Stock Return are no longer raised as requests — a supervisor

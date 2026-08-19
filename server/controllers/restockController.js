@@ -142,7 +142,10 @@ export const getRestockItems = async (req, res) => {
     }
 
     const items = await RestockItem.find(query)
-      .populate("product", "name code unit storeRoom image")
+      // `unitCost` is here for the scrap sheet: a return can be written off
+      // straight out of this list, and the person doing it should see what the
+      // write-off is worth before they book it.
+      .populate("product", "name code unit storeRoom image unitCost")
       .populate("returnedBy", "name email role")
       .populate("sourceIssue", "issueNumber recipient sourceRoom")
       // Deep enough to say how each merge happened, not just that one did:
