@@ -695,8 +695,7 @@ const RequestManagement = () => {
                             {selectedRequest.quantity} {selectedRequest.product?.unit}
                           </strong>{" "}
                           into the <strong>Red Stock Room</strong>, not into a store room. It
-                          reaches Manna Rubber Park or the Consumables Room only through an
-                          approved merge.
+                          reaches a store room only through an approved merge.
                         </span>
                       </div>
                     )}

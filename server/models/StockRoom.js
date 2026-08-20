@@ -45,7 +45,6 @@ stockRoomSchema.statics.DEFAULT_ROOMS = [
   "Manna Rubber Products",
   "Hi-Tech Rubber Industries",
   "Manna Treads",
-  "Consumables Room",
 ];
 
 /**
@@ -65,6 +64,11 @@ stockRoomSchema.statics.RENAMED_ROOMS = [
   // The park is the site; the store belongs to the company on it, and there
   // are three of those now. Its stock follows the name.
   ["Manna Rubber Park", "Manna Rubber Products"],
+  // Consumables are no longer kept apart — one store holds them alongside
+  // everything else. Last in the list on purpose: a database still on "Store
+  // Room 2" is carried to "Consumables Room" by the entry above and on to the
+  // main store by this one, in a single boot.
+  ["Consumables Room", "Manna Rubber Products"],
 ];
 
 const StockRoom = mongoose.model("StockRoom", stockRoomSchema);

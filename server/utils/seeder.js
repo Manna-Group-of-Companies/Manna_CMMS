@@ -99,7 +99,7 @@ const seedData = async () => {
           quantity: 3, // Low Stock! (minStock is 5)
           unit: "Pcs",
           minStock: 5,
-          storeRoom: "Consumables Room",
+          storeRoom: "Manna Rubber Products",
           description: "Premium ergonomic office chair with highly adjustable armrests and back support.",
           image: "https://images.unsplash.com/photo-1505797149-43b0069ec26b?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3",
         },
@@ -121,7 +121,7 @@ const seedData = async () => {
           quantity: 75,
           unit: "Pcs",
           minStock: 15,
-          storeRoom: "Consumables Room",
+          storeRoom: "Manna Rubber Products",
           description: "Flexible LED desk lamp with multiple color temperatures and integrated Qi wireless charging pad.",
           image: "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3",
         },
