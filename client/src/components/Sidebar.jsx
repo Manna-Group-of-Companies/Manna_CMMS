@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import {
+  AlertTriangle,
   LayoutDashboard,
   Boxes,
   ClipboardList,
@@ -43,6 +44,11 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
       name: "Engineering Stock",
       path: "/admin/products",
       icon: Boxes,
+    },
+    {
+      name: "Low Stock",
+      path: "/admin/low-stock",
+      icon: AlertTriangle,
     },
     {
       name: "Request Control",

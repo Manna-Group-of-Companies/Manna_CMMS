@@ -13,6 +13,7 @@ import AdminDashboard from "./pages/admin/AdminDashboard";
 import RequestManagement from "./pages/admin/RequestManagement";
 import AdminIssueHistory from "./pages/admin/IssueHistory";
 import AdminProductList from "./pages/admin/ProductList";
+import AdminLowStock from "./pages/admin/LowStockReport";
 import SupervisorDashboard from "./pages/supervisor/SupervisorDashboard";
 import ProductList from "./pages/supervisor/ProductList";
 import MyRequests from "./pages/supervisor/MyRequests";
@@ -61,6 +62,7 @@ function App() {
             <Route path="/admin" element={<AdminLayout />}>
               <Route path="dashboard" element={<AdminDashboard />} />
               <Route path="products" element={<AdminProductList />} />
+              <Route path="low-stock" element={<AdminLowStock />} />
               <Route path="requests" element={<RequestManagement />} />
               <Route path="issues" element={<AdminIssueHistory />} />
               <Route path="scrap" element={<AdminScrapReport />} />

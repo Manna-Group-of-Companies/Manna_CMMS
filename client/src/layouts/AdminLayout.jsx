@@ -35,6 +35,11 @@ const AdminLayout = () => {
   const PAGE_META = [
     ["/admin/dashboard", "Dashboard", "Stock, requests and alerts at a glance"],
     ["/admin/products", "Engineering Stock", "The catalog and what is on the shelves"],
+    [
+      "/admin/low-stock",
+      "Low Stock",
+      "Every item at or below its minimum, and what refilling it takes",
+    ],
     ["/admin/requests", "Request Control", "Approve, reject or hold supervisor requests"],
     ["/admin/issues", "Issue History", "Every engineering stock item issued, by every supervisor"],
     ["/admin/scrap", "Scrap & Consumption", "Value written off across the stores"],

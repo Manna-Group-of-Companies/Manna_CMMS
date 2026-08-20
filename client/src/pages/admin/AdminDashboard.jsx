@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
+import { severityOf } from "../../utils/lowStock";
 import {
   Boxes,
   Loader2,
@@ -116,7 +117,7 @@ const AdminDashboard = () => {
       title: "Low Engineering Stock",
       value: metrics.lowStockProductsCount,
       icon: AlertTriangle,
-      link: "/admin/products",
+      link: "/admin/low-stock",
       alert: metrics.lowStockProductsCount > 0,
       chip:
         metrics.lowStockProductsCount > 0
@@ -251,11 +252,14 @@ const AdminDashboard = () => {
                 {metrics.lowStockProductsCount}
               </span>
             </h3>
+            {/* Five rows fit here; the rest of the shortfalls — with the
+                shortage, the reorder cost and a sort on any column — are on
+                the Low Stock page. */}
             <Link
-              to="/admin/products"
+              to="/admin/low-stock"
               className="shrink-0 text-[12px] font-semibold text-brand-700 hover:text-brand-600 flex items-center gap-0.5 cursor-pointer"
             >
-              View catalog
+              View all
               <ChevronRight className="h-4 w-4" />
             </Link>
           </div>
@@ -279,8 +283,9 @@ const AdminDashboard = () => {
                 </thead>
                 <tbody>
                   {metrics.lowStockProducts.slice(0, 5).map((prod) => {
-                    const ratio = prod.quantity / prod.minStock;
-                    const isOutOfStock = prod.quantity === 0;
+                    // Same three bands, in the same words, as the Low Stock page.
+                    const level = severityOf(prod);
+                    const isOutOfStock = level.key === "out";
                     return (
                       <tr key={prod._id}>
                         <td className="mono text-slate-500">{prod.code}</td>
@@ -300,17 +305,7 @@ const AdminDashboard = () => {
                           </span>
                         </td>
                         <td className="text-right">
-                          <span
-                            className={`badge ${
-                              isOutOfStock
-                                ? "badge-rose"
-                                : ratio <= 0.5
-                                ? "badge-orange"
-                                : "badge-amber"
-                            }`}
-                          >
-                            {isOutOfStock ? "Critical" : ratio <= 0.5 ? "High" : "Warning"}
-                          </span>
+                          <span className={`badge ${level.badge}`}>{level.label}</span>
                         </td>
                       </tr>
                     );
