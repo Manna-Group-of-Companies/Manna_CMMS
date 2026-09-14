@@ -1,8 +1,27 @@
 import { useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { useAuth, homePathFor } from "../context/AuthContext";
+import { useAuth, homePathFor, canSeeSupervisorConsole } from "../context/AuthContext";
 import Sidebar from "../components/Sidebar";
 import Navbar from "../components/Navbar";
+
+/**
+ * The routes both consoles serve, under the same names.
+ *
+ * Only these can be carried across when somebody who no longer belongs in this
+ * console arrives with an old link. The rest — the Red Stock Room, the branch
+ * approvals, the monthly count — are the store supervisor's alone and have no
+ * counterpart to send them to.
+ */
+const SHARED_WITH_CONSOLE = [
+  "/products",
+  "/requests",
+  "/assets",
+  "/electrical",
+  "/categories",
+  "/breakdowns",
+  "/maintenance-requests",
+  "/preventive",
+];
 
 const SupervisorLayout = () => {
   const { user, loading } = useAuth();
@@ -25,16 +44,31 @@ const SupervisorLayout = () => {
     return <Navigate to="/login" replace />;
   }
 
-  if (user.role !== "Supervisor") {
-    return <Navigate to={homePathFor(user.role)} replace />;
+  if (!canSeeSupervisorConsole(user.role)) {
+    /**
+     * Everybody but the store supervisor works in the shared console now.
+     *
+     * The maintenance manager and the plant heads used to work here, and the
+     * screens they used still exist under /admin under the same names — so an
+     * old bookmark is carried across to the page it named rather than dropped
+     * on the catalog, which is what a redirect to their home would do.
+     */
+    const sub = location.pathname.replace(/^\/supervisor/, "");
+    const target = SHARED_WITH_CONSOLE.includes(sub) ? `/admin${sub}` : homePathFor(user.role);
+    return <Navigate to={target} replace />;
   }
 
   const getPageTitle = () => {
     const path = location.pathname;
-    if (path.includes("/dashboard")) return "Supervisor Dashboard";
     if (path.includes("/products")) return "Browse Engineering Stock Catalog";
-    if (path.includes("/requests")) return "My Requests Tracker";
+    if (path.includes("/requests")) return "Item Naming";
     if (path.includes("/audit")) return "Monthly Stock Audit";
+    if (path.includes("/returns")) return "Red Stock Room";
+    if (path.includes("/breakdowns")) return "Breakdowns";
+    if (path.includes("/maintenance-requests")) return "Maintenance Requests";
+    if (path.includes("/preventive")) return "Preventive Maintenance";
+    if (path.includes("/assets")) return "Asset Management";
+    if (path.includes("/categories")) return "Categories";
     return "Supervisor Stock Manager";
   };
 

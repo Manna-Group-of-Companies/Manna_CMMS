@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
-import { Loader2, X, Boxes, Lock, ShieldAlert } from "lucide-react";
+import { Loader2, X, Boxes, Lock, ShieldAlert, RotateCcw } from "lucide-react";
 import { COMMON_STATUSES } from "../../utils/productStatus";
 import ItemNameBuilder, {
   NameComplianceNotice,
@@ -14,23 +14,42 @@ import TaxonomySelect, {
   useSubCategoryOptions,
 } from "../../components/TaxonomySelect";
 import { AUDIT_FREQUENCIES } from "../../utils/audit";
+import { useFormDraft, describeWhen } from "../../hooks/useFormDraft";
 
 const EMPTY = {
   code: "",
   name: "",
   category: "",
   subCategory: "",
+  plant: "",
   brand: "",
   status: "Good Condition",
   rackNumber: "",
   quantity: 0,
-  unit: "Pcs",
+  unit: "Nos",
   minStock: 5,
   unitCost: 0,
   auditFrequency: "Monthly",
   storeRoom: "",
   description: "",
   image: "",
+  reason: "",
+};
+
+/**
+ * Whether what has been typed is worth keeping as a draft.
+ *
+ * The form starts with real defaults — Pcs, a minimum of 5, Monthly audit, and
+ * a company filled in from the list — so "anything differs from EMPTY" would
+ * call an untouched form a draft and offer to restore it forever. Only the
+ * fields a person actually fills in count.
+ */
+const isWorthKeeping = ({ form, naming } = {}) => {
+  if (!form) return false;
+  const typed = ["name", "brand", "category", "subCategory", "rackNumber", "description"];
+  if (typed.some((f) => String(form[f] || "").trim())) return true;
+  if (String(form.reason || "").trim()) return true;
+  return !isNamingBlank(naming || EMPTY_NAMING);
 };
 
 /**
@@ -59,12 +78,39 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
 
   const [form, setForm] = useState(EMPTY);
   const [rooms, setRooms] = useState([]);
+  const [units, setUnits] = useState({ inUse: [], others: [] });
+  const [plants, setPlants] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
   // The SOI1/SOP1 fields the name is built from (ST-09). Kept beside the form
   // rather than inside it because they are saved as their own sub-document.
   const [naming, setNaming] = useState(EMPTY_NAMING);
   const [showBuilder, setShowBuilder] = useState(false);
+
+  /**
+   * The half-finished form, kept across a close.
+   *
+   * Intake only. On an edit there is a real record behind the form, and
+   * restoring a draft over it would quietly put back values the user had
+   * already decided against.
+   */
+  const draft = useFormDraft("add-engineering-stock", {
+    enabled: !isEdit,
+    isWorthKeeping,
+  });
+  const [restoredFrom, setRestoredFrom] = useState(null);
+
+  // Read once when the form mounts and stable thereafter, so it can sit in the
+  // dependency list below without the effect re-running and restoring over
+  // whatever has been typed since.
+  const savedDraft = draft.restored;
+
+  // Pulled out because the hook returns a fresh object every render. Depending
+  // on `draft` itself made the effects below tear down and re-run on each
+  // render - which meant a synchronous localStorage write per keystroke, and a
+  // debounce that was reset before it could ever fire. These three are
+  // useCallback'd and stable.
+  const { save: saveDraft, saveNow: saveDraftNow, clear: clearDraft } = draft;
 
   /**
    * What the server refused, and what the user has since confirmed.
@@ -115,20 +161,28 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         description: product.description || "",
         image: product.image || "",
       });
+    } else if (savedDraft?.form) {
+      // Picked up where they left off. Announced rather than done silently —
+      // a form that opens with text already in it looks like a bug when you
+      // are not expecting it.
+      setForm({ ...EMPTY, ...savedDraft.form });
+      setNaming(savedDraft.naming || EMPTY_NAMING);
+      setRestoredFrom(savedDraft.savedAt || null);
     } else {
       setForm(EMPTY);
     }
 
     // Nothing on an edit is built from these: the builder is not shown and the
     // name is not sent, so the sub-document is only ever assembled at intake.
-    setNaming(EMPTY_NAMING);
+    // A restored draft has already set them just above, so it is left alone.
+    if (!savedDraft?.form) setNaming(EMPTY_NAMING);
     setShowBuilder(true);
 
     setNameIssues(null);
     setDuplicateBlock(null);
     setAcknowledgeNaming(false);
     setAllowDuplicate(false);
-  }, [product]);
+  }, [product, savedDraft]);
 
   useEffect(() => {
     const loadRooms = async () => {
@@ -142,7 +196,59 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       }
     };
     loadRooms();
+
+    // The units ERPNext actually holds. Typed free text reached the server as
+    // "Pieces" and came back "Could not find Unit: Pieces" — `uom` is a Link
+    // field, so it only accepts a name that exists.
+    API.get("/products/units")
+      .then(({ data }) => setUnits(data))
+      .catch(() => setUnits({ inUse: [], others: [] }));
+
+    // The sites, for "which plant wants this". `plant` is a Link to CMMS Plant
+    // on the request, so it has to be picked rather than typed.
+    API.get("/assets/plants")
+      .then(({ data }) => setPlants(Array.isArray(data) ? data : []))
+      .catch(() => setPlants([]));
   }, []);
+
+  /**
+   * The draft is written on a debounce while typing, and once more on the way
+   * out.
+   *
+   * Saving on unmount rather than from an onClose handler is deliberate: the
+   * form can be left by the X, by Cancel, by clicking the backdrop, or by the
+   * page navigating away, and only unmount catches all of them. Wiring each
+   * exit separately is how one of them ends up forgotten.
+   */
+  const latest = useRef({ form, naming });
+  latest.current = { form, naming };
+
+  // Set once the item is actually saved, so leaving does not immediately
+  // write back a draft of something that no longer needs one.
+  const finished = useRef(false);
+
+  useEffect(() => {
+    if (!isEdit) saveDraft({ form, naming });
+  }, [form, naming, isEdit, saveDraft]);
+
+  useEffect(
+    () => () => {
+      if (!isEdit && !finished.current) saveDraftNow(latest.current);
+    },
+    [isEdit, saveDraftNow]
+  );
+
+  /** Throws the draft away and puts the form back to a blank one. */
+  const startFresh = () => {
+    clearDraft();
+    setRestoredFrom(null);
+    setForm({ ...EMPTY, storeRoom: rooms[0]?.name || "" });
+    setNaming(EMPTY_NAMING);
+    setNameIssues(null);
+    setDuplicateBlock(null);
+    setAcknowledgeNaming(false);
+    setAllowDuplicate(false);
+  };
 
   const set = (field) => (e) => {
     setForm({ ...form, [field]: e.target.value });
@@ -198,56 +304,60 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
 
     if (!form.name.trim()) return showToast("Engineering Stock name is required", "error");
     if (!form.category.trim()) return showToast("Category is required", "error");
+    if (!isEdit && !form.plant.trim()) {
+      return showToast("Choose which plant this is for", "error");
+    }
 
-    const quantity = Number(form.quantity);
     if (!isEdit) {
-      if (!form.storeRoom) return showToast("Select a company", "error");
-      if (!Number.isInteger(quantity) || quantity < 0) {
-        return showToast("Quantity must be a whole number of 0 or more", "error");
-      }
+      if (!form.unit.trim()) return showToast("A unit is required", "error");
     }
 
     try {
       setSubmitting(true);
 
-      // Editing sends only what it is allowed to change. Posting the untouched
-      // rest back would be harmless today — the API no-ops a zero delta — but
-      // it invites a future field to be written by a form that never offered it.
-      //
-      // The name is deliberately absent: the form does not let it be changed, and
-      // echoing it back would put a legacy name through the convention on a save
-      // that only meant to fix a shelf label.
-      const payload = isEdit
-        ? {
-            category: form.category,
-            subCategory: form.subCategory,
-            rackNumber: form.rackNumber,
-            status: form.status,
-            image: form.image,
-            description: form.description,
-            acknowledgeNaming,
-            allowDuplicate,
-          }
-        : {
-            ...form,
-            quantity,
-            minStock: Number(form.minStock),
-            unitCost: Number(form.unitCost) || 0,
-            auditFrequency: form.auditFrequency,
-            // Only sent when there is something to send. An empty sub-document
-            // would overwrite the naming fields of a product created with them.
-            ...(isNamingBlank(naming) ? {} : { naming }),
-            acknowledgeNaming,
-            allowDuplicate,
-          };
-
       if (isEdit) {
-        await API.put(`/products/${product._id}`, payload);
+        // Editing sends only what it is allowed to change. Posting the
+        // untouched rest back would be harmless today — the API no-ops a zero
+        // delta — but it invites a future field to be written by a form that
+        // never offered it.
+        //
+        // The name is deliberately absent: the form does not let it be changed,
+        // and echoing it back would put a legacy name through the convention on
+        // a save that only meant to fix a shelf label.
+        await API.put(`/products/${product._id}`, {
+          category: form.category,
+          subCategory: form.subCategory,
+          rackNumber: form.rackNumber,
+          status: form.status,
+          image: form.image,
+          description: form.description,
+          acknowledgeNaming,
+          allowDuplicate,
+        });
         showToast(`"${form.name}" updated`, "success");
       } else {
-        await API.post("/products", payload);
-        showToast(`"${form.name}" added to the catalog`, "success");
+        // Adding is a proposal now, not a creation. An item entering the
+        // catalog is what every issue slip, every audit and eventually SAP
+        // refers to the thing by, so a name goes in front of the Manager
+        // before it becomes real.
+        const { data } = await API.post("/naming-requests", {
+          proposedName: form.name,
+          naming: isNamingBlank(naming) ? null : naming,
+          plant: form.plant,
+          category: form.category,
+          subCategory: form.subCategory,
+          unit: form.unit,
+          brand: form.brand,
+          rackLocation: form.rackNumber,
+          minStock: Number(form.minStock) || 0,
+          description: form.description,
+          reason: form.reason || "",
+        });
+        showToast(`${data.id} sent for approval`, "success");
       }
+
+      finished.current = true;
+      clearDraft();
 
       onSaved();
       onClose();
@@ -268,8 +378,17 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         return;
       }
 
-      console.error("Error saving product:", error);
-      showToast(refusal?.message || "Failed to save engineering stock", "error");
+      console.error(isEdit ? "Error saving product:" : "Error raising the request:", error);
+      // The server's own message names the field or the link it refused, which
+      // is more use than a generic failure. A message-less error is almost
+      // always the request never leaving the browser.
+      showToast(
+        refusal?.message ||
+          (isEdit
+            ? "Failed to save engineering stock"
+            : `Could not send it for approval: ${error.message}`),
+        "error"
+      );
     } finally {
       setSubmitting(false);
     }
@@ -283,7 +402,9 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       <div className="modal-head">
         <h3 className="modal-title truncate">
           <Boxes className="h-[18px] w-[18px] text-brand-700 shrink-0" />
-          <span className="truncate">{isEdit ? `Edit ${product.name}` : "Add Engineering Stock"}</span>
+          <span className="truncate">
+            {isEdit ? `Edit ${product.name}` : "Propose a new engineering item"}
+          </span>
         </h3>
         <button onClick={onClose} className="modal-close" aria-label="Close">
           <X className="h-5 w-5" />
@@ -292,6 +413,24 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
 
       <form onSubmit={handleSubmit} className="contents">
         <div className="modal-body space-y-4">
+        {/* Says plainly that the form was not blank when it opened, and offers
+            the way out. Without this, a restored draft reads as the form
+            having remembered something it should not have. */}
+        {restoredFrom && (
+          <div className="note note-brand items-center justify-between">
+            <span className="flex items-center gap-2">
+              <RotateCcw className="h-4 w-4 shrink-0" />
+              Picked up where you left off, saved {describeWhen(restoredFrom)}.
+            </span>
+            <button
+              type="button"
+              onClick={startFresh}
+              className="shrink-0 font-semibold underline underline-offset-2 hover:no-underline cursor-pointer"
+            >
+              Start fresh
+            </button>
+          </div>
+        )}
         {/* Intake only. The naming convention comes first there, because the
             name it produces is what every other field on the form hangs off —
             but on an edit the name is already settled and not up for changing,
@@ -355,6 +494,35 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
             )}
           </div>
 
+          {/*
+            Which site wants the item.
+            Add only: the queue had no way to say which company a pending name
+            was for, so four plants' requests read as one undifferentiated
+            list. Not shown on edit, because the catalog itself is group-wide -
+            this records who asked, not where the stock lives.
+          */}
+          {!isEdit && (
+            <div>
+              <label className={label}>Plant *</label>
+              <select
+                value={form.plant}
+                onChange={(e) => setForm((prev) => ({ ...prev, plant: e.target.value }))}
+                className="field"
+                disabled={submitting}
+                required
+              >
+                <option value="">Select a plant…</option>
+                {/* The docname, not the short code: `plant` is a Link to CMMS
+                    Plant and a short code would be refused on save. */}
+                {plants.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* --- the editable classification, on both add and edit --- */}
           <div>
             <label className={label}>Category *</label>
@@ -407,13 +575,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
           {!isEdit && (
             <>
               <div>
-                <label className={label}>
-                  Engineering Stock Code{" "}
-                  <span className="font-normal text-slate-500">(auto if blank)</span>
-                </label>
-                <input type="text" value={form.code} onChange={set("code")} className={field} />
-              </div>
-              <div>
                 <label className={label}>Brand</label>
                 <input
                   type="text"
@@ -424,34 +585,47 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                 />
               </div>
               <div>
-                <label className={label}>Unit</label>
-                <input type="text" value={form.unit} onChange={set("unit")} className={field} />
-              </div>
-              <div>
-                <label className={label}>Opening Quantity</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={form.quantity}
-                  onChange={set("quantity")}
-                  className={field}
-                />
-              </div>
-              <div>
-                <label className={label}>Home Company *</label>
+                <label className={label}>Unit *</label>
                 <select
-                  value={form.storeRoom}
-                  onChange={set("storeRoom")}
+                  value={form.unit}
+                  onChange={set("unit")}
                   required
                   className={`${field} cursor-pointer`}
                 >
-                  <option value="">Select a company…</option>
-                  {rooms.map((room) => (
-                    <option key={room._id} value={room.name}>
-                      {room.name}
-                    </option>
-                  ))}
+                  {/* The ones the store already uses first — the full ERPNext
+                      list is mostly furlongs and troy ounces. */}
+                  {units.inUse.length > 0 && (
+                    <optgroup label="Used in this store">
+                      {units.inUse.map((u) => (
+                        <option key={u} value={u}>
+                          {u}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {units.others.length > 0 && (
+                    <optgroup label="Everything else">
+                      {units.others.map((u) => (
+                        <option key={u} value={u}>
+                          {u}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {units.inUse.length === 0 && units.others.length === 0 && (
+                    <option value={form.unit}>{form.unit}</option>
+                  )}
                 </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className={label}>Why it is needed</label>
+                <input
+                  type="text"
+                  value={form.reason}
+                  onChange={set("reason")}
+                  placeholder="e.g. arrived with the new press; the old one has no name"
+                  className={field}
+                />
               </div>
               <div>
                 <label className={label}>Min Stock</label>
@@ -460,17 +634,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                   min="0"
                   value={form.minStock}
                   onChange={set("minStock")}
-                  className={field}
-                />
-              </div>
-              <div>
-                <label className={label}>Unit Cost (₹)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.unitCost}
-                  onChange={set("unitCost")}
                   className={field}
                 />
               </div>
@@ -617,7 +780,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
             className="btn btn-primary"
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            {isEdit ? "Save Changes" : "Add Engineering Stock"}
+            {isEdit ? "Save Changes" : "Send for approval"}
           </button>
         </div>
       </form>

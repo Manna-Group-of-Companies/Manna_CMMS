@@ -454,7 +454,7 @@ class UpdateService extends ChangeNotifier {
       final granted = await ApkInstaller.requestInstallPermission();
       if (!granted) {
         throw const UpdateException(
-          'Android needs permission to install apps from StockMaster. '
+          'Android needs permission to install apps from Manna CMMS. '
           'Turn on "Allow from this source", then tap Update Now again.',
         );
       }

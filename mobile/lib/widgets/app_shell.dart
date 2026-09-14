@@ -22,9 +22,8 @@ class NavLink {
 /// carries the whole portal; Settings sits in the app bar instead.
 const _bottomTabs = [
   NavLink('Catalog', '/supervisor/products', Icons.inventory_2_outlined),
-  NavLink('Requests', '/supervisor/requests', Icons.assignment_outlined),
   NavLink('Issues', '/supervisor/issues', Icons.send_outlined),
-  NavLink('Red Room', '/supervisor/returns', Icons.assignment_return_outlined),
+  NavLink('Red Rack', '/supervisor/returns', Icons.assignment_return_outlined),
 ];
 
 /// A Branch account has two screens: its room's stock, and the requests it has

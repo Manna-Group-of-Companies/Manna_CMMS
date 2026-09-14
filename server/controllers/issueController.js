@@ -75,6 +75,12 @@ export const issueProduct = async (req, res) => {
       note: `Issued to ${recipient.trim()} from ${drawn
         .map((entry) => `${entry.room} (${entry.quantity})`)
         .join(", ")}`,
+      // An issue is filled from whichever rooms hold the stock, so it can span
+      // several. The joined names keep the ledger row readable; `rooms` keeps
+      // the split intact so ERPNext debits each warehouse by what actually
+      // came out of it rather than taking the lot from the first.
+      fromRoom: drawn.map((entry) => entry.room).join(", "),
+      rooms: drawn,
     });
 
     // 4. Low stock notification if quantity dropped below threshold

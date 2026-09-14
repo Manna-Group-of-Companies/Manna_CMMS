@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
+import { useAuth, MANAGER, MAINTENANCE_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import useStockRooms from "../../hooks/useStockRooms";
@@ -113,6 +114,10 @@ const ProductList = () => {
   // The companies stock can be filed against, read from the API (ST-33).
   const rooms = useStockRooms();
   const { showToast } = useNotifications();
+  const { user } = useAuth();
+  // Mirrors the guard on POST /naming-requests. Offering a button the server
+  // will refuse is worse than not offering it.
+  const canProposeItem = user?.role === MANAGER || user?.role === MAINTENANCE_MANAGER;
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
@@ -123,7 +128,6 @@ const ProductList = () => {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedSubCategory, setSelectedSubCategory] = useState("");
   const [selectedStoreRoom, setSelectedStoreRoom] = useState("");
-  const [stockStatus, setStockStatus] = useState("");
 
   // Modals Toggles
   const [activeModal, setActiveModal] = useState(null);
@@ -161,7 +165,6 @@ const ProductList = () => {
       if (selectedCategory) params.category = selectedCategory;
       if (selectedSubCategory) params.subCategory = selectedSubCategory;
       if (selectedStoreRoom) params.storeRoom = selectedStoreRoom;
-      if (stockStatus) params.stockStatus = stockStatus;
 
       const { data } = await API.get("/products", { params });
       setProducts(data);
@@ -204,7 +207,7 @@ const ProductList = () => {
   useEffect(() => {
     fetchProducts();
     fetchCategories();
-  }, [searchTerm, selectedCategory, selectedSubCategory, selectedStoreRoom, stockStatus]);
+  }, [searchTerm, selectedCategory, selectedSubCategory, selectedStoreRoom]);
 
   useEffect(() => {
     fetchSubCategories();
@@ -237,7 +240,7 @@ const ProductList = () => {
           </div>
 
           {/* Filters */}
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4 2xl:flex">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-3 2xl:flex">
             {/* Category Select */}
             <select
               value={selectedCategory}
@@ -273,7 +276,7 @@ const ProductList = () => {
             <select
               value={selectedStoreRoom}
               onChange={(e) => setSelectedStoreRoom(e.target.value)}
-              className="field field-sm w-full 2xl:w-auto cursor-pointer"
+              className="field field-sm w-full 2xl:w-auto cursor-pointer col-span-2 md:col-span-1"
               aria-label="Filter by company"
             >
               <option value="">All Companies</option>
@@ -283,31 +286,31 @@ const ProductList = () => {
                 </option>
               ))}
             </select>
-
-            {/* Stock Level Select */}
-            <select
-              value={stockStatus}
-              onChange={(e) => setStockStatus(e.target.value)}
-              className="field field-sm w-full 2xl:w-auto cursor-pointer col-span-2 md:col-span-1"
-              aria-label="Filter by stock level"
-            >
-              <option value="">All Stock Levels</option>
-              <option value="low">Low Stock Alert</option>
-              <option value="out">Out of Stock</option>
-            </select>
           </div>
         </div>
 
-        <button
-          onClick={() => {
-            setSelectedProduct(null);
-            setActiveModal("form");
-          }}
-          className="btn btn-primary w-full sm:w-auto"
-        >
-          <Plus className="h-4 w-4" />
-          Add Engineering Stock
-        </button>
+        {/*
+          Proposing an item is maintenance's job, and the Admin's.
+
+          This button had no guard at all, so every role that can open the
+          catalog - which is all of them - was offered it, including the plant
+          heads. The server has always refused them (POST /naming-requests is
+          Manager and Maintenance Manager only), so the button was an invitation
+          to a 403. Naming is raised by maintenance and agreed by operations;
+          a plant head has no part in it.
+        */}
+        {canProposeItem && (
+          <button
+            onClick={() => {
+              setSelectedProduct(null);
+              setActiveModal("form");
+            }}
+            className="btn btn-primary w-full sm:w-auto"
+          >
+            <Plus className="h-4 w-4" />
+            Add Engineering Stock
+          </button>
+        )}
       </div>
 
       {/* Catalog Grid / Table */}

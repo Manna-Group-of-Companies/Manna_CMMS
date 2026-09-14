@@ -26,10 +26,14 @@ class AppUser {
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
     final room = json['stockRoom'];
+    // ERPNext identifies a person by their email; there is no `_id`. Falling
+    // back to the email keeps `id` populated for the screens that key off it,
+    // and keeps a session cached by an older build readable.
+    final email = asString(json['email']);
     return AppUser(
-      id: asString(json['_id']),
+      id: asString(json['_id']).isNotEmpty ? asString(json['_id']) : email,
       name: asString(json['name']),
-      email: asString(json['email']),
+      email: email,
       role: asString(json['role']),
       stockRoomId: asId(room) ?? '',
       stockRoomName: room is Map ? asString(room['name']) : '',

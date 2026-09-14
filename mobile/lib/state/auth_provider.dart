@@ -17,7 +17,11 @@ const kAdminNotSupported =
 /// Port of `client/src/context/AuthContext.jsx`.
 ///
 /// Restores the session from local storage, re-validates it against
-/// `GET /auth/me`, and clears everything on 401.
+/// `GET /session/me`, and clears everything on 401.
+///
+/// People sign in with their ERPNext email and password. The PIN is gone:
+/// Frappe has no such concept, and the point of moving onto ERPNext is one
+/// list of people rather than two that drift apart.
 class AuthProvider extends ChangeNotifier {
   AuthProvider(this._api) {
     _api.onUnauthorized = () {
@@ -49,7 +53,7 @@ class AuthProvider extends ChangeNotifier {
         notifyListeners();
 
         // Validate the token and refresh the cached profile.
-        final data = await _api.get('/auth/me');
+        final data = await _api.get('/session/me');
         final fresh = AppUser.fromJson(data as Map<String, dynamic>);
         if (fresh.isAdmin) throw ApiException(kAdminNotSupported);
         _user = fresh;
@@ -74,12 +78,13 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Signs in with the account name and the 4-digit PIN an admin issued.
+  /// Signs in with an ERPNext email and password.
   ///
   /// Throws an [ApiException] whose message can be shown to the user.
-  Future<AppUser> login(String name, String pin) async {
-    final data = await _api.post('/auth/login', {'name': name, 'pin': pin})
-        as Map<String, dynamic>;
+  Future<AppUser> login(String email, String password) async {
+    final data =
+        await _api.post('/session/login', {'email': email, 'password': password})
+            as Map<String, dynamic>;
 
     final user = AppUser.fromJson(data);
     final token = data['token'] as String?;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import { useAuth, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import useStockRooms from "../../hooks/useStockRooms";
 import { COMMON_STATUSES, statusTone } from "../../utils/productStatus";
@@ -67,7 +68,17 @@ const ProductList = () => {
   // Who stock may be issued to, as the Admin keeps them.
   const [recipients, setRecipients] = useState([]);
   // The companies stock can be filed against, read from the API (ST-33).
+  const { user } = useAuth();
   const rooms = useStockRooms();
+
+  /**
+   * A production manager reads this catalog, they do not run the store.
+   *
+   * Editing an item and issuing stock are the storekeeper's, and offering them
+   * here would only raise the question of why they fail. Looking up who holds a
+   * spare — which is why they are on this screen — is untouched.
+   */
+  const storeActions = user?.role !== PRODUCTION_MANAGER;
 
   /**
    * The add / edit form.
@@ -551,10 +562,30 @@ const ProductList = () => {
                       <td className="py-4 px-6">
                         <span className="font-mono text-xs text-slate-700">{product.rackNumber || "—"}</span>
                       </td>
+                      {/* Every company holding it, not just the one holding
+                          most. "Who can I get this from?" is the question this
+                          column exists to answer, and a single badge answered
+                          it wrongly whenever the stock was split. */}
                       <td className="py-4 px-6">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 border border-slate-200 text-slate-600">
-                          {product.storeRoom}
-                        </span>
+                        {product.rooms?.length ? (
+                          <div className="flex flex-col gap-0.5">
+                            {product.rooms.map((r) => (
+                              <span
+                                key={r.room}
+                                className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 border border-slate-200 text-slate-600 whitespace-nowrap"
+                              >
+                                {r.room} · {r.quantity}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">none held</span>
+                        )}
+                        {product.redStock > 0 && (
+                          <span className="mt-0.5 inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-rose-50 border border-rose-200 text-rose-700 whitespace-nowrap">
+                            Red Rack · {product.redStock}
+                          </span>
+                        )}
                       </td>
                       <td className="py-4 px-6 text-center">
                         <div className="flex flex-col items-center justify-center">
@@ -590,6 +621,7 @@ const ProductList = () => {
                           </button>
 
                           {/* Edit (direct — no approval) */}
+                          {storeActions && (
                           <button
                             onClick={() => openEditModal(product)}
                             className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 hover:text-brand-700 transition-all cursor-pointer"
@@ -597,9 +629,11 @@ const ProductList = () => {
                           >
                             <Edit className="h-4 w-4" />
                           </button>
+                          )}
 
 
                           {/* Issue Engineering Stock (direct) */}
+                          {storeActions && (
                           <button
                             onClick={() => openIssueModal(product)}
                             className="p-1.5 hover:bg-slate-100 rounded-lg text-amber-600 hover:text-amber-600 transition-all cursor-pointer"
@@ -607,6 +641,7 @@ const ProductList = () => {
                           >
                             <Send className="h-4 w-4" />
                           </button>
+                          )}
                         </div>
                       </td>
                     </tr>

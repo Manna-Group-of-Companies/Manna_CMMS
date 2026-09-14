@@ -2,10 +2,14 @@
  * What "low stock" means on screen.
  *
  * Whether an item *is* low is decided on the server — `quantity <= minStock`,
- * behind `stockStatus=low` — so the catalog filter, the dashboard count and the
- * Low Stock page never disagree on the size of the list. What is left is how
- * urgent each shortfall reads, and that is here rather than in either page, so
- * the dashboard panel and the full report speak the same three words.
+ * behind `stockStatus=low` — so the catalog filter and the Low Stock page never
+ * disagree on the size of the list. What is left is how urgent each shortfall
+ * reads, and that is here rather than in either page, so both speak the same
+ * three words.
+ *
+ * There was a third reader, a dashboard panel showing the worst five. It is
+ * gone with the dashboard, and this stayed shared because the catalog and the
+ * report still need to agree.
  */
 
 /**

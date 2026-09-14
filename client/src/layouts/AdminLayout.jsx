@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { useAuth, homePathFor } from "../context/AuthContext";
+import { useAuth, homePathFor, canSeeAdminConsole } from "../context/AuthContext";
 import Sidebar from "../components/Sidebar";
 import Navbar from "../components/Navbar";
 
@@ -15,7 +15,7 @@ const AdminLayout = () => {
       <div className="min-h-screen bg-canvas text-slate-900 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-brand-500"></div>
-          <span className="text-sm font-medium text-slate-600">Loading admin session...</span>
+          <span className="text-sm font-medium text-slate-600">Loading your session...</span>
         </div>
       </div>
     );
@@ -25,34 +25,53 @@ const AdminLayout = () => {
     return <Navigate to="/login" replace />;
   }
 
-  if (user.role !== "Admin") {
-    // Anyone else belongs in their own portal, not on the login screen.
+  if (!canSeeAdminConsole(user.role)) {
+    // The store supervisor belongs in the store console, not on the login
+    // screen — and a role this build does not know belongs nowhere, which
+    // homePathFor answers with the login.
     return <Navigate to={homePathFor(user.role)} replace />;
   }
 
-  // Title and one-line context for the bar above the page. Every admin route
-  // has an entry so none of them falls back to a heading meant for another.
+  /**
+   * Title and one-line context for the bar above the page.
+   *
+   * Every route in this console has an entry, so none of them falls back to a
+   * heading meant for another. Matched by prefix, longest first, so
+   * "/admin/breakdown-report" is not answered by "/admin/breakdowns".
+   */
   const PAGE_META = [
-    ["/admin/dashboard", "Dashboard", "Stock, requests and alerts at a glance"],
+    ["/admin/breakdown-report", "Breakdown Report", "Downtime and reliability across the group"],
+    ["/admin/breakdowns", "Breakdowns", "Machines that have stopped, and what is being done"],
+    [
+      "/admin/maintenance-requests",
+      "Maintenance Requests",
+      "Planned work: what has been asked for, and where it has got to",
+    ],
+    ["/admin/preventive", "Preventive Maintenance", "Checklists and what they are due on"],
     ["/admin/products", "Engineering Stock", "The catalog and what is on the shelves"],
+    ["/admin/categories", "Categories", "The category tree items are filed under"],
     [
       "/admin/low-stock",
       "Low Stock",
       "Every item at or below its minimum, and what refilling it takes",
     ],
-    ["/admin/requests", "Request Control", "Approve, reject or hold supervisor requests"],
-    ["/admin/issues", "Issue History", "Every engineering stock item issued, by every supervisor"],
+    ["/admin/requests", "Item Naming", "Approve, reject or hold a proposed item name"],
+    ["/admin/assets", "Asset Management", "The machine register and everything known about each"],
+    ["/admin/electrical", "Electrical Systems", "Panels, supplies and what they feed"],
     ["/admin/scrap", "Scrap & Consumption", "Value written off across the stores"],
-    ["/admin/audits", "Stock Audits", "Monthly counts, the score each store room earned, and the history"],
-    ["/admin/users", "Users & PINs", "Accounts and the PINs they sign in with"],
+    [
+      "/admin/audits",
+      "Stock Audits",
+      "Monthly counts, the score each store room earned, and the history",
+    ],
+    ["/admin/recipients", "Recipients", "Who stock may be issued to"],
+    ["/admin/users", "Users & Passwords", "Accounts and the ERPNext roles they sign in with"],
   ];
 
   const [, title, subtitle] =
-    PAGE_META.find(([path]) => location.pathname.startsWith(path)) || [
-      "",
-      "Stock Master Control",
-      "",
-    ];
+    PAGE_META.filter(([path]) => location.pathname.startsWith(path)).sort(
+      (a, b) => b[0].length - a[0].length
+    )[0] || ["", "Stock Master Control", ""];
 
   return (
     <div className="min-h-screen bg-canvas flex">

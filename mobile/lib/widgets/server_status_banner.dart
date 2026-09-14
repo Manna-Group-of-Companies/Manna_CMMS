@@ -146,7 +146,7 @@ class _ServerStatusBannerState extends State<ServerStatusBanner> {
       case ServerStatus.checking:
         return 'Connecting to the server…';
       case ServerStatus.scanning:
-        return 'Searching your Wi-Fi network for the StockMaster server…';
+        return 'Searching your Wi-Fi network for the Manna CMMS server…';
       case ServerStatus.unreachable:
         if (server.isPinned) {
           return 'Cannot reach ${server.host}. This build has a fixed server '
@@ -264,7 +264,7 @@ class _ServerSettingsSheetState extends State<_ServerSettingsSheet> {
       Toast.success('Connected to ${server.host}');
     } else {
       setState(() => _error =
-          'No StockMaster API answered at that address. Check the IP, the '
+          'No Manna CMMS API answered at that address. Check the IP, the '
           'port, and that the server is running.');
     }
   }
@@ -332,7 +332,7 @@ class _ServerSettingsSheetState extends State<_ServerSettingsSheet> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'The app uses the hosted StockMaster server by default. To work '
+            'The app uses the hosted Manna CMMS server by default. To work '
             'against a server on this Wi-Fi network instead, enter that '
             'computer’s IP address — run "ipconfig" (Windows) or "ifconfig" '
             '(macOS/Linux) on it to find one.',

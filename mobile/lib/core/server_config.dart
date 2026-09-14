@@ -29,8 +29,8 @@ abstract final class ServerConfig {
   /// Matches `PORT` in `server/.env`.
   static const port = int.fromEnvironment('API_PORT', defaultValue: 5000);
 
-  /// The deployed StockMaster API. Reachable from anywhere, so it is what the
-  /// app settles on unless a server answers on the local network first.
+  /// The deployed Manna CMMS API. Reachable from anywhere, so it
+  /// is what the app settles on unless a server answers on the local network first.
   static const cloudUrl = 'https://manna-cmms.onrender.com/api';
 
   /// Render puts free instances to sleep after a spell of inactivity, and the

@@ -11,103 +11,99 @@ import {
 } from "../utils/stockRooms.js";
 import { composeItemName, resolveItemName } from "../utils/itemNaming.js";
 import { findSimilarProducts } from "../utils/duplicateCheck.js";
+import {
+  getCatalogItem,
+  listUnits,
+  retireCatalogItem,
+  listCatalog,
+  listCategories,
+  listSubCategories,
+} from "../repository/catalog.js";
+import { scopeFor } from "../repository/plantScope.js";
+import { maySee } from "../config/access.js";
 
 // @desc    Get all products with search and filtering
 // @route   GET /api/products
-// @access  Private (Both Admin and Supervisor)
+// @access  Private (Manager, Maintenance Manager, Supervisor)
+//
+// Reads ERPNext, not MongoDB. The shape is unchanged, so the screens did not
+// have to be touched — but the numbers are now Bin's, which means the catalog
+// and ERPNext's own Stock Balance report cannot drift apart.
 export const getProducts = async (req, res) => {
   try {
     const { search, category, subCategory, storeRoom, stockStatus } = req.query;
 
-    let query = {};
-
-    // Search query
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { code: { $regex: search, $options: "i" } },
-        { category: { $regex: search, $options: "i" } },
-        // Searching the rack answers "what is on A-1?", which is how somebody
-        // standing in front of the shelving looks things up.
-        { rackNumber: { $regex: search, $options: "i" } },
-      ];
+    // The catalog and Low Stock are one endpoint told apart by a query
+    // parameter, and they have different audiences. Checked here rather than
+    // on the route, because guarding the route with the narrower of the two
+    // would take the catalog away from everybody who only has that.
+    if (stockStatus === "low" && !maySee(req.user.role, "lowStock")) {
+      return res.status(403).json({
+        message: `Role (${req.user.role}) is not allowed to access this resource`,
+      });
     }
 
-    // Exact filters
-    if (category) {
-      query.category = category;
-    }
+    // A plant head sees their own site's shelves and nothing else. Read from
+    // the signed-in user rather than taken from the query, so narrowing it is
+    // not something a caller can decline to do.
+    const { stores } = await scopeFor(req.user);
 
-    if (subCategory) {
-      query.subCategory = subCategory;
-    }
-
-    if (storeRoom) {
-      query.storeRoom = storeRoom;
-    }
-
-    // Stock level filtering
-    if (stockStatus === "low") {
-      // quantity <= minStock
-      query.$expr = { $lte: ["$quantity", "$minStock"] };
-    } else if (stockStatus === "out") {
-      query.quantity = 0;
-    }
-
-    const products = await Product.find(query).sort({ updatedAt: -1 });
-    res.json(products);
+    res.json(
+      await listCatalog({
+        search,
+        category,
+        subCategory,
+        storeRoom,
+        onlyRooms: stores,
+        stockStatus,
+      })
+    );
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(error.status === 403 ? 403 : 502).json({
+      message: `Could not read the catalog from ERPNext: ${error.message}`,
+    });
   }
 };
 
-// @desc    Get product by ID
+// @desc    Get one product by its item code
 // @route   GET /api/products/:id
 // @access  Private
 export const getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
+    const { stores } = await scopeFor(req.user);
+    const product = await getCatalogItem(req.params.id, { onlyRooms: stores });
 
-    if (product) {
-      res.json(product);
-    } else {
-      res.status(404).json({ message: "Engineering Stock not found" });
-    }
+    // "Not found" rather than "not allowed" on purpose: to a plant head an
+    // item their site does not hold is not in their catalog at all, and a 403
+    // would confirm the code exists to somebody who cannot see it.
+    if (!product) return res.status(404).json({ message: "Engineering Stock not found" });
+    res.json(product);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(502).json({ message: `Could not read the item from ERPNext: ${error.message}` });
   }
 };
 
-// @desc    Get all unique categories
+// @desc    Categories in use
 // @route   GET /api/products/categories
 // @access  Private
 export const getCategories = async (req, res) => {
   try {
-    const categories = await Product.distinct("category");
-    res.json(categories);
+    res.json(await listCategories());
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(502).json({ message: `Could not read categories from ERPNext: ${error.message}` });
   }
 };
 
 // @desc    Sub-categories in use, optionally narrowed to one category
 // @route   GET /api/products/subcategories?category=Tools
 // @access  Private
-//
-// Scoped on purpose: the catalog carries well over a hundred sub-categories,
-// and an unfiltered list is unusable in a dropdown. Passing the category the
-// user already picked leaves only the handful that belong to it.
 export const getSubCategories = async (req, res) => {
   try {
-    const { category } = req.query;
-    const filter = category ? { category } : {};
-
-    const subCategories = await Product.distinct("subCategory", filter);
-    // Products predating the field have "", which is not a choice anyone can
-    // filter on.
-    res.json(subCategories.filter(Boolean).sort((a, b) => a.localeCompare(b)));
+    res.json(await listSubCategories(req.query.category || ""));
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(502).json({
+      message: `Could not read sub-categories from ERPNext: ${error.message}`,
+    });
   }
 };
 
@@ -303,122 +299,55 @@ const EDITABLE_FIELDS = [
   "image",
 ];
 
-// @desc    Create a product
-// @route   POST /api/products
-// @access  Private (Admin)
-export const createProduct = async (req, res) => {
+// @desc    The units ERPNext holds, for the unit picker
+// @route   GET /api/products/units
+// @access  Private
+export const getUnits = async (_req, res) => {
   try {
-    const {
-      code,
-      quantity = 0,
-      storeRoom,
-      name,
-      naming,
-      // The two intake checks below are advisory, not absolute — the store has
-      // to be able to enter an item the rules did not anticipate. Each is
-      // overridden by the caller confirming it, which is what "flag before
-      // saving" (ST-10) means in practice.
-      acknowledgeNaming = false,
-      allowDuplicate = false,
-      ...rest
-    } = req.body;
-
-    if (!storeRoom || !String(storeRoom).trim()) {
-      return res.status(400).json({ message: "Store Room is required" });
-    }
-
-    // ST-09 / ST-10 — compose the standardized name from the captured fields
-    // when none was typed, then hold it against the convention.
-    const named = resolveItemName({ name, naming });
-    if (!named.name) {
-      return res.status(400).json({ message: "Engineering Stock name is required" });
-    }
-    if (!named.compliant && !acknowledgeNaming) {
-      return res.status(422).json({
-        code: "NAME_NOT_COMPLIANT",
-        message: `"${named.name}" does not follow the SOI1/SOP1 naming convention`,
-        name: named.name,
-        issues: named.issues,
-      });
-    }
-
-    const productCode = code?.trim() || generateProductCode();
-    if (await Product.findOne({ code: productCode })) {
-      return res.status(400).json({ message: `Engineering Stock code ${productCode} already exists` });
-    }
-
-    // ST-14 — say so before a second copy of an item the store already holds
-    // is created.
-    if (!allowDuplicate) {
-      const matches = await findSimilarProducts({
-        name: named.name,
-        code: productCode,
-        brand: rest.brand,
-        category: rest.category,
-      });
-
-      if (matches.length) {
-        return res.status(409).json({
-          code: "POSSIBLE_DUPLICATE",
-          message:
-            matches.length === 1
-              ? `"${matches[0].name}" is already in the catalog`
-              : `${matches.length} similar items are already in the catalog`,
-          matches,
-          blocking: matches.some((match) => match.exact),
-        });
-      }
-    }
-
-    const openingQuantity = Number(quantity) || 0;
-    if (openingQuantity < 0) {
-      return res.status(400).json({ message: "Opening quantity cannot be negative" });
-    }
-
-    // Created empty, then credited, so the room row and the total are written
-    // by the same path as every other stock movement.
-    const product = await Product.create({
-      ...rest,
-      name: named.name,
-      naming: named.naming,
-      nameCompliant: named.compliant,
-      code: productCode,
-      storeRoom: String(storeRoom).trim(),
-      quantity: 0,
-      // Every item that comes in through intake owes the Plant Manager a SAP
-      // record (ST-13). The imported catalog does not — see models/Product.js.
-      sap: { status: "Pending" },
-    });
-
-    if (openingQuantity > 0) {
-      await creditRoom({ product, room: product.storeRoom, quantity: openingQuantity });
-    }
-
-    await recordMovement({
-      product,
-      type: "PRODUCT_CREATED",
-      direction: openingQuantity > 0 ? "IN" : "NONE",
-      quantity: openingQuantity,
-      reference: product.code,
-      performedBy: req.user._id,
-      note: `Created by ${req.user.name} in ${product.storeRoom}`,
-    });
-
-    await Notification.create({
-      message: `Engineering Stock "${product.name}" added to the catalog by ${req.user.name}`,
-      type: "REQUEST_APPROVED",
-    });
-
-    res.status(201).json(await Product.findById(product._id));
+    res.json(await listUnits());
   } catch (error) {
-    console.error("Error creating product:", error);
-    res.status(500).json({ message: error.message });
+    res.status(502).json({ message: `Could not read units from ERPNext: ${error.message}` });
   }
 };
 
-// @desc    Update a product. Quantity and store room changes move real stock.
-// @route   PUT /api/products/:id
-// @access  Private (Admin, Supervisor — quantity is Admin-only)
+// @desc    Adding an item is not a direct action any more
+// @route   POST /api/products
+//
+// An item entering the catalog is what every issue slip, every audit and
+// eventually SAP will refer to the thing by, so it goes through a named
+// proposal and an approval rather than a form anybody can submit. This used to
+// create the item outright, which meant a name reached the catalog - and would
+// have reached SAP - with nobody having agreed to it.
+export const createProduct = async (_req, res) =>
+  res.status(405).json({
+    message:
+      "Items are added by raising a naming request, which the Manager approves. " +
+      "Raise one from Request Control.",
+    raiseAt: "/api/naming-requests",
+  });
+
+/**
+ * @desc    Retire an item
+ * @route   DELETE /api/products/:id
+ *
+ * "Delete" is the wrong word and the screen should stop using it. ERPNext
+ * refuses to delete an Item that any stock document has ever referenced - even
+ * a cancelled one - and tells you to disable it instead. So the item is taken
+ * out of the catalog and its balance zeroed, which is what deleting was
+ * understood to mean, but the ledger it took part in stays intact.
+ */
+export const deleteProduct = async (req, res) => {
+  try {
+    const result = await retireCatalogItem(req.params.id);
+    res.json(result);
+  } catch (error) {
+    if (error.status === 403) {
+      return res.status(403).json({ message: "Your ERPNext role does not allow that." });
+    }
+    res.status(error.status ? 400 : 500).json({ message: error.message });
+  }
+};
+
 export const updateProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -678,40 +607,19 @@ export const addStock = async (req, res) => {
   }
 };
 
-// @desc    Delete a product and its per-room rows
-// @route   DELETE /api/products/:id
-// @access  Private (Admin)
-export const deleteProduct = async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id);
-    if (!product) {
-      return res.status(404).json({ message: "Engineering Stock not found" });
-    }
-
-    // History (issues, movements, past requests) snapshots the name and code,
-    // so those records stay readable after the product is gone.
-    await StockRoomInventory.deleteMany({ product: product._id });
-    await Product.deleteOne({ _id: product._id });
-
-    await Notification.create({
-      message: `Engineering Stock "${product.name}" (${product.code}) was deleted by ${req.user.name}`,
-      type: "REQUEST_REJECTED",
-    });
-
-    res.json({ message: `"${product.name}" has been deleted`, id: product._id });
-  } catch (error) {
-    console.error("Error deleting product:", error);
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// @desc    Per-room breakdown for one product
-// @route   GET /api/products/:id/rooms
-// @access  Private
 export const getProductRooms = async (req, res) => {
   try {
-    res.json(await roomBreakdownFor(req.params.id));
+    const product = await getCatalogItem(req.params.id);
+    if (!product) return res.status(404).json({ message: "Engineering Stock not found" });
+
+    // Red Stock is listed alongside the stores rather than folded into them.
+    // It is real stock on the books, but it is not on a shelf anybody issues
+    // from, and showing it as store stock would promise more than is there.
+    res.json([
+      ...product.rooms,
+      ...(product.redStock > 0 ? [{ room: "Red Stock Room", quantity: product.redStock }] : []),
+    ]);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(502).json({ message: `Could not read stock from ERPNext: ${error.message}` });
   }
 };

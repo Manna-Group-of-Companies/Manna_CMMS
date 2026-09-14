@@ -45,7 +45,7 @@ Future<void> checkForUpdateFromSettings(BuildContext context) async {
   if (!context.mounted) return;
 
   if (!result.updateAvailable) {
-    Toast.success('StockMaster ${result.installedVersion} is up to date.');
+    Toast.success('Manna CMMS ${result.installedVersion} is up to date.');
     return;
   }
 
@@ -185,7 +185,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                     icon: Icons.priority_high,
                     color: AppColors.warning,
                     message:
-                        'This is a required update — StockMaster needs it to keep '
+                        'This is a required update — the app needs it to keep '
                         'working with the server.',
                   ),
                 ],
@@ -283,7 +283,7 @@ class _Header extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                mandatory ? 'Required update' : 'StockMaster',
+                mandatory ? 'Required update' : 'Manna CMMS',
                 style: const TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 11.5,
