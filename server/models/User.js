@@ -45,6 +45,21 @@ const userSchema = new mongoose.Schema(
       required: [true, "Role is required"],
       enum: ["Admin", "Supervisor", "Branch"],
     },
+    /**
+     * The business this account belongs to.
+     *
+     * Null means "every company", which is what an Admin or Supervisor needs —
+     * they already work across all rooms, and scoping them here would take
+     * away access they have today. A Branch account inherits the company of
+     * the room it is pinned to; see `backfillUserCompanies`.
+     *
+     * Module 2 reads this to know whose asset a breakdown was raised against.
+     */
+    company: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      default: null,
+    },
     // A Branch account is tied to exactly one room: it sees that room's stock
     // and nothing else. Admin and Supervisor accounts leave this null, since
     // they work across every room.

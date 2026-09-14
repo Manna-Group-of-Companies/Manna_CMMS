@@ -15,3 +15,9 @@ npm-debug.log*
 .claude/
 .agents/
 skills-lock.json
+
+# The engineering store's own catalog and everything derived from it. This is
+# operational data, not code: it carries the whole product list, what is on the
+# shelves and where. server/.gitignore already excludes its own data/ for the
+# same reason; this covers the copy at the project root.
+/data/

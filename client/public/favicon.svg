@@ -1,7 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="StockMaster">
-  <!-- Brand tile: --color-brand-600 from src/index.css, matching the mark in
-       Sidebar.jsx and Login.jsx. Solid fill so it reads on light and dark tab bars. -->
-  <rect width="64" height="64" rx="14" fill="#0d9488"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Manna CMMS">
+  <!-- Brand tile: the brand-600 orange from src/index.css, which is the orange
+       in the Manna Group mark. Solid fill so it reads on light and dark tab
+       bars. (An XML comment may not contain a double hyphen, so the CSS custom
+       property is named in words here - written literally it made this whole
+       file fail to parse and every browser fell back to the .ico.) -->
+  <rect width="64" height="64" rx="14" fill="#d14a0c"/>
   <!-- lucide "boxes", the same glyph the app renders. Scaled from its 24px grid
        and given a heavier stroke so it survives a 16px tab icon. -->
   <g transform="translate(11.6 11.6) scale(1.7)"

@@ -20,6 +20,20 @@ const stockRoomSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    /**
+     * The business this room belongs to.
+     *
+     * Optional rather than required: every room that predates companies is
+     * attached on boot by `backfillRoomCompanies`, and making this required
+     * would fail validation on all of them before that migration could run —
+     * including on tablets still posting against an older build. New rooms are
+     * asked for one by the controller instead.
+     */
+    company: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      default: null,
+    },
     // Retired rooms stay in the database so historical inventory rows and
     // approved requests still resolve to a name.
     isActive: {

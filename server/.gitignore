@@ -7,3 +7,11 @@ node_modules/
 # scripts/extractProductsFromTransactions.js rebuilds everything here from a
 # fresh export.
 data/
+
+# The ERPNext import sheets, for the same reason: they carry the whole catalog
+# and every current shelf balance. scripts/exportForErpnext.js regenerates them
+# from the database whenever they are needed.
+exports/
+# Credentials copied aside during a key rotation. Never in the repo.
+.env.backup*
+.env.*.local

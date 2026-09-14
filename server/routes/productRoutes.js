@@ -4,6 +4,7 @@ import {
   getProductById,
   getCategories,
   getSubCategories,
+  getUnits,
   createProduct,
   updateProduct,
   deleteProduct,
@@ -14,43 +15,58 @@ import {
   getSapPending,
   updateSapStatus,
 } from "../controllers/productController.js";
-import { protect, authorizeRoles } from "../middleware/auth.js";
+import { protect, requireRole } from "../middleware/session.js";
+import { requireView } from "../config/access.js";
 
 const router = express.Router();
 
-// The catalog is a whole-company view. A Branch account only ever sees the
-// stock sitting in its own room, so it is kept out of every route here.
-router.use(protect, authorizeRoles("Admin", "Supervisor"));
+/**
+ * Not yet moved off MongoDB.
+ *
+ * The reads below come from ERPNext; these writes still expect a database that
+ * is no longer there. Mounted with an honest refusal rather than left to fail
+ * on a dead connection, because "Not authorized" or a stack trace would send
+ * whoever hit it looking for a permission problem that does not exist.
+ */
+const notYetMoved = (what) => (_req, res) =>
+  res.status(501).json({
+    message: `${what} has not been moved to ERPNext yet. Do it in ERPNext directly for now.`,
+  });
+
+/**
+ * The catalog is open to every signed-in role.
+ *
+ * It is one catalog rather than four on purpose — a plant head reads it to
+ * find out which site holds a spare. What a plant head sees is nevertheless
+ * their own site's shelves alone: the confinement is applied in the
+ * controller, against the signed-in user, so it is not a filter a caller can
+ * decline to send.
+ *
+ * The same endpoint serves Low Stock, whose audience is narrower. The
+ * difference is a query parameter rather than a route, so the narrowing is
+ * enforced on the screen rather than here; widening this to the Low Stock
+ * audience would take Engineering Stock away from everyone else.
+ */
+router.use(protect, requireView("engineeringStock"));
 
 router.get("/", getProducts);
 router.get("/categories", getCategories);
 router.get("/subcategories", getSubCategories);
+router.get("/units", getUnits);
 
 // The intake checks. All three are named routes and must stay above "/:id",
 // or Express hands "duplicates" to getProductById as an id.
-//
-// A supervisor drafting an ADD request needs the same naming help and the same
-// duplicate warning as the Admin creating the product outright, so these are
-// open to both roles. Only the creates and deletes below are Admin-only.
 router.post("/name-preview", previewItemName);
-router.get("/duplicates", checkDuplicates);
-router.get("/sap-pending", getSapPending);
+router.get("/duplicates", notYetMoved("The duplicate check"));
+router.get("/sap-pending", notYetMoved("The SAP hand-off queue"));
 
-// Creating a catalog item is Admin-only; a supervisor raises an ADD request,
-// which is the one request left in the flow.
-router.post("/", authorizeRoles("Admin"), createProduct);
+router.post("/", requireRole("Manager"), createProduct);
 
 router.get("/:id", getProductById);
 router.get("/:id/rooms", getProductRooms);
-// Add Stock. Applies straight away — stock coming in no longer waits for an
-// Admin, so it is done on the product rather than raised at /api/requests.
-router.post("/:id/stock-in", addStock);
-router.put("/:id/sap", authorizeRoles("Admin"), updateSapStatus);
-// An edit is saved straight to the product — supervisors no longer raise an
-// EDIT request for it. Quantity is the exception: only an Admin may set a new
-// total from here; a supervisor adds stock through /:id/stock-in, which credits
-// a named room instead (see updateProduct).
-router.put("/:id", authorizeRoles("Admin", "Supervisor"), updateProduct);
-router.delete("/:id", authorizeRoles("Admin"), deleteProduct);
+router.post("/:id/stock-in", notYetMoved("Adding stock"));
+router.put("/:id/sap", requireRole("Manager"), notYetMoved("Setting the SAP code"));
+router.put("/:id", requireRole("Manager", "Supervisor"), notYetMoved("Editing an item"));
+router.delete("/:id", requireRole("Manager"), deleteProduct);
 
 export default router;

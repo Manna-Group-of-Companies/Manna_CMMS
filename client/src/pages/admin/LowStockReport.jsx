@@ -97,9 +97,10 @@ const CardRow = ({ label, children }) => (
 /**
  * Every item at or below its minimum, in one table.
  *
- * The dashboard panel only ever shows the first five, and the catalog mixes
- * the shortfalls in with the several thousand items that are fine. This is the
- * whole list, row by row and column by column — what is on the shelf, what it
+ * The catalog mixes the shortfalls in with the several thousand items that are
+ * fine, and the dashboard panel that used to show the worst five is gone with
+ * the dashboard — so this is now the only place the shortfalls are read. It is
+ * the whole list, row by row and column by column — what is on the shelf, what it
  * should be, how many units are missing and what buying them back costs —
  * sortable on any of those and exportable, so the same rows go out as the
  * purchase list.
@@ -122,8 +123,8 @@ const LowStockReport = () => {
     try {
       if (!silent) setLoading(true);
       // The same `stockStatus=low` the catalog filter uses. Deciding
-      // `quantity <= minStock` on the server is what keeps this page, the
-      // catalog filter and the dashboard count agreeing on one number.
+      // `quantity <= minStock` on the server is what keeps this page and the
+      // catalog filter agreeing on one number.
       const { data } = await API.get("/products", { params: { stockStatus: "low" } });
       setProducts(Array.isArray(data) ? data : []);
     } catch (error) {

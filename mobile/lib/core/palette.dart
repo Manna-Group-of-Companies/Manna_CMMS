@@ -1,57 +1,62 @@
 import 'package:flutter/material.dart';
 
-/// Design tokens for the StockMaster light theme: a soft off-white canvas,
-/// white cards with hairline borders, and a teal brand accent.
+/// Design tokens for the Manna CMMS light theme: a warm
+/// off-white canvas, white cards with hairline borders, and the Manna orange
+/// taken from the group logo.
 ///
 /// Tokens are named by role rather than by hue so a screen never has to know
-/// which shade of teal or grey is currently in fashion.
+/// which shade of orange or grey is currently in fashion.
 abstract final class AppColors {
   // ── Surfaces ──────────────────────────────────────────────────────────────
-  /// Page background behind the cards. Faintly teal so it sits with the brand,
+  /// Page background behind the cards. Faintly warm so it sits with the brand,
   /// and a step deeper than [surface] so the cards separate from it.
   /// Kept in step with `--color-canvas` in the web client's index.css.
-  static const canvas = Color(0xFFEEF3F2);
+  static const canvas = Color(0xFFF5F2EF);
 
   /// Card / sheet / app bar background.
   static const surface = Color(0xFFFFFFFF);
 
   /// Recessed fill: input chips, thumbnails, table headers.
-  static const surfaceMuted = Color(0xFFF1F4F5);
+  static const surfaceMuted = Color(0xFFF3F0EC);
 
   /// Hairline divider and card outline.
-  static const border = Color(0xFFE6EBEE);
+  static const border = Color(0xFFEAE4DF);
 
   /// Outline that needs to read against [surfaceMuted].
-  static const borderStrong = Color(0xFFD5DEE2);
+  static const borderStrong = Color(0xFFDAD2CB);
 
   // ── Text ──────────────────────────────────────────────────────────────────
   /// Screen and card titles.
-  static const textStrong = Color(0xFF0F2129);
+  static const textStrong = Color(0xFF232225);
 
   /// Emphasised values inside a card.
-  static const textPrimary = Color(0xFF1C2C34);
+  static const textPrimary = Color(0xFF323034);
 
   /// Default body copy.
-  static const textBody = Color(0xFF41525C);
+  static const textBody = Color(0xFF4E4B51);
 
   /// Supporting copy next to a value.
-  static const textSecondary = Color(0xFF5D6B75);
+  static const textSecondary = Color(0xFF6B676E);
 
   /// Labels, timestamps, inactive icons.
-  static const textMuted = Color(0xFF7C8B95);
+  static const textMuted = Color(0xFF8B868E);
 
   /// Placeholders and empty-state art.
-  static const textFaint = Color(0xFF9FADB6);
+  static const textFaint = Color(0xFFAEA8B0);
 
   // ── Brand ─────────────────────────────────────────────────────────────────
   /// Primary action colour — solid buttons, active nav, focus rings.
-  static const primary = Color(0xFF0D9488);
+  ///
+  /// A step deeper than the logo orange (#F26722) on purpose: the logo colour
+  /// only reaches 3.1 contrast on white, which is fine for a mark but not for
+  /// a surface carrying white text. This shade reaches 4.5.
+  static const primary = Color(0xFFD14A0C);
 
   /// Primary used as *text or icon* on a light surface.
-  static const primaryDeep = Color(0xFF0B7A6E);
+  static const primaryDeep = Color(0xFFB03C09);
 
   /// End stop of the hero gradient.
-  static const primaryDarker = Color(0xFF0A6B62);
+  static const primaryDarker = Color(0xFF8E3007);
 
   // ── Status ────────────────────────────────────────────────────────────────
   /// Approved / in stock, as text on a light surface.
@@ -101,17 +106,17 @@ abstract final class StatusColors {
 abstract final class AppShadows {
   /// Resting card.
   static const card = [
-    BoxShadow(color: Color(0x0A0F2129), blurRadius: 14, offset: Offset(0, 4)),
+    BoxShadow(color: Color(0x0A232225), blurRadius: 14, offset: Offset(0, 4)),
     BoxShadow(color: Color(0x05000000), blurRadius: 2, offset: Offset(0, 1)),
   ];
 
   /// Anything that floats above the page: bottom bar, FAB, toast, hero tile.
   static const raised = [
-    BoxShadow(color: Color(0x140F2129), blurRadius: 24, offset: Offset(0, 10)),
+    BoxShadow(color: Color(0x14232225), blurRadius: 24, offset: Offset(0, 10)),
   ];
 }
 
-/// The teal hero gradient used by the dashboard's headline tile.
+/// The orange hero gradient used by the dashboard's headline tile.
 abstract final class AppGradients {
   static const primary = LinearGradient(
     begin: Alignment.topLeft,

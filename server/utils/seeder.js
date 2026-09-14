@@ -3,6 +3,7 @@ import Product from "../models/Product.js";
 import StockRoom from "../models/StockRoom.js";
 import { ensureDefaultRooms, migrateProductsIntoRooms, renameStockRooms } from "./stockRooms.js";
 import { bootstrapAdminPin, migrateUserLogins } from "./userLogins.js";
+import { setUpCompanies } from "./companies.js";
 
 /** The room the seeded Branch account is pointed at. */
 const BRANCH_ROOM = StockRoom.DEFAULT_ROOMS[0];
@@ -63,6 +64,12 @@ const seedData = async () => {
 
     // 1c. Make sure somebody can actually get in to issue the other PINs.
     await bootstrapAdminPin();
+
+    // 1d. Create the companies and attach the rooms and Branch accounts to
+    //     them. After the rooms exist (step 0) because a room is matched to
+    //     its company by name, and after the Branch account is seeded (1b)
+    //     because that account takes its company from its room.
+    await setUpCompanies();
 
     // 2. Seed Products
     const productCount = await Product.countDocuments();

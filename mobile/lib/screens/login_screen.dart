@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../core/api_client.dart';
@@ -12,8 +11,8 @@ import '../state/server_provider.dart';
 import '../widgets/common.dart';
 import '../widgets/server_status_banner.dart';
 
-/// Every account signs in with its name and a PIN of exactly this many digits.
-const kPinLength = 4;
+/// Every account signs in with the email and password it uses for ERPNext.
+/// There is no PIN any more — Frappe has no such concept.
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -24,8 +23,8 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _name = TextEditingController();
-  final _pin = TextEditingController();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
 
   bool _loading = false;
   bool _obscure = true;
@@ -33,15 +32,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    _name.dispose();
-    _pin.dispose();
+    _email.dispose();
+    _password.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
 
-    if (_name.text.trim().isEmpty || _pin.text.isEmpty) {
+    if (_email.text.trim().isEmpty || _password.text.isEmpty) {
       setState(() => _error = 'Please fill in all fields');
       return;
     }
@@ -55,14 +54,15 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final user = await context
           .read<AuthProvider>()
-          .login(_name.text.trim(), _pin.text);
+          .login(_email.text.trim(), _password.text);
       Toast.success('Welcome back, ${user.name}!');
       // Routing is handled by the router's redirect once `user` is set.
     } on ApiException catch (error) {
-      // A 403 carries something the user needs to read verbatim — an account
-      // whose PIN an admin has not issued yet.
+      // 401 is the only one worth rewording. A 403 says the account holds no
+      // stock role, a 426 says this build is too old for the server — both
+      // need reading verbatim, because neither is fixed by trying again.
       final message = error.statusCode == 401
-          ? 'Invalid name or PIN. Please try again.'
+          ? 'Wrong email or password. Please try again.'
           : error.message;
       if (mounted) setState(() => _error = message);
       Toast.error(message);
@@ -126,7 +126,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 14),
                       const Text(
-                        'StockMaster',
+                        'Manna CMMS',
                         style: TextStyle(
                           color: AppColors.textStrong,
                           fontSize: 28,
@@ -185,43 +185,43 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                                 const SizedBox(height: 16),
                               ],
-                              const _FieldLabel('Name'),
+                              const _FieldLabel('ERPNext Email'),
                               TextFormField(
-                                controller: _name,
+                                controller: _email,
                                 textInputAction: TextInputAction.next,
-                                textCapitalization: TextCapitalization.words,
+                                keyboardType: TextInputType.emailAddress,
                                 autocorrect: false,
+                                // An email typed on a phone keyboard picks up
+                                // a capital first letter otherwise, and Frappe
+                                // matches the address exactly.
+                                textCapitalization: TextCapitalization.none,
                                 style: const TextStyle(
                                     fontSize: 14, color: AppColors.textStrong),
                                 decoration: const InputDecoration(
-                                  hintText: 'Your account name',
-                                  prefixIcon: Icon(Icons.person_outline, size: 18),
+                                  hintText: 'you@mannarubber.com',
+                                  prefixIcon: Icon(Icons.mail_outline, size: 18),
                                 ),
-                                validator: (value) => (value ?? '').trim().isEmpty
-                                    ? 'Name is required'
-                                    : null,
+                                validator: (value) {
+                                  final text = (value ?? '').trim();
+                                  if (text.isEmpty) return 'Email is required';
+                                  if (!text.contains('@')) return 'Enter your full email address';
+                                  return null;
+                                },
                               ),
                               const SizedBox(height: 18),
-                              const _FieldLabel('$kPinLength-Digit PIN'),
+                              const _FieldLabel('Password'),
                               TextFormField(
-                                controller: _pin,
+                                controller: _password,
                                 obscureText: _obscure,
-                                keyboardType: TextInputType.number,
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.digitsOnly,
-                                  LengthLimitingTextInputFormatter(kPinLength),
-                                ],
+                                autocorrect: false,
+                                enableSuggestions: false,
                                 textInputAction: TextInputAction.done,
                                 onFieldSubmitted: (_) => _loading ? null : _submit(),
                                 style: const TextStyle(
-                                  fontSize: 18,
-                                  letterSpacing: 8,
-                                  color: AppColors.textStrong,
-                                ),
+                                    fontSize: 14, color: AppColors.textStrong),
                                 decoration: InputDecoration(
-                                  hintText: '••••',
-                                  hintStyle: const TextStyle(letterSpacing: 8),
-                                  prefixIcon: const Icon(Icons.pin_outlined, size: 18),
+                                  hintText: 'Your ERPNext password',
+                                  prefixIcon: const Icon(Icons.lock_outline, size: 18),
                                   suffixIcon: IconButton(
                                     icon: Icon(
                                       _obscure
@@ -233,14 +233,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                     onPressed: () => setState(() => _obscure = !_obscure),
                                   ),
                                 ),
-                                validator: (value) {
-                                  final text = value ?? '';
-                                  if (text.isEmpty) return 'PIN is required';
-                                  if (text.length != kPinLength) {
-                                    return 'Your PIN is $kPinLength digits';
-                                  }
-                                  return null;
-                                },
+                                validator: (value) =>
+                                    (value ?? '').isEmpty ? 'Password is required' : null,
                               ),
                               const SizedBox(height: 24),
                               SizedBox(

@@ -1,28 +1,18 @@
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import {
-  AlertTriangle,
-  LayoutDashboard,
-  Boxes,
-  ClipboardList,
-  History,
-  LogOut,
-  User,
-  ShieldCheck,
-  Send,
-  PackageOpen,
-  Warehouse,
-  ClipboardCheck,
-  Gauge,
-  KeyRound,
-  Contact,
-  TrendingDown,
-  X,
-} from "lucide-react";
+import MannaLogo from "./MannaLogo";
+import { navFor } from "../config/access";
+import { LogOut, User, ShieldCheck, Warehouse, X } from "lucide-react";
 
 /**
  * Portal navigation. Fixed on the left from `lg` up; below that it slides in
  * over the page as a drawer, opened by the hamburger in the Navbar.
+ *
+ * The menu itself is not written here any more. It comes from the screen
+ * matrix in `config/access.js`, so a role's menu and what that role is
+ * actually allowed to open cannot disagree — they used to be three hand-kept
+ * lists, and a link to a screen the server refused looked to the person
+ * clicking it like a broken page rather than a permission.
  */
 const Sidebar = ({ open = false, onClose = () => {} }) => {
   const { user, logout } = useAuth();
@@ -34,111 +24,7 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
     }
   };
 
-  const adminLinks = [
-    {
-      name: "Dashboard",
-      path: "/admin/dashboard",
-      icon: LayoutDashboard,
-    },
-    {
-      name: "Engineering Stock",
-      path: "/admin/products",
-      icon: Boxes,
-    },
-    {
-      name: "Low Stock",
-      path: "/admin/low-stock",
-      icon: AlertTriangle,
-    },
-    {
-      name: "Request Control",
-      path: "/admin/requests",
-      icon: ClipboardList,
-    },
-    {
-      name: "Issue History",
-      path: "/admin/issues",
-      icon: Send,
-    },
-    {
-      name: "Scrap & Consumption",
-      path: "/admin/scrap",
-      icon: TrendingDown,
-    },
-    {
-      name: "Stock Audits",
-      path: "/admin/audits",
-      icon: Gauge,
-    },
-    {
-      name: "Recipients",
-      path: "/admin/recipients",
-      icon: Contact,
-    },
-    {
-      name: "Users & PINs",
-      path: "/admin/users",
-      icon: KeyRound,
-    },
-  ];
-
-  const supervisorLinks = [
-    {
-      name: "Dashboard",
-      path: "/supervisor/dashboard",
-      icon: LayoutDashboard,
-    },
-    {
-      name: "Browse Engineering Stock",
-      path: "/supervisor/products",
-      icon: Boxes,
-    },
-    {
-      name: "Requests",
-      path: "/supervisor/requests",
-      icon: History,
-    },
-    {
-      name: "Issue History",
-      path: "/supervisor/issues",
-      icon: Send,
-    },
-    {
-      name: "Red Stock Room",
-      path: "/supervisor/returns",
-      icon: PackageOpen,
-    },
-    {
-      name: "Branch Approvals",
-      path: "/supervisor/branch-approvals",
-      icon: ClipboardCheck,
-    },
-    {
-      name: "Monthly Audit",
-      path: "/supervisor/audit",
-      icon: Gauge,
-    },
-  ];
-
-  // A branch sees its own room's stock, and the requests it has raised on it.
-  const branchLinks = [
-    {
-      name: user?.stockRoom?.name ? `${user.stockRoom.name} Stock` : "Company Stock",
-      path: "/branch/stock",
-      icon: Warehouse,
-    },
-    {
-      name: "My Requests",
-      path: "/branch/requests",
-      icon: ClipboardList,
-    },
-  ];
-
-  const linksByRole = {
-    Admin: adminLinks,
-    Branch: branchLinks,
-  };
-  const links = linksByRole[user?.role] || supervisorLinks;
+  const links = navFor(user?.role);
 
   return (
     <>
@@ -152,24 +38,27 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
       )}
 
       <aside
-        className={`w-64 shrink-0 bg-navy-900 text-slate-300 flex flex-col
+        className={`w-64 shrink-0 bg-charcoal-900 text-slate-300 flex flex-col
           fixed inset-y-0 left-0 z-50 overflow-y-auto transition-transform duration-200 ease-out
           lg:static lg:z-auto lg:h-screen lg:translate-x-0
           ${open ? "translate-x-0" : "-translate-x-full"}`}
       >
-        {/* Brand Header — same 64px as the Navbar it lines up with. */}
-        <div className="h-16 flex items-center px-4 gap-3 border-b border-white/10 shrink-0">
-          <div className="bg-brand-600 h-9 w-9 grid place-items-center rounded-xl shadow-lg shadow-brand-900/40 shrink-0">
-            <Boxes className="h-5 w-5 text-white" />
-          </div>
-          <div className="min-w-0">
-            <h1 className="font-bold text-[15px] text-white leading-tight tracking-tight truncate">
-              StockMaster
-            </h1>
-            <span className="text-[10px] text-brand-400 font-semibold tracking-wider uppercase">
-              {user?.role} Portal
-            </span>
-          </div>
+        {/* Brand Header — same 64px as the Navbar it lines up with.
+            px-3, not px-4: the user card below is mx-3 and every nav pill sits
+            inside a px-3 nav, so 12px is the rail this whole column is hung
+            from. The header was the one row off it. */}
+        <div className="h-16 flex items-center px-3 gap-3 border-b border-white/10 shrink-0">
+          <MannaLogo onDark className="h-6 w-auto" />
+          {/* A rule, then "CMMS" — the lockup reads as one name across it.
+              The logo already draws MANNA, so setting "Manna CMMS" beside it
+              printed the word twice at two different sizes within an inch of
+              itself, which is what made the header look wrong. */}
+          <div className="h-7 w-px bg-white/15 shrink-0" aria-hidden="true" />
+          {/* The role used to sit under this, and clipped to "MAINTENANCE
+              MANAG…" — 256px will not carry the product name and the person's
+              job on the same row. The role moved to the account card below,
+              which is where the rest of who-you-are already is. */}
+          <h1 className="font-bold text-[15px] text-white leading-none tracking-tight">CMMS</h1>
           <button
             onClick={onClose}
             className="ml-auto grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 hover:text-white hover:bg-white/10 cursor-pointer lg:hidden"
@@ -182,9 +71,9 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
         {/* User Information */}
         <div className="mx-3 mt-4 mb-5 p-3 rounded-xl bg-white/5 border border-white/10 flex items-center gap-3 shrink-0">
           <div className="bg-brand-600/20 h-9 w-9 rounded-full flex items-center justify-center border border-brand-500/30 shrink-0">
-            {user?.role === "Admin" ? (
+            {user?.role === "Manager" ? (
               <ShieldCheck className="h-[18px] w-[18px] text-brand-400" />
-            ) : user?.role === "Branch" ? (
+            ) : user?.role === "Maintenance Manager" ? (
               <Warehouse className="h-[18px] w-[18px] text-brand-400" />
             ) : (
               <User className="h-[18px] w-[18px] text-brand-400" />
@@ -192,10 +81,16 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
           </div>
           <div className="min-w-0">
             <p className="text-[13px] font-semibold text-white truncate">{user?.name}</p>
-            {/* Email is optional now that accounts sign in by name + PIN. */}
-            <p className="text-[11px] text-slate-400 truncate">
-              {user?.email || user?.stockRoom?.name || user?.role}
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-brand-400 truncate">
+              {user?.role}
             </p>
+            {/* Several people here have more than one account. The address is
+                how you tell at a glance which one you are signed in to. */}
+            {user?.email && (
+              <p className="text-[11px] text-slate-400 truncate" title={user.email}>
+                {user.email}
+              </p>
+            )}
           </div>
         </div>
 
@@ -206,11 +101,11 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
           </p>
           {links.map((link) => {
             const Icon = link.icon;
-            const isActive = location.pathname === link.path;
+            const isActive = location.pathname === link.to;
             return (
               <Link
-                key={link.path}
-                to={link.path}
+                key={link.to}
+                to={link.to}
                 // Following a link on a phone should get the drawer out of the way.
                 onClick={onClose}
                 aria-current={isActive ? "page" : undefined}
@@ -225,7 +120,7 @@ const Sidebar = ({ open = false, onClose = () => {} }) => {
                     isActive ? "text-white" : "text-slate-400 group-hover:text-brand-400"
                   }`}
                 />
-                <span className="truncate">{link.name}</span>
+                <span className="truncate">{link.label}</span>
               </Link>
             );
           })}

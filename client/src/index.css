@@ -1,25 +1,39 @@
 @import "tailwindcss";
 
-/* Brand ramp — teal, matching the mobile app's AppColors.primary family.
-   Exposed to Tailwind as `bg-brand-600`, `text-brand-700`, … */
-@theme {
-  --color-brand-50: #e6f5f3;
-  --color-brand-100: #ccebe8;
-  --color-brand-200: #99d7d0;
-  --color-brand-400: #2bb3a3;
-  --color-brand-500: #14a093;
-  --color-brand-600: #0d9488;
-  --color-brand-700: #0b7a6e;
-  --color-brand-900: #0a4f48;
+/* Brand ramp — the Manna orange, taken from the group logo.
+   Exposed to Tailwind as `bg-brand-600`, `text-brand-700`, …
 
-  /* Page background and the navy used by the admin sidebar.
-     The canvas carries a faint teal cast so it sits with the brand rather than
-     reading as plain grey, and is a step deeper than the white cards so they
-     separate from it without needing a heavier border. */
-  --color-canvas: #eef3f2;
-  --color-navy-800: #16232c;
-  --color-navy-900: #101c24;
-  --color-navy-950: #0b141a;
+   Three steps carry real meaning and the rest are shading around them:
+
+     500  the logo orange itself. Contrast on white is 3.1, which is right for
+          borders, tints, focus rings and accents but NOT for text or for a
+          surface carrying white text.
+     600  4.5 on white — the shade a filled button can wear white text on.
+     700  6.0 on white — the shade orange text can be set in.
+
+   Anything that reads as words uses 700; anything filled uses 600; 500 is for
+   the parts that are colour rather than content. */
+@theme {
+  --color-brand-50: #fef3ec;
+  --color-brand-100: #fce1d0;
+  --color-brand-200: #f9c0a0;
+  /* Defined because six components already reference brand-300 — it was never
+     in the ramp, so those borders have been rendering as nothing. */
+  --color-brand-300: #f59c6c;
+  --color-brand-400: #f37f40;
+  --color-brand-500: #f26722;
+  --color-brand-600: #d14a0c;
+  --color-brand-700: #b03c09;
+  --color-brand-900: #6e2505;
+
+  /* Page background and the charcoal used by the admin sidebar, both from the
+     logo's second colour. The canvas carries a faint warm cast so it sits with
+     the orange rather than reading as plain grey, and is a step deeper than
+     the white cards so they separate without needing a heavier border. */
+  --color-canvas: #f5f2ef;
+  --color-charcoal-800: #3a393c;
+  --color-charcoal-900: #2e2d30;
+  --color-charcoal-950: #232225;
 
   /* One motion curve for the whole console, so panels, modals and drawers
      all decelerate the same way. */
@@ -184,7 +198,7 @@
   }
 
   .btn-primary {
-    @apply bg-brand-600 text-white shadow-sm hover:bg-brand-500;
+    @apply bg-brand-600 text-white shadow-sm hover:bg-brand-700;
   }
 
   .btn-neutral {
@@ -395,6 +409,13 @@
     @apply border-amber-500/20 bg-amber-50 text-amber-900;
   }
 
+  /* For a state that is neither a warning nor good news - a cancelled record,
+     a step that does not apply. The others all carry a meaning this one has to
+     stay out of. */
+  .note-slate {
+    @apply border-slate-300/60 bg-slate-50 text-slate-700;
+  }
+
   .note-rose {
     @apply border-rose-500/20 bg-rose-50 text-rose-900;
   }
@@ -472,7 +493,7 @@
 }
 
 .text-gradient {
-  background: linear-gradient(135deg, #0d9488 0%, #14a093 100%);
+  background: linear-gradient(135deg, #d14a0c 0%, #f26722 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -483,5 +504,79 @@
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Printing
+
+   There were no print rules at all. Anything printed from inside the console
+   came out with the sidebar, the navbar and the page behind it first, and the
+   sheet somewhere after — which is what "the print does not come properly"
+   meant. The printable thing is rendered into `document.body` through a portal
+   (see ChecklistSheet.jsx), so hiding the application is one selector and there
+   is nothing of it left to leak onto the page.
+--------------------------------------------------------------------------- */
+@media print {
+  /* The whole application. The sheet is a sibling of #root, not inside it. */
+  #root {
+    display: none !important;
+  }
+
+  /* No ground colour behind the sheet, and no page margin fighting @page. */
+  html,
+  body {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+  }
+
+  /* The portal is a fixed overlay on screen. On paper it is just the document:
+     left fixed, only its first page would print. */
+  .print-sheet {
+    position: static !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  /*
+     Multi-page sheets.
+
+     A checklist longer than one page has to continue onto the next properly
+     rather than being cut: the column headings repeat, and nothing is split
+     down the middle of itself.
+  */
+  table {
+    break-inside: auto;
+  }
+
+  /* Repeats the day/week numbers at the top of every page. Without it page two
+     is a grid of unlabelled boxes. */
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  /* A point cut in half across a page break is a point nobody ticks. */
+  tr,
+  img {
+    break-inside: avoid;
+  }
+
+  /* The findings box and the signature row travel whole. A signature block
+     split across two pages gets signed twice or not at all. */
+  .break-inside-avoid {
+    break-inside: avoid;
+  }
+
+  /* Colours as drawn. Browsers drop backgrounds by default, which takes the
+     shading off the table headings and the safety rows with it. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }

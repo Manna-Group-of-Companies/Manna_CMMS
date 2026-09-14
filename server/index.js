@@ -9,6 +9,9 @@ import {
   startWeeklyMergeScheduler,
 } from "./utils/weeklyMerge.js";
 import { settleParkedSupervisorMerges } from "./utils/mergeApply.js";
+import { startErpSyncWorker } from "./integrations/erpnext/worker.js";
+import { startDriftScheduler } from "./integrations/erpnext/driftRunner.js";
+import { pruneSessions } from "./integrations/erpnext/auth.js";
 
 // Routes imports
 import authRoutes from "./routes/authRoutes.js";
@@ -25,6 +28,16 @@ import recipientRoutes from "./routes/recipientRoutes.js";
 import branchRequestRoutes from "./routes/branchRequestRoutes.js";
 import disposalRoutes from "./routes/disposalRoutes.js";
 import auditRoutes from "./routes/auditRoutes.js";
+import companyRoutes from "./routes/companyRoutes.js";
+import erpRoutes from "./routes/erpRoutes.js";
+import sessionRoutes from "./routes/sessionRoutes.js";
+import breakdownRoutes from "./routes/breakdownRoutes.js";
+import namingRequestRoutes from "./routes/namingRequestRoutes.js";
+import assetRoutes from "./routes/assetRoutes.js";
+import electricalRoutes from "./routes/electricalRoutes.js";
+import maintenanceRequestRoutes from "./routes/maintenanceRequestRoutes.js";
+import preventiveRoutes from "./routes/preventiveRoutes.js";
+import taxonomyRoutes from "./routes/taxonomyRoutes.js";
 
 dotenv.config();
 
@@ -75,7 +88,7 @@ app.use(
 
 // Product photos taken on the mobile app arrive inline as base64 data URIs,
 // which blows past the 100kb express default.
-app.use(express.json({ limit: "8mb" }));
+app.use(express.json({ limit: "25mb" }));
 
 // Register API Routes
 app.use("/api/auth", authRoutes);
@@ -97,6 +110,25 @@ app.use("/api/disposals", disposalRoutes);
 // Monthly stock counts, the score each store room earned, and the history the
 // Admin reports off.
 app.use("/api/audits", auditRoutes);
+// The businesses in the group, and which ERPNext company each one posts to.
+app.use("/api/companies", companyRoutes);
+// The state of the ERPNext sync queue, for the Admin console.
+app.use("/api/erp", erpRoutes);
+// Signing in against ERPNext. Separate from /api/auth, which still signs
+// people in against MongoDB with a PIN, until the last controller moves over.
+app.use("/api/session", sessionRoutes);
+// Module 2: breakdowns and machines. Reads ERPNext directly, so these work
+// without a MongoDB behind them.
+app.use("/api/breakdowns", breakdownRoutes);
+app.use("/api/naming-requests", namingRequestRoutes);
+app.use("/api/assets", assetRoutes);
+app.use("/api/electrical", electricalRoutes);
+// The planned side of Module 2, kept apart from /api/breakdowns on purpose:
+// a fabrication job and a stopped machine are different records with
+// different stages, and sharing a route was what let them share a form.
+app.use("/api/maintenance-requests", maintenanceRequestRoutes);
+app.use("/api/preventive", preventiveRoutes);
+app.use("/api/taxonomy", taxonomyRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
@@ -119,21 +151,46 @@ const start = async () => {
     // for any account, so refuse to come up rather than serve with a hole.
     assertJwtSecret();
 
-    await connectDB();
+    const hasMongo = await connectDB();
 
-    // Seed initial data (users & products) if DB is empty
-    await seedData();
+    // Everything in this block reads or writes MongoDB, so it only runs when
+    // there is one. The ERPNext-backed routes — signing in, the catalog, stock
+    // — need none of it and serve either way.
+    if (hasMongo) {
+      // Seed initial data (users & products) if DB is empty
+      await seedData();
 
-    // Bring any pre-Red-Stock records onto the current status vocabulary
-    await migrateRedStockStatuses();
+      // Bring any pre-Red-Stock records onto the current status vocabulary
+      await migrateRedStockStatuses();
 
-    // A supervisor merge is theirs to make, so any that an older build left
-    // waiting on an Admin are applied now — that stock is out of Red Stock and
-    // countable nowhere until it reaches a store room.
-    await settleParkedSupervisorMerges();
+      // A supervisor merge is theirs to make, so any that an older build left
+      // waiting on an Admin are applied now — that stock is out of Red Stock and
+      // countable nowhere until it reaches a store room.
+      await settleParkedSupervisorMerges();
 
-    // Raises one merge request per week over whatever is in Red Stock
-    startWeeklyMergeScheduler();
+      // Raises one merge request per week over whatever is in Red Stock
+      startWeeklyMergeScheduler();
+    } else {
+      console.log("Skipping MongoDB seeding, migrations and the weekly merge.");
+    }
+
+    // Drains queued stock movements into ERPNext. Started last and never
+    // awaited for its result: the store works without ERPNext, so an
+    // unreachable Frappe must not keep this server from listening.
+    startErpSyncWorker();
+
+    // Compares the two systems overnight and files a report. The safety net
+    // for a movement that failed to post without anybody noticing.
+    startDriftScheduler();
+
+    // Expired ERPNext sessions are dropped on a timer rather than only when
+    // somebody happens to present one, so a server left running for weeks
+    // cannot accumulate a session per sign-in that ever happened.
+    const sessionSweeper = setInterval(() => {
+      const dropped = pruneSessions();
+      if (dropped > 0) console.log(`Dropped ${dropped} expired ERPNext session(s).`);
+    }, 30 * 60_000);
+    sessionSweeper.unref?.();
 
     const server = app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);

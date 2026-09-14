@@ -1,21 +1,38 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import API from "../services/api";
+import { ROLES, SUPERVISOR } from "../config/access.js";
 
 const AuthContext = createContext(null);
 
-/** Where a signed-in user belongs, by role. Unknown roles go back to login. */
-export const homePathFor = (role) => {
-  switch (role) {
-    case "Admin":
-      return "/admin/dashboard";
-    case "Supervisor":
-      return "/supervisor/dashboard";
-    case "Branch":
-      return "/branch/stock";
-    default:
-      return "/login";
-  }
-};
+/**
+ * The roles and the screen matrix live in `config/access.js`.
+ *
+ * Re-exported here because every page already reaches for them through this
+ * module, and one import path is worth more than a tidy diff. The definitions
+ * moved so that the navigation, the route guards and the role list are one
+ * table instead of three that drifted — which is exactly how a Manager once
+ * came to sign in successfully and be sent straight back to the login screen.
+ */
+export {
+  MANAGER,
+  MAINTENANCE_MANAGER,
+  SUPERVISOR,
+  PRODUCTION_MANAGER,
+  HIGHER_MANAGEMENT,
+  VP_OPERATIONS,
+  ROLES,
+  VIEWS,
+  maySee,
+  navFor,
+  consoleFor,
+  homePathFor,
+} from "../config/access.js";
+
+/** True when this role works in the shared console at /admin. */
+export const canSeeAdminConsole = (role) => ROLES.includes(role) && role !== SUPERVISOR;
+
+/** True when this role works in the store console at /supervisor. */
+export const canSeeSupervisorConsole = (role) => role === SUPERVISOR;
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -29,8 +46,10 @@ export const AuthProvider = ({ children }) => {
       if (storedToken && storedUser) {
         try {
           setUser(JSON.parse(storedUser));
-          // Validate token with backend and refresh user profile
-          const { data } = await API.get("/auth/me");
+          // Validate token with backend and refresh user profile. Re-read
+          // rather than trusted from storage, so a role changed in ERPNext
+          // takes effect on the next load rather than at the next sign-in.
+          const { data } = await API.get("/session/me");
           setUser(data);
           localStorage.setItem("user", JSON.stringify(data));
         } catch (error) {
@@ -44,17 +63,20 @@ export const AuthProvider = ({ children }) => {
     initializeAuth();
   }, []);
 
-  /** Accounts sign in with their name and the 4-digit PIN an admin issued. */
-  const login = async (name, pin) => {
+  /**
+   * Signs in against ERPNext with an email and password.
+   *
+   * The PIN is gone: Frappe has no such concept, and the point of moving onto
+   * ERPNext is one list of people rather than two that drift apart.
+   */
+  const login = async (email, password) => {
     try {
-      const { data } = await API.post("/auth/login", { name, pin });
+      const { data } = await API.post("/session/login", { email, password });
       const profile = {
-        _id: data._id,
         name: data.name,
         email: data.email,
         role: data.role,
-        // Branch accounts carry the one room they are allowed to see.
-        stockRoom: data.stockRoom || null,
+        erpRoles: data.erpRoles || [],
       };
       setUser(profile);
       localStorage.setItem("token", data.token);
@@ -62,10 +84,12 @@ export const AuthProvider = ({ children }) => {
       return data;
     } catch (error) {
       if (error.response) {
-        throw error.response.data?.message || "Invalid name or PIN. Please try again.";
+        // 426 is this server telling an out-of-date client to update. Passing
+        // the message straight through says what to do; a generic "invalid
+        // credentials" would send somebody hunting for a password that is fine.
+        throw error.response.data?.message || "Wrong email or password.";
       }
-      // No response at all — the API is down or unreachable. Saying "invalid
-      // credentials" here sends people off checking a password that is fine.
+      // No response at all — the API is down or unreachable.
       throw `Cannot reach the server at ${API.defaults.baseURL}. Check that the backend is running.`;
     }
   };

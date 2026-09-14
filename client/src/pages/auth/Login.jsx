@@ -2,28 +2,23 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth, homePathFor } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
-import { KeyRound, User, Boxes } from "lucide-react";
-
-const PIN_LENGTH = 4;
+import { KeyRound, Mail } from "lucide-react";
+import MannaLogo from "../../components/MannaLogo";
 
 const Login = () => {
   const { login } = useAuth();
   const { showToast } = useNotifications();
   const navigate = useNavigate();
 
-  const [name, setName] = useState("");
-  const [pin, setPin] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name || !pin) {
+    if (!email || !password) {
       setError("Please fill in all fields");
-      return;
-    }
-    if (pin.length !== PIN_LENGTH) {
-      setError(`Your PIN is ${PIN_LENGTH} digits`);
       return;
     }
 
@@ -31,7 +26,7 @@ const Login = () => {
     setError("");
 
     try {
-      const data = await login(name.trim(), pin);
+      const data = await login(email.trim(), password);
       showToast(`Welcome back, ${data.name}!`, "success");
 
       // Redirect based on role
@@ -53,11 +48,19 @@ const Login = () => {
       <div className="w-full max-w-md z-10">
         {/* Logo and Header */}
         <div className="flex flex-col items-center mb-8">
-          <div className="bg-brand-600 p-3.5 rounded-2xl mb-3 shadow-lg shadow-brand-600/25">
-            <Boxes className="h-10 w-10 text-white" />
+          {/* The same lockup as the sidebar, at sign-in size: the mark, a rule,
+              then the product name. The sign-in page is on a light ground, so
+              the mark sits on it directly rather than on a white plate. */}
+          <div className="flex items-center gap-4">
+            <MannaLogo className="h-12 w-auto" />
+            <div className="h-11 w-px bg-charcoal-900/15" aria-hidden="true" />
+            <span className="text-3xl font-extrabold text-charcoal-900 tracking-tight leading-none">
+              CMMS
+            </span>
           </div>
-          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight leading-none">StockMaster</h1>
-          <p className="text-sm text-slate-600 mt-2">MERN Stock Management System</p>
+          <p className="text-sm text-slate-600 mt-4 text-center">
+            Maintenance &amp; engineering store &middot; signed in with ERPNext
+          </p>
         </div>
 
         {/* Login Card */}
@@ -71,31 +74,32 @@ const Login = () => {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Name Field */}
+            {/* Email */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
-                Name
+                ERPNext Email
               </label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                  <User className="h-[18px] w-[18px]" />
+                  <Mail className="h-[18px] w-[18px]" />
                 </span>
                 <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   autoComplete="username"
+                  autoFocus
                   className="w-full pl-11 pr-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20 transition-all"
-                  placeholder="Your account name"
+                  placeholder="you@mannarubber.com"
                   required
                 />
               </div>
             </div>
 
-            {/* PIN Field */}
+            {/* Password */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
-                {PIN_LENGTH}-Digit PIN
+                Password
               </label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
@@ -103,19 +107,17 @@ const Login = () => {
                 </span>
                 <input
                   type="password"
-                  inputMode="numeric"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"
-                  value={pin}
-                  // Digits only, so a stray letter never reaches the API.
-                  onChange={(e) =>
-                    setPin(e.target.value.replace(/\D/g, "").slice(0, PIN_LENGTH))
-                  }
-                  maxLength={PIN_LENGTH}
-                  className="w-full pl-11 pr-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 text-sm tracking-[0.5em] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20 transition-all"
-                  placeholder="••••"
+                  className="w-full pl-11 pr-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20 transition-all"
+                  placeholder="Your ERPNext password"
                   required
                 />
               </div>
+              <p className="mt-2 text-[11px] text-slate-500">
+                The same password you use to sign in to ERPNext.
+              </p>
             </div>
 
             {/* Submit Button */}
