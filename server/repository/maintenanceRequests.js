@@ -244,14 +244,27 @@ export const raiseRequest = async ({
   requestedBy,
 }) => {
   if (!String(title || "").trim()) throw new Error("Give the request a title");
-  if (!requestType) throw new Error("Say what kind of work this is");
+  /**
+   * The type of work is not asked for any more.
+   *
+   * The form dropped the field, so refusing a request without one would refuse
+   * every request. It cannot simply be left empty either: `request_type` is
+   * still `reqd` on the live DocType, and ERPNext answers "Value missing for
+   * Type of Work" - the repo's own definition disagrees with the instance on
+   * that, which only a real save reveals.
+   *
+   * So it defaults to "Other" and the office sets the real type when they pick
+   * the job up. That is where the judgement belongs anyway: the person raising
+   * a request was guessing at the category, and a guess recorded as fact is
+   * worse than an honest "Other".
+   */
   if (!String(whatIsNeeded || "").trim()) throw new Error("Say what is needed");
   if (!plant) throw new Error("A plant is required");
 
   const created = await createDoc("CMMS Maintenance Request", {
     doctype: "CMMS Maintenance Request",
     title: String(title).trim(),
-    request_type: requestType,
+    request_type: requestType || "Other",
     ...(machine ? { machine } : {}),
     plant,
     ...(area.trim() ? { area: area.trim() } : {}),

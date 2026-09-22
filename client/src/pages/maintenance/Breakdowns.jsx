@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 
 import API from "../../services/api";
-import { outputLabel } from "../../utils/output";
 import BreakdownDetail from "./BreakdownDetail";
 import { useAuth, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
@@ -126,11 +125,23 @@ const Breakdowns = () => {
 
   const stats = useMemo(() => {
     const open = rows.filter((r) => !["Closed", "Cancelled"].includes(r.state));
+
+    /**
+     * Machines that are down *now*.
+     *
+     * Not the same as open. A breakdown stays open after the repair while the
+     * root cause is written up, but the machine is running again the moment it
+     * reaches Repaired - so counting it in "downtime so far" reported a plant
+     * as still losing hours to a machine that was back in production. Reported
+     * and Under Repair are the only states where the machine is actually
+     * stopped.
+     */
+    const down = rows.filter((r) => ["Reported", "Under Repair"].includes(r.state));
+
     return {
       open: open.length,
       notStarted: rows.filter((r) => r.state === "Reported").length,
-      stopped: open.filter((r) => r.productionStopped).length,
-      downtime: open.reduce((sum, r) => sum + (r.stoppedForHours || 0), 0),
+      downtime: down.reduce((sum, r) => sum + (r.stoppedForHours || 0), 0),
     };
   }, [rows]);
 
@@ -143,9 +154,6 @@ const Breakdowns = () => {
           </span>
           <div>
             <h2 className="panel-title">Breakdowns</h2>
-            <p className="panel-sub">
-              Report a stopped machine. Maintenance assesses and plans from here.
-            </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -170,10 +178,11 @@ const Breakdowns = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* "Production stopped" was here and is gone: every breakdown is a stopped
+          machine, so the tile always read the same as Open. */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Stat label="Open" value={stats.open} />
         <Stat label="Work not started" value={stats.notStarted} tone={stats.notStarted ? "rose" : ""} />
-        <Stat label="Production stopped" value={stats.stopped} tone={stats.stopped ? "amber" : ""} />
         <Stat label="Downtime so far" value={hoursLabel(Math.round(stats.downtime * 10) / 10)} />
       </div>
 
@@ -228,17 +237,10 @@ const Breakdowns = () => {
                         <span className="text-slate-400">not set</span>
                       )}
                     </td>
-                    <td>
-                      {hoursLabel(r.stoppedForHours)}
-                      {/* What that stoppage cost in product. Per row rather
-                          than as a column total: each row is one machine, and
-                          machines are counted in different units. */}
-                      {outputLabel(r.outputLost, r.outputUom) && (
-                        <div className="text-slate-500">
-                          {outputLabel(r.outputLost, r.outputUom)} lost
-                        </div>
-                      )}
-                    </td>
+                    {/* Hours only. The output-lost figure under this was worked
+                        out from a per-machine rate that has not been measured,
+                        so it read as fact while resting on an estimate. */}
+                    <td>{hoursLabel(r.stoppedForHours)}</td>
                     <td className="text-right">
                       {next && canAdvance && (
                         <button className="btn btn-sm btn-primary" onClick={() => setOpened(r.id)}>
@@ -312,7 +314,20 @@ const ReportModal = ({ machines, onClose, onDone, reporter }) => {
   const [machine, setMachine] = useState("");
   const [stoppedAt, setStoppedAt] = useState(localNow);
   const [whatHappened, setWhatHappened] = useState("");
-  const [productionStopped, setProductionStopped] = useState(true);
+  /**
+   * Always true, and no longer asked.
+   *
+   * A breakdown is a machine that has stopped - that is what separates it from
+   * a maintenance request - so the box was a question with one honest answer,
+   * and every reporter had to tick past it. The field is still written, because
+   * the record and the report both read it.
+   */
+  const productionStopped = true;
+
+  /** The companies represented in the machines this person may report against. */
+  const [plantFilter, setPlantFilter] = useState("");
+  const plantsOnOffer = [...new Set(machines.map((m) => m.plant).filter(Boolean))].sort();
+  const shown = plantFilter ? machines.filter((m) => m.plant === plantFilter) : machines;
   const [priority, setPriority] = useState("High");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -354,9 +369,6 @@ const ReportModal = ({ machines, onClose, onDone, reporter }) => {
               <AlertTriangle className="h-5 w-5 text-brand-600" />
               Report a breakdown
             </h3>
-            <p className="modal-sub">
-              Just what you can see. Everything else is recorded after the repair.
-            </p>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
             <X className="h-4 w-4" />
@@ -365,6 +377,37 @@ const ReportModal = ({ machines, onClose, onDone, reporter }) => {
 
         <div className="modal-body space-y-4">
           {error && <div className="note note-rose">{error}</div>}
+
+          {/*
+            Narrow to one company first.
+
+            The maintenance manager covers every site, so the machine list is
+            every machine in the group in one dropdown - and once the other
+            plants were filled in that is long enough to scroll past the one you
+            want. A plant head is served only their own machines, so they get no
+            filter: one company is not a choice.
+          */}
+          {plantsOnOffer.length > 1 && (
+            <div>
+              <label className="field-label">Company</label>
+              <select
+                className="field"
+                value={plantFilter}
+                onChange={(e) => {
+                  setPlantFilter(e.target.value);
+                  // The machine already picked may not be in the new company.
+                  setMachine("");
+                }}
+              >
+                <option value="">All companies</option>
+                {plantsOnOffer.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="field-label">Machine</label>
@@ -375,17 +418,15 @@ const ReportModal = ({ machines, onClose, onDone, reporter }) => {
               required
             >
               <option value="">Choose the machine…</option>
-              {machines.map((m) => (
+              {shown.map((m) => (
                 <option key={m.code} value={m.code}>
                   {/* Named the way the asset register names it: the machine
-                      first, its code after. The area used to trail in brackets
-                      and made every option read as a different machine from the
-                      one on the register. */}
+                      first, its code after. */}
                   {m.name} — {m.code}
                 </option>
               ))}
             </select>
-            {machines.length === 0 && (
+            {shown.length === 0 && (
               <p className="mt-1.5 text-xs text-slate-500">
                 No machines are registered yet.
               </p>
@@ -413,9 +454,6 @@ const ReportModal = ({ machines, onClose, onDone, reporter }) => {
                 Now
               </button>
             </div>
-            <p className="mt-1 text-xs text-slate-500">
-              Already set to now. Change it if the machine stopped earlier.
-            </p>
           </div>
 
           <div>
@@ -425,7 +463,6 @@ const ReportModal = ({ machines, onClose, onDone, reporter }) => {
               rows={3}
               value={whatHappened}
               onChange={(e) => setWhatHappened(e.target.value)}
-              placeholder="What you saw or heard. Plain words are fine."
               required
             />
           </div>
@@ -445,16 +482,6 @@ const ReportModal = ({ machines, onClose, onDone, reporter }) => {
               ))}
             </select>
           </div>
-
-          <label className="flex items-center gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-brand-600"
-              checked={productionStopped}
-              onChange={(e) => setProductionStopped(e.target.checked)}
-            />
-            <span className="text-sm text-slate-700">Production has stopped</span>
-          </label>
 
           <p className="text-xs text-slate-500">
             Reported as {reporter}. Maintenance starts work from here.

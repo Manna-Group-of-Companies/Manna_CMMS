@@ -225,6 +225,18 @@ export const REQUEST_DOCTYPES = [MATERIAL, REQUEST];
  * Every state is docstatus 0 because the record is edited across days by
  * several people, and a submitted document in ERPNext cannot be edited.
  */
+/**
+ * Whoever applies these transitions must hold the role each one names.
+ *
+ * The application applies them as the integration account, never as the person
+ * who clicked - so ERPNext only ever sees that account's roles, and a role it
+ * does not hold means "Not a valid Workflow Action" for everybody. Who may
+ * really take a step is decided in the application, against the signed-in user.
+ *
+ * `scripts/syncWorkflowServiceRole.js` adds a System Manager row beside every
+ * transition below for exactly that reason. Run it after creating these
+ * workflows on a fresh instance, or every button here fails.
+ */
 export const REQUEST_WORKFLOW = {
   doctype: "Workflow",
   workflow_name: "CMMS Maintenance Request Flow",

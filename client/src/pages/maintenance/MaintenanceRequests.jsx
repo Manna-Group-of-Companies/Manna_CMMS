@@ -146,10 +146,6 @@ const MaintenanceRequests = () => {
           </span>
           <div>
             <h2 className="panel-title">Maintenance requests</h2>
-            <p className="panel-sub">
-              Fabrication, preventive work, routines and improvements — everything that is not a
-              breakdown. Picked up between the emergencies, most urgent first.
-            </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -357,12 +353,20 @@ const Stat = ({ label, value, sub, tone = "" }) => (
  * scheduled rather than just queued.
  */
 const RaiseModal = ({ machines, plants, requester, onClose, onDone }) => {
+  /**
+   * The one plant this person may file against, when there is only one.
+   *
+   * The list arrives already narrowed by the server to the sites the signed-in
+   * account covers, so a plant head is served exactly one. That is the whole
+   * test - no role check here, because the scoping is the server's answer and
+   * duplicating it in the browser is how the two drift apart.
+   */
+  const onlyPlant = plants.length === 1 ? plants[0].name : "";
+
   const [form, setForm] = useState({
     title: "",
-    requestType: "",
     machine: "",
-    plant: "",
-    area: "",
+    plant: onlyPlant,
     whatIsNeeded: "",
     whyNeeded: "",
     priority: "Medium",
@@ -371,6 +375,12 @@ const RaiseModal = ({ machines, plants, requester, onClose, onDone }) => {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // The picker can load after the modal is on screen, so the single plant has
+  // to be filled in when it arrives rather than only at first render.
+  useEffect(() => {
+    if (onlyPlant) setForm((f) => (f.plant ? f : { ...f, plant: onlyPlant }));
+  }, [onlyPlant]);
 
   const set = (field) => (e) =>
     setForm((f) => ({
@@ -392,14 +402,13 @@ const RaiseModal = ({ machines, plants, requester, onClose, onDone }) => {
       ...f,
       machine: code,
       plant: machine?.plant || f.plant,
-      area: machine?.area || f.area,
     }));
   };
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.title.trim() || !form.requestType || !form.whatIsNeeded.trim() || !form.plant) {
-      setError("A title, a type of work, a plant and what is needed");
+    if (!form.title.trim() || !form.whatIsNeeded.trim() || !form.plant) {
+      setError("A description, a plant and what is needed");
       return;
     }
     setSaving(true);
@@ -423,10 +432,6 @@ const RaiseModal = ({ machines, plants, requester, onClose, onDone }) => {
               <ClipboardList className="h-5 w-5 text-brand-600" />
               Raise a maintenance request
             </h3>
-            <p className="modal-sub">
-              For work that is not a breakdown. If a machine has stopped, report a breakdown
-              instead — it moves faster and is measured differently.
-            </p>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
             <X className="h-4 w-4" />
@@ -442,23 +447,15 @@ const RaiseModal = ({ machines, plants, requester, onClose, onDone }) => {
               className="field"
               value={form.title}
               onChange={set("title")}
-              placeholder="Guard for the kneader drive coupling"
+              placeholder="Description"
               required
             />
           </div>
 
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className="field-label">Type of work</label>
-              <select className="field" value={form.requestType} onChange={set("requestType")} required>
-                <option value="">Choose…</option>
-                {TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Type of work is gone: the office decides what kind of job it is
+              when they pick it up, and asking the person raising it only ever
+              produced a guess. It still exists on the record. */}
+          <div>
             <div>
               <label className="field-label">How urgent</label>
               <select className="field" value={form.priority} onChange={set("priority")}>
@@ -492,7 +489,18 @@ const RaiseModal = ({ machines, plants, requester, onClose, onDone }) => {
             </select>
           </div>
 
-          <div className="grid sm:grid-cols-2 gap-4">
+          {/*
+            The plant, unless the person signing in has only one.
+
+            A plant head's account is already confined to their own site - the
+            picker they are served holds exactly one entry - so asking which
+            plant is asking a question their login already answered. It is set
+            for them and the field is not drawn. Anyone who covers more than one
+            site still chooses.
+
+            Area / section is gone entirely: the plants do not use the term.
+          */}
+          {!onlyPlant && (
             <div>
               <label className="field-label">Plant</label>
               <select className="field" value={form.plant} onChange={set("plant")} required>
@@ -504,16 +512,7 @@ const RaiseModal = ({ machines, plants, requester, onClose, onDone }) => {
                 ))}
               </select>
             </div>
-            <div>
-              <label className="field-label">Area / section</label>
-              <input
-                className="field"
-                value={form.area}
-                onChange={set("area")}
-                placeholder="Mixing, Curing, Utilities"
-              />
-            </div>
-          </div>
+          )}
 
           <div>
             <label className="field-label">What is needed</label>
@@ -522,7 +521,6 @@ const RaiseModal = ({ machines, plants, requester, onClose, onDone }) => {
               rows={3}
               value={form.whatIsNeeded}
               onChange={set("whatIsNeeded")}
-              placeholder="Sizes, materials, where it goes — whatever a fitter would need to start."
               required
             />
           </div>
@@ -534,16 +532,12 @@ const RaiseModal = ({ machines, plants, requester, onClose, onDone }) => {
               rows={2}
               value={form.whyNeeded}
               onChange={set("whyNeeded")}
-              placeholder="What it fixes or improves. This is what decides where it sits in the queue."
             />
           </div>
 
           <div>
             <label className="field-label">Wanted by</label>
             <input type="date" className="field" value={form.neededBy} onChange={set("neededBy")} />
-            <p className="mt-1 text-xs text-slate-500">
-              Optional. A date makes it chaseable; leaving it blank means whenever there is room.
-            </p>
           </div>
 
           <label className="flex items-center gap-2.5 cursor-pointer">

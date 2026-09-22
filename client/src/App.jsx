@@ -11,6 +11,7 @@ import BranchLayout from "./layouts/BranchLayout";
 // Pages
 import Login from "./pages/auth/Login";
 import ChecklistSheetPreview from "./pages/maintenance/ChecklistSheetPreview";
+import NoAccess from "./pages/auth/NoAccess";
 import NamingRequests from "./pages/admin/NamingRequests";
 import Categories from "./pages/admin/Categories";
 import AssetManagement from "./pages/maintenance/AssetManagement";
@@ -68,6 +69,10 @@ function App() {
           <Routes>
             {/* Public Access */}
             <Route path="/login" element={<Login />} />
+
+            {/* Where a role with no screens lands. Signing in works; there is
+                simply nothing in this release for them yet. */}
+            <Route path="/no-access" element={<NoAccess />} />
 
             {/*
               The printed checklist sheet with stand-in content, for reviewing

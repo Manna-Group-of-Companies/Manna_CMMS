@@ -126,8 +126,24 @@ export const VIEWS = {
   monthlyAudit: [SUPERVISOR],
 };
 
-/** The roles that may see a screen. Unknown screen means nobody. */
-export const rolesFor = (view) => VIEWS[view] || [];
+
+/**
+ * The screens this release ships.
+ *
+ * The matrix above is the full picture of who may see what, and it stays
+ * intact. This is the narrower question of what is switched on today: the first
+ * release is breakdowns and maintenance requests only, and everything else is
+ * held back rather than shown half-finished.
+ *
+ * A separate list rather than edits to the matrix, because deleting the role
+ * lists would throw away who was allowed to see each screen - and that is
+ * exactly what has to be reconstructed when a screen is turned back on. Adding
+ * a name here is the whole of putting one back.
+ */
+export const RELEASED = new Set(["breakdowns", "maintenanceRequests"]);
+
+/** The roles that may see a screen. Unknown or unreleased means nobody. */
+export const rolesFor = (view) => (RELEASED.has(view) ? VIEWS[view] || [] : []);
 
 /** True when this role may see this screen. */
 export const maySee = (role, view) => rolesFor(view).includes(role);

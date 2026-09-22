@@ -41,12 +41,10 @@ const AdminLayout = () => {
    */
   const PAGE_META = [
     ["/admin/breakdown-report", "Breakdown Report", "Downtime and reliability across the group"],
-    ["/admin/breakdowns", "Breakdowns", "Machines that have stopped, and what is being done"],
-    [
-      "/admin/maintenance-requests",
-      "Maintenance Requests",
-      "Planned work: what has been asked for, and where it has got to",
-    ],
+    ["/admin/breakdowns", "Breakdowns", ""],
+    // No strapline: the screen is named plainly enough, and a sentence under
+    // every title is a sentence nobody reads twice.
+    ["/admin/maintenance-requests", "Maintenance Requests", ""],
     ["/admin/preventive", "Preventive Maintenance", "Checklists and what they are due on"],
     ["/admin/products", "Engineering Stock", "The catalog and what is on the shelves"],
     ["/admin/categories", "Categories", "The category tree items are filed under"],

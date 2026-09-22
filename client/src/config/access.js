@@ -109,8 +109,25 @@ export const VIEWS = {
   monthlyAudit: [SUPERVISOR],
 };
 
-/** True when this role may see this screen. */
-export const maySee = (role, view) => (VIEWS[view] || []).includes(role);
+
+/**
+ * The screens this release ships.
+ *
+ * The matrix above is the full picture of who may see what, and it stays
+ * intact. This is the narrower question of what is switched on today: the first
+ * release is breakdowns and maintenance requests only, and everything else is
+ * held back rather than shown half-finished.
+ *
+ * A separate list rather than edits to the matrix, because deleting the role
+ * lists would throw away who was allowed to see each screen - and that is
+ * exactly what has to be reconstructed when a screen is turned back on. Adding
+ * a name here is the whole of putting one back.
+ */
+export const RELEASED = new Set(["breakdowns", "maintenanceRequests"]);
+
+/** True when this role may see this screen, and the screen is in this release. */
+export const maySee = (role, view) =>
+  RELEASED.has(view) && (VIEWS[view] || []).includes(role);
 
 /**
  * Which console a role works in.
@@ -178,4 +195,14 @@ export const navFor = (role) => {
  *
  * A role with no menu at all has nowhere to be, and goes back to the login.
  */
-export const homePathFor = (role) => navFor(role)[0]?.to || "/login";
+export const homePathFor = (role) => navFor(role)[0]?.to || "/no-access";
+
+/**
+ * Not "/login".
+ *
+ * That is where this pointed, and it made a role with no screens look like a
+ * failed sign-in: the password was accepted, `homePathFor` sent them to the
+ * login page, and the login page sent them back. Holding screens back for a
+ * release is exactly how a role ends up with an empty menu, so it now lands
+ * somewhere that says so.
+ */
