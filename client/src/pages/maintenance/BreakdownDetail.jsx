@@ -13,11 +13,13 @@ import {
   Trash2,
   Users,
   X,
+  Ban,
 } from "lucide-react";
 
 import API from "../../services/api";
 import { outputLabel } from "../../utils/output";
 import { useNotifications } from "../../context/NotificationContext";
+import { useAuth } from "../../context/AuthContext";
 
 /**
  * One breakdown, in full.
@@ -117,6 +119,7 @@ const toErpDateTime = (value) => (value ? `${value.replace("T", " ")}:00` : "");
 
 const BreakdownDetail = ({ id, onClose, onChanged }) => {
   const { showToast } = useNotifications();
+  const { user } = useAuth();
 
   const [record, setRecord] = useState(null);
   const [stages, setStages] = useState({});
@@ -145,7 +148,22 @@ const BreakdownDetail = ({ id, onClose, onChanged }) => {
     API.get("/breakdowns/lookups").then(({ data }) => setLookups(data)).catch(() => {});
   }, []);
 
-  const stage = record?.nextAction ? stages[record.nextAction] : null;
+  /**
+   * The next step, but only for somebody allowed to take it.
+   *
+   * The server has always refused the wrong role - `allowedRoles` in
+   * breakdownStages.js - and sends that same list here with each stage. This
+   * screen was not reading it, so a plant head was shown "Save and mark under
+   * repair" on their own plant's breakdown and got a refusal when they pressed
+   * it. Reporting a breakdown is theirs; moving it on is maintenance's.
+   *
+   * Read from the stage rather than checked against a role name here, so the
+   * two cannot drift: the server decides, and this only decides what to draw.
+   */
+  const nextStage = record?.nextAction ? stages[record.nextAction] : null;
+  const mayTakeStage =
+    !!nextStage && (nextStage.allowedRoles || []).includes(user?.role);
+  const stage = mayTakeStage ? nextStage : null;
 
   const reached = useMemo(() => {
     if (!record) return -1;
@@ -187,7 +205,7 @@ const BreakdownDetail = ({ id, onClose, onChanged }) => {
             <div className="px-6 pb-10 space-y-6">
               <Rail record={record} reached={reached} />
 
-              {stage && (
+              {stage ? (
                 <StageForm
                   key={record.nextAction}
                   action={record.nextAction}
@@ -196,7 +214,17 @@ const BreakdownDetail = ({ id, onClose, onChanged }) => {
                   lookups={lookups}
                   onDone={done}
                 />
+              ) : (
+                nextStage && (
+                  // Not a blank space: without this the record simply stops
+                  // after the timeline and reads as though nothing is due.
+                  <p className="note note-slate">
+                    Waiting on maintenance to {nextStage.title.toLowerCase()}.
+                  </p>
+                )
               )}
+
+              <CancelReport record={record} stages={stages} user={user} onDone={done} />
 
               <Report record={record} />
             </div>
@@ -321,6 +349,70 @@ const Rail = ({ record, reached }) => {
  * collect still gets a button, so "Start Repair" is a deliberate act rather
  * than something that happens silently.
  */
+/**
+ * Withdrawing a breakdown that should not have been raised.
+ *
+ * The server has always allowed this - the Cancel stage names Production
+ * Manager among its roles - but nothing in the application ever drew it, so a
+ * plant head who reported the wrong machine had no way back and the record sat
+ * open forever. The maintenance request screen has had the equivalent all
+ * along; this is the missing half.
+ *
+ * Only while the breakdown is still Reported. Once maintenance has started
+ * work there is something real to account for, and it is closed rather than
+ * made to disappear.
+ */
+const CancelReport = ({ record, stages, user, onDone }) => {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
+
+  const stage = stages?.Cancel;
+  if (!user || !stage) return null;
+  if (record.state !== stage.from) return null;
+  if (!(stage.allowedRoles || []).includes(user.role)) return null;
+
+  const submit = async () => {
+    setSaving(true);
+    setProblem("");
+    try {
+      const { data } = await API.post(`/breakdowns/${record.id}/action`, {
+        action: "Cancel",
+        fields: {},
+      });
+      onDone(data);
+    } catch (err) {
+      setProblem(err.response?.data?.message || "That step was refused");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="print:hidden">
+      {!open ? (
+        <button className="btn btn-sm btn-neutral" onClick={() => setOpen(true)}>
+          <Ban className="h-3.5 w-3.5" />
+          {stage.title}
+        </button>
+      ) : (
+        <div className="note note-amber flex-col items-start gap-2">
+          <p>{stage.blurb}</p>
+          {problem && <p className="text-rose-600">{problem}</p>}
+          <div className="flex gap-2">
+            <button className="btn btn-sm btn-neutral" onClick={() => setOpen(false)} disabled={saving}>
+              Keep it
+            </button>
+            <button className="btn btn-sm btn-primary" onClick={submit} disabled={saving}>
+              {saving ? "Cancelling…" : stage.title}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const StageForm = ({ action, stage, record, lookups, onDone }) => {
   const has = (field) => stage.fields.includes(field);
 
