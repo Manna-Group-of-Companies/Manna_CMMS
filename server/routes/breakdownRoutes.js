@@ -24,6 +24,18 @@ const router = express.Router();
 // A plant head sees only their own plant's, applied in the controller.
 router.use(protect);
 
+/**
+ * Who may report one in the first place.
+ *
+ * Reporting used to be open to everyone the matrix let see the screen,
+ * including the Maintenance Manager - which put the person meant to *fix* a
+ * breakdown in a position to also *raise* one, and blurred the line between
+ * the two. Reporting is the plant's own job: they are standing at the machine.
+ * The Admin keeps it as a fallback, the same reasoning kept for every other
+ * override in this file.
+ */
+const REPORT = requireRole("Manager", "Production Manager");
+
 const READ = requireView("breakdowns");
 
 // Before /:id, or "machines" is read as a breakdown id. The three lookups are
@@ -38,15 +50,24 @@ router.get("/report", requireView("breakdownReport"), reliabilityReport);
 router.get("/plants", READ, plants);
 
 router.get("/", READ, list);
-router.post("/", READ, report);
+router.post("/", READ, REPORT, report);
 router.get("/:id", READ, detail);
 router.put("/:id", READ, update);
 router.post("/:id/action", READ, act);
 
-// The signed log sheet. Anyone on the maintenance side may attach it; only the
-// Manager confirms he has read it, which is the point of the confirmation.
-router.post("/:id/files", requireRole("Manager", "Maintenance Manager"), attach);
-router.delete("/:id/files/:fileId", requireRole("Manager", "Maintenance Manager"), detach);
+// Attaching a file: the signed log sheet (maintenance's) and now a photo taken
+// when a breakdown is reported (the plant's). Only the Manager confirms he has
+// read the log sheet, which is the point of that separate confirmation.
+router.post(
+  "/:id/files",
+  requireRole("Manager", "Maintenance Manager", "Production Manager"),
+  attach
+);
+router.delete(
+  "/:id/files/:fileId",
+  requireRole("Manager", "Maintenance Manager", "Production Manager"),
+  detach
+);
 router.post("/:id/verify", requireRole("Manager"), verify);
 
 export default router;

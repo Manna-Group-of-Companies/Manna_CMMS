@@ -152,10 +152,9 @@ class _ServerStatusBannerState extends State<ServerStatusBanner> {
           return 'Cannot reach ${server.host}. This build has a fixed server '
               'address, so start the API on that machine.';
         }
-        if (server.host == ServerConfig.hostOf(ServerConfig.cloudUrl)) {
-          return 'Cannot reach the hosted server at ${server.host}. Check this '
-              'device’s internet connection — the server may also be waking '
-              'up, so try again in a moment.';
+        if (server.host.isEmpty) {
+          return 'No server address is set. Enter the address of the Manna '
+              'CMMS API below, or wait for the Wi-Fi search to finish.';
         }
         return 'Cannot reach the server at ${server.host}. Make sure the API '
             'is running and that this device is on the same Wi-Fi network.';
@@ -269,14 +268,7 @@ class _ServerSettingsSheetState extends State<_ServerSettingsSheet> {
     }
   }
 
-  /// One tap back to the deployed API, for a device that is off the office
-  /// Wi-Fi or was pointed at a dev machine that has since gone away.
-  Future<void> _useHosted() async {
-    _address.text = ServerConfig.cloudUrl;
-    await _save();
-  }
-
-  Future<void> _detect() async {
+Future<void> _detect() async {
     FocusScope.of(context).unfocus();
     setState(() => _error = null);
 
@@ -371,23 +363,6 @@ class _ServerSettingsSheetState extends State<_ServerSettingsSheet> {
             Text(
               'Saved as ${ServerConfig.normalize(_address.text)}',
               style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-            ),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: busy ? null : _useHosted,
-                icon: const Icon(Icons.cloud_outlined, size: 15),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppColors.primaryDeep,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                label: Text(
-                  'Use hosted server (${ServerConfig.hostOf(ServerConfig.cloudUrl)})',
-                  style: const TextStyle(fontSize: 11.5),
-                ),
-              ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),

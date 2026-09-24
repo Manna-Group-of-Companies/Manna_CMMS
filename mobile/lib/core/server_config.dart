@@ -18,8 +18,14 @@ import 'lan_discovery.dart';
 ///   1. `--dart-define=API_URL=...`      (compile-time pin, wins outright)
 ///   2. the address the user saved in the app
 ///   3. `--dart-define=API_HOST=...` and the platform defaults
-///   4. the hosted server on Render
-///   5. a sweep of the device's own Wi-Fi subnet for the API port
+///   4. a sweep of the device's own Wi-Fi subnet for the API port
+///
+/// There is deliberately no hosted fallback. This used to try
+/// manna-cmms.onrender.com when nothing on the local network answered — a
+/// deployment that had gone stale, was serving code from before the move onto
+/// ERPNext, and was never asked for by name. A device now either finds a real
+/// server or is told plainly that none was found, rather than being silently
+/// pointed at one nobody chose.
 abstract final class ServerConfig {
   static const prefsKey = 'api_base_url';
 
@@ -29,27 +35,17 @@ abstract final class ServerConfig {
   /// Matches `PORT` in `server/.env`.
   static const port = int.fromEnvironment('API_PORT', defaultValue: 5000);
 
-  /// The deployed Manna CMMS API. Reachable from anywhere, so it
-  /// is what the app settles on unless a server answers on the local network first.
-  static const cloudUrl = 'https://manna-cmms.onrender.com/api';
-
-  /// Render puts free instances to sleep after a spell of inactivity, and the
-  /// request that wakes one can take the better part of a minute — far longer
-  /// than the LAN probes are given.
-  static const cloudWakeTimeout = Duration(seconds: 45);
-
-  /// Pings [cloudUrl] with enough patience for a sleeping instance to boot.
-  static Future<bool> wakeCloud({http.Client? client}) =>
-      ping(cloudUrl, timeout: cloudWakeTimeout, client: client);
-
-  /// How long a single address is given to answer. LAN probes must stay snappy
-  /// — a dead one is refused instantly anyway — while a remote host is allowed
-  /// the cold start it may need.
+  /// How long a single address is given to answer.
+  ///
+  /// LAN probes must stay snappy — a dead one on the local subnet is refused
+  /// instantly anyway — while an address the user typed by hand (their own
+  /// server, on whatever host they chose) is given longer, since it may be a
+  /// real network hop away rather than the next machine on the same Wi-Fi.
   static Duration timeoutFor(String baseUrl) {
     final host = hostOf(baseUrl);
     final isLocal =
         host == 'localhost' || host == '127.0.0.1' || _ipv4.hasMatch(host);
-    return isLocal ? const Duration(seconds: 2) : cloudWakeTimeout;
+    return isLocal ? const Duration(seconds: 2) : const Duration(seconds: 15);
   }
 
   /// A compile-time pin disables discovery entirely.
@@ -118,10 +114,6 @@ abstract final class ServerConfig {
   }
 
   /// Addresses worth trying before falling back to a network sweep.
-  ///
-  /// A server on the developer's own machine wins over the hosted one, so a
-  /// local API keeps taking precedence during development; everywhere else the
-  /// local addresses fail fast and the app lands on [cloudUrl].
   static List<String> quickCandidates() {
     final candidates = <String>[
       if (_envHost.isNotEmpty) normalize(_envHost),
@@ -130,15 +122,18 @@ abstract final class ServerConfig {
         'http://10.0.2.2:$port/api',
       'http://localhost:$port/api',
       'http://127.0.0.1:$port/api',
-      cloudUrl,
     ];
     return candidates.toSet().toList();
   }
 
-  /// The address used when nothing answers — kept so error messages can name
-  /// something concrete instead of being blank, and so a retry goes somewhere
-  /// a device off the office Wi-Fi can actually reach.
-  static String fallback() => cloudUrl;
+  /// The address used when nothing answers.
+  ///
+  /// Empty rather than a guessed host: there is nothing left to name once the
+  /// saved address, the quick candidates and the network sweep have all failed,
+  /// and naming one anyway is what silently pointed the app at a stale Render
+  /// deployment. [ServerStatusBanner] treats an empty host as "nothing
+  /// configured yet" rather than "cannot reach X".
+  static String fallback() => '';
 
   /// True when [baseUrl] serves `GET /api/health`.
   ///

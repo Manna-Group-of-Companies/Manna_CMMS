@@ -21,12 +21,19 @@ router.use(protect, requireView("maintenanceRequests"));
 // Before /:id, or "stages" is read as a request id.
 router.get("/stages", stages);
 
-// Raising is open to every signed-in role, on the same reasoning that lets
-// anybody report a breakdown. Who may *work* a request and who may *close* one
-// is decided per stage, against the signed-in user — see
-// maintenanceRequestStages.js, which holds the rule the workflow cannot express.
+/**
+ * Who may raise one.
+ *
+ * Raising used to be open to every role the matrix let see the queue,
+ * including the Maintenance Manager - the same overlap the breakdown screen
+ * had, between the person who asks for work and the person who does it.
+ * Raising is the plant's own job; the Admin keeps it as a fallback. Who may
+ * *work* a request and who may *close* one is still decided per stage, against
+ * the signed-in user - see maintenanceRequestStages.js, which holds the rule
+ * the workflow cannot express.
+ */
 router.get("/", list);
-router.post("/", raise);
+router.post("/", requireRole("Manager", "Production Manager"), raise);
 router.get("/:id", detail);
 router.post("/:id/action", act);
 

@@ -9,8 +9,13 @@ import '../models/models.dart';
 const _kTokenKey = 'token';
 const _kUserKey = 'user';
 
-/// Shown when an Admin tries to sign in. This app ships the Supervisor and
-/// Branch portals; the admin console lives in the React client.
+/// Shown when an account carries the retired `Admin` role.
+///
+/// Nothing issues that role now - ERPNext accounts map to Manager, Maintenance
+/// Manager, Supervisor, Production Manager, Higher Management or VP Operations -
+/// so this only catches a session cached by a much older build. The Manager and
+/// the Maintenance Manager are served by this app: they get the maintenance
+/// screens, the same two the web console shows them.
 const kAdminNotSupported =
     'Admin accounts use the web console. Sign in with a supervisor or branch account.';
 

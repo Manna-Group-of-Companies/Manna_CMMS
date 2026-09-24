@@ -10,7 +10,7 @@ import {
 
 import API from "../../services/api";
 import MaintenanceRequestDetail from "./MaintenanceRequestDetail";
-import { useAuth } from "../../context/AuthContext";
+import { useAuth, MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 
 /**
@@ -93,6 +93,15 @@ const ageLabel = (days) => {
 const MaintenanceRequests = () => {
   const { user } = useAuth();
   const { showToast } = useNotifications();
+  /**
+   * Who may raise one.
+   *
+   * Was open to everyone this screen is shown to, including the Maintenance
+   * Manager - the same overlap the breakdown screen had between asking for
+   * work and doing it. Raising is the plant's own job. Mirrors the server's
+   * guard on POST /maintenance-requests.
+   */
+  const canRaise = user?.role === MANAGER || user?.role === PRODUCTION_MANAGER;
 
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -174,10 +183,12 @@ const MaintenanceRequests = () => {
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </button>
-          <button className="btn btn-sm btn-primary" onClick={() => setRaising(true)}>
-            <Plus className="h-4 w-4" />
-            Raise a request
-          </button>
+          {canRaise && (
+            <button className="btn btn-sm btn-primary" onClick={() => setRaising(true)}>
+              <Plus className="h-4 w-4" />
+              Raise a request
+            </button>
+          )}
         </div>
       </div>
 

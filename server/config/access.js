@@ -142,8 +142,33 @@ export const VIEWS = {
  */
 export const RELEASED = new Set(["breakdowns", "maintenanceRequests"]);
 
-/** The roles that may see a screen. Unknown or unreleased means nobody. */
-export const rolesFor = (view) => (RELEASED.has(view) ? VIEWS[view] || [] : []);
+
+/**
+ * Roles the release scope does not apply to.
+ *
+ * The Maintenance Manager is setting the system up - filling in machines,
+ * checklists and the asset register - and cannot do that through two screens.
+ * They see everything the matrix above grants them; everybody else still gets
+ * only what `RELEASED` names, so the narrow release holds for the people it was
+ * narrowed for.
+ *
+ * This is not "sees everything": the matrix still decides. A screen the
+ * Maintenance Manager is not on stays invisible to them.
+ */
+const RELEASE_EXEMPT = [MAINTENANCE_MANAGER];
+
+/**
+ * The roles that may see a screen, given the matrix and the release.
+ *
+ * An unreleased screen is left to the exempt roles rather than nobody, so the
+ * enforcement matches what the menus offer. `requireView` reads this, so a
+ * screen hidden from a role is refused at the API too, not just unlisted.
+ */
+export const rolesFor = (view) => {
+  const allowed = VIEWS[view] || [];
+  if (RELEASED.has(view)) return allowed;
+  return allowed.filter((role) => RELEASE_EXEMPT.includes(role));
+};
 
 /** True when this role may see this screen. */
 export const maySee = (role, view) => rolesFor(view).includes(role);

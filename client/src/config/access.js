@@ -125,9 +125,24 @@ export const VIEWS = {
  */
 export const RELEASED = new Set(["breakdowns", "maintenanceRequests"]);
 
-/** True when this role may see this screen, and the screen is in this release. */
+
+/**
+ * Roles the release scope does not apply to.
+ *
+ * The Maintenance Manager is setting the system up - filling in machines,
+ * checklists and the asset register - and cannot do that through two screens.
+ * They see everything the matrix above grants them; everybody else still gets
+ * only what `RELEASED` names, so the narrow release holds for the people it was
+ * narrowed for.
+ *
+ * This is not "sees everything": the matrix still decides. A screen the
+ * Maintenance Manager is not on stays invisible to them.
+ */
+const RELEASE_EXEMPT = [MAINTENANCE_MANAGER];
+
+/** True when this role may see this screen, given the matrix and the release. */
 export const maySee = (role, view) =>
-  RELEASED.has(view) && (VIEWS[view] || []).includes(role);
+  (RELEASED.has(view) || RELEASE_EXEMPT.includes(role)) && (VIEWS[view] || []).includes(role);
 
 /**
  * Which console a role works in.

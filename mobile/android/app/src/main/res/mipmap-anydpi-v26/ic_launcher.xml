@@ -3,8 +3,11 @@
      ic_launcher.png in the mipmap-* density folders. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
-    <!-- Android 13+ themed icons: the launcher tints the glyph to the user's
-         wallpaper palette, so the same white-on-transparent layer is reused. -->
-    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <!--
+      No <monochrome>. Android 13+ themed icons flatten whatever they are given
+      to a single wallpaper colour, and the Manna mark is two colours and a
+      registered wordmark: flattened it reads as a smudge. Without this element
+      the launcher keeps showing the real icon instead.
+    -->
 </adaptive-icon>

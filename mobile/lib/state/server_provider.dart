@@ -84,14 +84,9 @@ class ServerProvider extends ChangeNotifier {
       return;
     }
 
-    // Nothing on this network: fall back to the hosted API, which may have been
-    // put to sleep and needs longer than a LAN probe to answer.
-    if (await ServerConfig.wakeCloud(client: probeClient)) {
-      await _apply(ServerConfig.cloudUrl);
-      return;
-    }
-
-    // Keep the last known address so error messages name something real.
+    // Nothing on this network answered. There is no hosted fallback to try —
+    // see the note on ServerConfig — so this is a real "not found", and
+    // autoDetect (a full subnet sweep) is what ServerStatusBanner offers next.
     _api.baseUrl = saved ?? ServerConfig.fallback();
     _set(ServerStatus.unreachable);
   }
@@ -109,13 +104,6 @@ class ServerProvider extends ChangeNotifier {
     ], client: probeClient);
     if (quick != null) {
       await _apply(quick);
-      return true;
-    }
-
-    // Prefer waking the hosted API over sweeping the subnet: it is reachable
-    // from any network, and the sweep is the slow last resort.
-    if (await ServerConfig.wakeCloud(client: probeClient)) {
-      await _apply(ServerConfig.cloudUrl);
       return true;
     }
 

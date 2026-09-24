@@ -11,7 +11,7 @@ import {
 
 import API from "../../services/api";
 import BreakdownDetail from "./BreakdownDetail";
-import { useAuth, PRODUCTION_MANAGER } from "../../context/AuthContext";
+import { useAuth, MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 
 /**
@@ -84,6 +84,16 @@ const Breakdowns = () => {
   // A production manager raises breakdowns for their own plant and follows
   // them. Moving one on is maintenance's, so the row offers no action.
   const canAdvance = user?.role !== PRODUCTION_MANAGER;
+  /**
+   * Who may report one in the first place.
+   *
+   * Reporting was open to everyone this screen is shown to, which put the
+   * Maintenance Manager - the person who fixes a breakdown - in a position to
+   * also raise one. Reporting is the plant's own job: they are standing at the
+   * machine. Mirrors the server's guard on POST /breakdowns; a button the
+   * server would refuse is worse than no button.
+   */
+  const canReport = user?.role === MANAGER || user?.role === PRODUCTION_MANAGER;
   const { showToast } = useNotifications();
 
   const [rows, setRows] = useState([]);
@@ -164,10 +174,12 @@ const Breakdowns = () => {
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </button>
-          <button className="btn btn-sm btn-primary" onClick={() => setReporting(true)}>
-            <Plus className="h-4 w-4" />
-            Report a breakdown
-          </button>
+          {canReport && (
+            <button className="btn btn-sm btn-primary" onClick={() => setReporting(true)}>
+              <Plus className="h-4 w-4" />
+              Report a breakdown
+            </button>
+          )}
         </div>
       </div>
 

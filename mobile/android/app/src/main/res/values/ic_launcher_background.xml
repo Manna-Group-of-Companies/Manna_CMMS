@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- AppColors.primary from lib/core/palette.dart, the same teal the web
-         client exposes as the brand-600 custom property. -->
-    <color name="ic_launcher_background">#0D9488</color>
+    <!--
+      White, because the mark is charcoal and orange and the charcoal half
+      disappears on a coloured tile - the same reason the web sidebar puts the
+      logo on a white plate rather than inventing a light variant of it.
+
+      This was #0D9488, a teal that is nowhere in the brand. It carried a
+      comment claiming it was AppColors.primary, which is #D14A0C.
+    -->
+    <color name="ic_launcher_background">#FFFFFF</color>
 </resources>

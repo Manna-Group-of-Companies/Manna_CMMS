@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../core/formatters.dart';
 import '../core/palette.dart';
+import '../router.dart';
 import '../state/auth_provider.dart';
 import '../state/notification_provider.dart';
 import 'common.dart';
@@ -18,29 +19,24 @@ class NavLink {
   final IconData icon;
 }
 
-/// Every supervisor working screen, in order. There is no drawer, so the bar
-/// carries the whole portal; Settings sits in the app bar instead.
-const _bottomTabs = [
-  NavLink('Catalog', '/supervisor/products', Icons.inventory_2_outlined),
-  NavLink('Issues', '/supervisor/issues', Icons.send_outlined),
-  NavLink('Red Rack', '/supervisor/returns', Icons.assignment_return_outlined),
-];
+/// Breakdowns and Requests, each shown only if the signed-in role is on the
+/// matching screen — see `canSeeBreakdowns` / `canSeeRequests` in router.dart,
+/// which mirror the same matrix the web console enforces. The app used to
+/// carry a store catalog and a branch's own room here as well; both are gone,
+/// this is the whole bar now.
+List<NavLink> _tabsFor(AuthProvider auth) {
+  final role = auth.user?.role;
+  if (role == null) return const [];
+  return [
+    if (canSeeBreakdowns(role))
+      const NavLink('Breakdowns', breakdownsHome, Icons.build_outlined),
+    if (canSeeRequests(role))
+      const NavLink('Requests', requestsHome, Icons.assignment_outlined),
+  ];
+}
 
-/// A Branch account has two screens: its room's stock, and the requests it has
-/// raised on that stock.
-const _branchTabs = [
-  NavLink('Stock', '/branch/stock', Icons.warehouse_outlined),
-  NavLink('Requests', '/branch/requests', Icons.assignment_outlined),
-];
-
-/// Navigation for the signed-in role. Branch accounts never see the
-/// supervisor screens, and the API refuses them regardless.
-List<NavLink> _tabsFor(AuthProvider auth) =>
-    auth.user?.isBranch == true ? _branchTabs : _bottomTabs;
-
-/// Where the gear goes — each portal has its own Settings screen.
-String _settingsPathFor(AuthProvider auth) =>
-    auth.user?.isBranch == true ? '/branch/settings' : '/supervisor/settings';
+/// Where the gear goes. One Settings screen now that there is one portal.
+String _settingsPathFor(AuthProvider auth) => '/maintenance/settings';
 
 /// Chrome shared by every authenticated screen: the app bar with the settings
 /// gear and the notification bell (Navbar.jsx), and the bottom tab bar for the
