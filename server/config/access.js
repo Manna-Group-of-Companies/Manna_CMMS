@@ -77,7 +77,9 @@ export const VIEWS = {
    * could not previously see where any of them got to, which was a gap rather
    * than a decision.
    */
-  itemNaming: [MANAGER, MAINTENANCE_MANAGER, VP_OPERATIONS, HIGHER_MANAGEMENT, SUPERVISOR],
+  // 25 Sep 2026: the Maintenance Manager creates items and the VP Operations approves them,
+  // so the queue is theirs. Was [MANAGER, MAINTENANCE_MANAGER, VP_OPERATIONS, HIGHER_MANAGEMENT, SUPERVISOR].
+  itemNaming: [MAINTENANCE_MANAGER, VP_OPERATIONS],
 
   /** Machines that have stopped. Plant-scoped for a plant head. */
   breakdowns: [MANAGER, MAINTENANCE_MANAGER, HIGHER_MANAGEMENT, PRODUCTION_MANAGER, SUPERVISOR],
@@ -140,7 +142,8 @@ export const VIEWS = {
  * exactly what has to be reconstructed when a screen is turned back on. Adding
  * a name here is the whole of putting one back.
  */
-export const RELEASED = new Set(["breakdowns", "maintenanceRequests"]);
+// itemNaming released 25 Sep 2026 so the VP Operations can approve new items (made in SAP on approval).
+export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "itemNaming"]);
 
 
 /**

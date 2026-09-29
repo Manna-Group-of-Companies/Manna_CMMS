@@ -6,25 +6,24 @@ import {
   Loader2,
   Package,
   RefreshCw,
-  Tag,
+  Send,
   Undo2,
   X,
 } from "lucide-react";
 
 import API from "../../services/api";
-import { useAuth, MANAGER, VP_OPERATIONS } from "../../context/AuthContext";
+import { useAuth, MANAGER, MAINTENANCE_MANAGER, VP_OPERATIONS } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 
 /**
- * Item naming requests — the one request flow the store still has.
+ * New engineering items, on their way into SAP.
  *
- * Something arrives that nobody has a name for. The Maintenance Manager
- * proposes one against the naming convention; the Manager approves it; only
- * then does it become a catalog item, and only after that does it go to SAP.
- *
- * Approving is what creates the item, so this screen is the only way a name
- * enters the catalog. That is the point: the name is what every issue slip,
- * every audit and eventually SAP refers to the thing by.
+ * The Maintenance Manager fills in the SAP item master fields and sends the
+ * item for approval; the VP Operations approves or rejects it. Approving queues
+ * it for the SAP server, which creates it in SAP with the company's next item
+ * code and adds it to the catalog - the request then reads "In SAP" with the
+ * code. A failed creation says why, and the Maintenance Manager can send it
+ * again. (Decided 25 Sep 2026.)
  */
 
 const STATE_STYLE = {
@@ -46,17 +45,10 @@ const NamingRequests = () => {
   const { user } = useAuth();
   const { showToast } = useNotifications();
   const isManager = user?.role === MANAGER;
-  /**
-   * Who may approve or reject a name.
-   *
-   * The VP Operations, plus the Admin so a queue is not stuck when the VP is
-   * away. The plant heads used to be here, which meant every name went to four
-   * of them at once; naming is raised by maintenance and agreed by operations.
-   *
-   * Still wider than `isManager`, which gates recording the SAP code — that is
-   * a claim the item exists in SAP, not a decision about what it is called.
-   */
-  const canDecide = isManager || user?.role === VP_OPERATIONS;
+  // Mirrors the server: the VP Operations approves or rejects; the Maintenance
+  // Manager raises, re-raises a rejected request and re-sends a failed one.
+  const canDecide = user?.role === VP_OPERATIONS;
+  const isMaintenance = user?.role === MAINTENANCE_MANAGER;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -94,7 +86,7 @@ const NamingRequests = () => {
       const { data } = await API.post(`/naming-requests/${id}/decide`, { action, note });
       showToast(
         action === "Approve"
-          ? `Approved. ${data.itemCode} is now in the catalog.`
+          ? `Approved. The SAP server will create ${data.proposedName} in SAP.`
           : `${id} is now ${data.state}`,
         "success"
       );
@@ -107,10 +99,24 @@ const NamingRequests = () => {
     }
   };
 
+  const retry = async (id) => {
+    setBusy(id);
+    try {
+      await API.post(`/naming-requests/${id}/retry`);
+      showToast(`${id} sent to SAP again`, "success");
+      load(true);
+    } catch (err) {
+      showToast(err.response?.data?.message || "That step was refused", "error");
+    } finally {
+      setBusy("");
+    }
+  };
+
   const stats = useMemo(
     () => ({
       waiting: rows.filter((r) => r.state === "Awaiting Approval").length,
       approved: rows.filter((r) => r.state === "Approved").length,
+      failed: rows.filter((r) => r.state === "Approved" && r.sapStatus === "Failed").length,
       offName: rows.filter((r) => r.state === "Awaiting Approval" && !r.nameCompliant).length,
     }),
     [rows]
@@ -124,11 +130,11 @@ const NamingRequests = () => {
             <ClipboardList className="h-5 w-5" />
           </span>
           <div>
-            <h2 className="panel-title">Item naming requests</h2>
+            <h2 className="panel-title">New items for SAP</h2>
             <p className="panel-sub">
               {canDecide
-                ? "Approving a name is what puts the item into the catalog."
-                : "Names you have proposed, and where they have got to."}
+                ? "Approving an item creates it in SAP, with the company's next item code."
+                : "Items you have sent for approval, and where they have got to."}
             </p>
           </div>
         </div>
@@ -151,8 +157,8 @@ const NamingRequests = () => {
       )}
 
       <div className="grid grid-cols-3 gap-3">
-        <Stat label="Waiting on you" value={stats.waiting} tone={stats.waiting ? "amber" : ""} />
-        <Stat label="Approved, not in SAP" value={stats.approved} />
+        <Stat label="Waiting for approval" value={stats.waiting} tone={stats.waiting ? "amber" : ""} />
+        <Stat label="Approved, not yet in SAP" value={stats.approved} tone={stats.failed ? "rose" : ""} />
         <Stat
           label="Off the naming convention"
           value={stats.offName}
@@ -184,6 +190,8 @@ const NamingRequests = () => {
               request={r}
               isManager={isManager}
               canDecide={canDecide}
+              isMaintenance={isMaintenance}
+              onRetry={() => retry(r.id)}
               busy={busy === r.id}
               onDecide={(action) =>
                 action === "Approve" || action === "Reject"
@@ -233,7 +241,7 @@ const Stat = ({ label, value, tone = "" }) => (
   </div>
 );
 
-const RequestCard = ({ request: r, isManager, canDecide, busy, onDecide, onRecordSap }) => (
+const RequestCard = ({ request: r, canDecide, isMaintenance, busy, onDecide, onRetry }) => (
   <div className="card p-5">
     <div className="flex flex-wrap items-start gap-3">
       <div className="min-w-0 flex-1">
@@ -243,9 +251,15 @@ const RequestCard = ({ request: r, isManager, canDecide, busy, onDecide, onRecor
           {!r.nameCompliant && (
             <span className="badge badge-rose badge-soft">Off the naming convention</span>
           )}
-          {r.itemCode && <span className="badge badge-emerald badge-soft">{r.itemCode}</span>}
           {r.sapItemCode && (
             <span className="badge badge-violet badge-soft">SAP {r.sapItemCode}</span>
+          )}
+          {r.state === "Approved" && r.sapStatus === "Queued" && (
+            <span className="badge badge-brand badge-soft">Waiting for the SAP server</span>
+          )}
+          {r.sapStatus === "Failed" && <span className="badge badge-rose">SAP creation failed</span>}
+          {!r.hasSapFields && r.state !== "In SAP" && (
+            <span className="badge badge-amber badge-soft">Raised without SAP fields</span>
           )}
         </div>
 
@@ -257,19 +271,23 @@ const RequestCard = ({ request: r, isManager, canDecide, busy, onDecide, onRecor
           {/* Which site wanted it. The queue used to say who raised a name but
               not which company it was for, so a list of pending names read the
               same whether they all came from one plant or from four. */}
-          <KV label="Plant" value={r.plant || "not recorded"} />
-          <KV label="Category" value={[r.category, r.subCategory].filter(Boolean).join(" › ")} />
+          <KV label="SAP company" value={r.companyName || r.plant || "not recorded"} />
+          <KV label="Item group › A › B" value={[r.category, r.subCategory, r.subCategoryB].filter(Boolean).join(" › ")} />
           <KV label="Unit" value={r.unit} />
-          <KV label="Brand" value={r.brand} />
-          <KV label="Rack" value={r.rackLocation} />
+          <KV label="HSN · Tax" value={[r.hsnCode, r.taxRate].filter(Boolean).join(" · ")} />
+          <KV label="Foreign name" value={r.foreignName} />
           <KV label="Minimum stock" value={r.minStock || "—"} />
-          <KV label="Why" value={r.reason} />
+          <KV label="Brand" value={r.brand} />
           <KV label="Raised by" value={`${r.raisedBy} · ${when(r.raisedAt)}`} />
           {r.decidedBy && <KV label="Decided by" value={`${r.decidedBy} · ${when(r.decidedAt)}`} />}
         </div>
 
         {r.decisionNote && (
           <p className="mt-2 text-xs text-slate-600 italic">“{r.decisionNote}”</p>
+        )}
+
+        {r.sapError && (
+          <p className="mt-2 text-xs text-rose-700">SAP said: {r.sapError}</p>
         )}
 
         {r.waitingOn && (
@@ -299,17 +317,17 @@ const RequestCard = ({ request: r, isManager, canDecide, busy, onDecide, onRecor
           </>
         )}
 
-        {!isManager && r.state === "Rejected" && (
+        {isMaintenance && r.state === "Rejected" && (
           <button className="btn btn-sm btn-neutral" disabled={busy} onClick={() => onDecide("Reopen")}>
             <Undo2 className="h-4 w-4" />
             Raise again
           </button>
         )}
 
-        {isManager && r.state === "Approved" && (
-          <button className="btn btn-sm btn-primary" onClick={onRecordSap}>
-            <Tag className="h-4 w-4" />
-            Record SAP code
+        {isMaintenance && r.state === "Approved" && r.sapStatus === "Failed" && (
+          <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetry}>
+            <Send className="h-4 w-4" />
+            Send to SAP again
           </button>
         )}
       </div>
@@ -340,7 +358,7 @@ const DecideModal = ({ request: r, action, onClose, onConfirm, busy }) => {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal max-w-lg" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h3 className="modal-title">{rejecting ? "Reject this name" : "Approve this name"}</h3>
+          <h3 className="modal-title">{rejecting ? "Reject this item" : "Approve and create in SAP"}</h3>
           <button className="modal-close" onClick={onClose} aria-label="Close">
             <X className="h-4 w-4" />
           </button>
@@ -348,11 +366,12 @@ const DecideModal = ({ request: r, action, onClose, onConfirm, busy }) => {
 
         <div className="modal-body space-y-4">
           <div>
-            <p className="kv-label">Proposed name</p>
+            <p className="kv-label">Description (SAP item name)</p>
             <p className="text-base font-bold text-slate-900 text-balance">{r.proposedName}</p>
             <p className="mt-0.5 text-xs text-slate-500">
-              {[r.category, r.subCategory].filter(Boolean).join(" › ")} · {r.unit}
-              {r.brand ? ` · ${r.brand}` : ""}
+              {r.companyName} · {[r.category, r.subCategory, r.subCategoryB].filter(Boolean).join(" › ")} · {r.unit}
+              {r.hsnCode ? ` · HSN ${r.hsnCode}` : ""}
+              {r.taxRate ? ` · ${r.taxRate}` : ""}
             </p>
           </div>
 
@@ -366,12 +385,23 @@ const DecideModal = ({ request: r, action, onClose, onConfirm, busy }) => {
             </div>
           )}
 
-          {!rejecting && (
+          {!rejecting && !r.hasSapFields && (
+            <div className="note note-rose">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>
+                This request was raised before items were made in SAP, so it has no SAP company or item
+                group and cannot be approved. Reject it and have it raised again from the form.
+              </span>
+            </div>
+          )}
+
+          {!rejecting && r.hasSapFields && (
             <div className="note note-brand">
               <Package className="h-4 w-4 shrink-0" />
               <span>
-                Approving creates the catalog item straight away, with no stock against it. What
-                physically arrived is received separately.
+                Approving sends it to the SAP server, which creates it in {r.companyName}'s SAP with the next
+                item code and then adds it to the catalog, with no stock. What physically arrived is received
+                separately.
               </span>
             </div>
           )}
@@ -398,10 +428,10 @@ const DecideModal = ({ request: r, action, onClose, onConfirm, busy }) => {
           </button>
           <button
             className={`btn ${rejecting ? "btn-danger" : "btn-primary"}`}
-            disabled={busy || (rejecting && !note.trim())}
+            disabled={busy || (rejecting && !note.trim()) || (!rejecting && !r.hasSapFields)}
             onClick={() => onConfirm(note)}
           >
-            {busy ? "…" : rejecting ? "Reject" : "Approve and create the item"}
+            {busy ? "…" : rejecting ? "Reject" : "Approve and create in SAP"}
           </button>
         </div>
       </div>

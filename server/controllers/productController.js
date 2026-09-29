@@ -18,7 +18,15 @@ import {
   listCatalog,
   listCategories,
   listSubCategories,
+  listSubCategoriesB,
+  ensureBrand,
 } from "../repository/catalog.js";
+import {
+  categoryOptionsFor,
+  categorySyncStatus,
+  updateItemCategory,
+  updateSapItem,
+} from "../repository/sapCategories.js";
 import { scopeFor } from "../repository/plantScope.js";
 import { maySee } from "../config/access.js";
 
@@ -31,7 +39,7 @@ import { maySee } from "../config/access.js";
 // and ERPNext's own Stock Balance report cannot drift apart.
 export const getProducts = async (req, res) => {
   try {
-    const { search, category, subCategory, storeRoom, stockStatus } = req.query;
+    const { search, category, subCategory, subCategoryB, storeRoom, stockStatus } = req.query;
 
     // The catalog and Low Stock are one endpoint told apart by a query
     // parameter, and they have different audiences. Checked here rather than
@@ -53,6 +61,7 @@ export const getProducts = async (req, res) => {
         search,
         category,
         subCategory,
+        subCategoryB,
         storeRoom,
         onlyRooms: stores,
         stockStatus,
@@ -104,6 +113,77 @@ export const getSubCategories = async (req, res) => {
     res.status(502).json({
       message: `Could not read sub-categories from ERPNext: ${error.message}`,
     });
+  }
+};
+
+// @desc    Level-3 values (SAP U_SubTypeB) under one category and sub-category
+// @route   GET /api/products/subcategories-b?category=Engineering%20Stocks&subCategory=Tools
+// @access  Private
+export const getSubCategoriesB = async (req, res) => {
+  try {
+    res.json(await listSubCategoriesB(req.query.category || "", req.query.subCategory || ""));
+  } catch (error) {
+    res.status(502).json({
+      message: `Could not read sub-categories from ERPNext: ${error.message}`,
+    });
+  }
+};
+
+/** 400 / 404 carry their own message; anything else is ERPNext being unreachable. */
+const sendCategoryError = (res, error, doing) =>
+  res.status(error.status === 400 || error.status === 404 ? error.status : error.status === 403 ? 403 : 502).json({
+    message: error.status === 400 || error.status === 404 ? error.message : `${doing}: ${error.message}`,
+  });
+
+// @desc    Where the SAP copy of the categories stands (the flagged sync)
+// @route   GET /api/products/category-sync
+// @access  Private
+export const getCategorySync = async (req, res) => {
+  try {
+    res.json(await categorySyncStatus());
+  } catch (error) {
+    sendCategoryError(res, error, "Could not read the SAP category sync status");
+  }
+};
+
+// @desc    The SAP item groups an item may be moved to, and its current three levels
+// @route   GET /api/products/:id/category-options
+// @access  Private
+export const getCategoryOptions = async (req, res) => {
+  try {
+    res.json(await categoryOptionsFor(req.params.id));
+  } catch (error) {
+    sendCategoryError(res, error, "Could not read the item's SAP category");
+  }
+};
+
+// @desc    Edit a SAP item: description (SOP name), foreign name, HSN, tax rate,
+//          minimum stock, brand and the category levels. SAP fields reach SAP
+//          through the flagged item master sync; brand stays in the CMMS.
+// @route   PUT /api/products/:id
+// @access  Private (Maintenance Manager)
+export const putProduct = async (req, res) => {
+  try {
+    res.json(
+      await updateSapItem(req.params.id, req.body || {}, req.user, {
+        resolveName: resolveItemName,
+        ensureBrand,
+      })
+    );
+  } catch (error) {
+    sendCategoryError(res, error, "Could not save the item");
+  }
+};
+
+// @desc    Re-file an item: SAP item group, Sub-category A, Sub-category B.
+//          Saved in ERPNext at once; reaches SAP through the flagged category sync.
+// @route   PUT /api/products/:id/category   { category, subCategory, subCategoryB }
+// @access  Private (Manager, Maintenance Manager)
+export const putCategory = async (req, res) => {
+  try {
+    res.json(await updateItemCategory(req.params.id, req.body || {}, req.user));
+  } catch (error) {
+    sendCategoryError(res, error, "Could not save the category");
   }
 };
 

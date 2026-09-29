@@ -1,4 +1,34 @@
 import * as taxonomy from "../repository/taxonomy.js";
+import { readSapTree, renameCategoryValue } from "../repository/sapCategories.js";
+
+/**
+ * The SAP three-level tree (item group > Sub-category A > Sub-category B),
+ * read from the items. Errors carrying 400/404 are the caller's to fix.
+ */
+const failSap = (res, error, fallback) => {
+  if (error?.status === 400 || error?.status === 404) return res.status(error.status).json({ message: error.message });
+  if (error?.status === 403) return res.status(403).json({ message: "Your ERPNext role does not allow that." });
+  console.error(`${fallback}:`, error.message);
+  return res.status(502).json({ message: `${fallback}: ${error.message}` });
+};
+
+/** @route GET /api/taxonomy/sap */
+export const sapTree = async (_req, res) => {
+  try {
+    res.json(await readSapTree());
+  } catch (error) {
+    failSap(res, error, "Could not read the SAP category tree");
+  }
+};
+
+/** @route PUT /api/taxonomy/sap/rename  { level: 2|3, category, subCategory?, from, to } */
+export const sapRename = async (req, res) => {
+  try {
+    res.json(await renameCategoryValue(req.body || {}, req.user));
+  } catch (error) {
+    failSap(res, error, "Could not rename the category");
+  }
+};
 
 /**
  * The category tree.

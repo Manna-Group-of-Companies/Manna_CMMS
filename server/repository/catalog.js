@@ -15,6 +15,7 @@ import {
   RED_STOCK_WAREHOUSE,
   STORES,
   labelFor,
+  storeForCompany,
   warehouseFor,
 } from "../integrations/erpnext/stores.js";
 import { MAINTENANCE_ROOT, MAINTENANCE_SUFFIX } from "../integrations/erpnext/masterData.js";
@@ -135,6 +136,79 @@ const readBins = async () => {
   return byItem;
 };
 
+/**
+ * The company an imported SAP item belongs to, from its code prefix.
+ *
+ * The SAP engineering items were imported as "<ERPNext company abbr>-<SAP code>"
+ * (MRPPL-ENG-436, MT-I-13136, HRI-OS46, MTR-ENG-11) because the SAP companies
+ * reuse codes for different items. Empty for anything else.
+ */
+export const sapCompanyOf = (item) =>
+  item.custom_sap_item_group ? String(item.name).split("-", 1)[0] : "";
+
+/**
+ * The three category levels of an item.
+ *
+ * Items mirrored from SAP carry them as fields - SAP item group, U_SubTypeA,
+ * U_SubTypeB - and those win. Anything else keeps the old reading, from where
+ * its Item Group sits under the maintenance root, with no third level.
+ */
+const levelsOf = (item, group) =>
+  item.custom_sap_item_group
+    ? {
+        category: tidy(item.custom_sap_item_group),
+        subCategory: tidy(item.custom_sap_sub_type_a),
+        subCategoryB: tidy(item.custom_sap_sub_type_b),
+      }
+    : { category: group?.category || "", subCategory: group?.subCategory || "", subCategoryB: "" };
+
+const tidy = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
+
+/** Case-insensitive key for comparing category values ("Tools" = "TOOLS"). */
+export const levelKey = (value) => tidy(value).toLowerCase();
+
+/**
+ * One spelling per category, per level.
+ *
+ * SAP holds "Tools", "TOOLS" and "tools" as three values. They are one category
+ * to a person, so the screens show them as one - under whichever spelling most
+ * items use - while each item's own value is left as SAP has it (it is only
+ * rewritten when somebody edits that item). Level 2 is scoped by level 1 and
+ * level 3 by both, so "Tools" under two groups stays two categories.
+ */
+const canonicalise = (products) => {
+  const tally = new Map();
+  const vote = (key, spelling) => {
+    if (!spelling) return;
+    if (!tally.has(key)) tally.set(key, new Map());
+    const votes = tally.get(key);
+    votes.set(spelling, (votes.get(spelling) || 0) + 1);
+  };
+  const keys = (p) => {
+    const a = levelKey(p.category);
+    const b = `${a}\u0001${levelKey(p.subCategory)}`;
+    return [a, b, `${b}\u0001${levelKey(p.subCategoryB)}`];
+  };
+  for (const p of products) {
+    const [k1, k2, k3] = keys(p);
+    vote(k1, p.category);
+    vote(k2, p.subCategory);
+    vote(k3, p.subCategoryB);
+  }
+  const winner = (key, fallback) => {
+    const votes = tally.get(key);
+    if (!votes) return fallback;
+    return [...votes].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0][0];
+  };
+  for (const p of products) {
+    const [k1, k2, k3] = keys(p);
+    p.category = winner(k1, p.category);
+    p.subCategory = winner(k2, p.subCategory);
+    p.subCategoryB = winner(k3, p.subCategoryB);
+  }
+  return products;
+};
+
 /** One ERPNext Item as the screens expect a product to look. */
 const toProduct = (item, group, warehouses) => {
   const held = warehouses || new Map();
@@ -150,11 +224,13 @@ const toProduct = (item, group, warehouses) => {
     quantity: held.get(store.warehouse) || 0,
   })).filter((r) => r.quantity > 0);
 
-  // Where most of it sits, so the badge on the row says something true. The
-  // main store when nothing is held anywhere.
+  // Where most of it sits, so the badge on the row says something true. With
+  // nothing held anywhere: the item's own company for a SAP item (it belongs to
+  // that company whether or not it is in stock), else the main store.
   const biggest = rooms.length
     ? rooms.reduce((a, b) => (b.quantity > a.quantity ? b : a))
     : null;
+  const homeStore = storeForCompany(sapCompanyOf(item))?.label || "";
 
   return {
     // The screens key rows and build URLs off `_id`. The item code is the
@@ -163,8 +239,23 @@ const toProduct = (item, group, warehouses) => {
     _id: item.name,
     code: item.name,
     name: item.item_name || item.name,
-    category: group?.category || "",
-    subCategory: group?.subCategory || "",
+    // Three levels. `subCategoryB` is new; clients that know only two ignore it.
+    ...levelsOf(item, group),
+    // The item's own SAP values (unmerged spelling) and where the SAP copy stands.
+    sapCategory: item.custom_sap_item_group
+      ? {
+          company: sapCompanyOf(item),
+          group: tidy(item.custom_sap_item_group),
+          subTypeA: tidy(item.custom_sap_sub_type_a),
+          subTypeB: tidy(item.custom_sap_sub_type_b),
+          pending: Boolean(item.custom_sap_category_pending),
+          error: item.custom_sap_category_error || "",
+        }
+      : null,
+    // SAP item master fields mirrored on the Item (SAP items only).
+    foreignName: item.custom_sap_foreign_name || "",
+    hsnCode: item.custom_sap_hsn_code || "",
+    taxRate: item.custom_sap_tax_rate || "",
     brand: item.brand || "",
     unit: item.stock_uom || "",
     unitCost: Number(item.valuation_rate || 0),
@@ -172,7 +263,9 @@ const toProduct = (item, group, warehouses) => {
     quantity,
     redStock: held.get(RED_STOCK_WAREHOUSE) || 0,
     rooms: rooms.map(({ room, quantity: q }) => ({ room, quantity: q })),
-    storeRoom: labelFor(biggest ? biggest.warehouse : MAIN_WAREHOUSE),
+    storeRoom: biggest ? labelFor(biggest.warehouse) : homeStore || labelFor(MAIN_WAREHOUSE),
+    // The company a SAP item belongs to ("" for anything else).
+    homeStore,
     rackNumber: item.custom_rack_location || "",
     description: item.description || "",
     image: item.image || "",
@@ -200,11 +293,23 @@ const readCatalog = async () => {
         "valuation_rate",
         "custom_rack_location",
         "custom_sap_item_code",
+        "custom_sap_item_group",
+        "custom_sap_sub_type_a",
+        "custom_sap_sub_type_b",
+        "custom_sap_category_pending",
+        "custom_sap_category_error",
+        "custom_sap_foreign_name",
+        "custom_sap_hsn_code",
+        "custom_sap_tax_rate",
         "image",
         "disabled",
         "modified",
       ],
-      filters: [["Item", "item_group", "in", [...groups.keys()]]],
+      // One tree operator, not every group name. Listing the names put the
+      // whole maintenance tree into the URL, and Frappe Cloud refuses a request
+      // line over ~4 KB with a bare nginx 400 - the catalog went blank the day
+      // the tree grew past it (24 Sep 2026).
+      filters: [["Item", "item_group", "descendants of (inclusive)", MAINTENANCE_ROOT]],
     }),
     readBins(),
   ]);
@@ -217,11 +322,15 @@ const readCatalog = async () => {
     // the normal way an item leaves the catalog rather than the exception.
     .filter((item) => !item.disabled)
     .map((item) => toProduct(item, groups.get(item.item_group), bins.get(item.name)));
+  canonicalise(products);
   products.sort((a, b) => a.name.localeCompare(b.name));
 
   cache = { at: Date.now(), products };
   return products;
 };
+
+/** The whole (unconfined) catalog, for the category tools in sapCategories.js. */
+export const catalogProducts = () => readCatalog();
 
 /**
  * The catalog as one site sees it.
@@ -262,6 +371,7 @@ export const listCatalog = async ({
   search = "",
   category = "",
   subCategory = "",
+  subCategoryB = "",
   storeRoom = "",
   onlyRooms = null,
   stockStatus = "",
@@ -280,15 +390,22 @@ export const listCatalog = async ({
     // The rack is in here because "what is on A-1?" is how somebody standing
     // in front of the shelving looks something up.
     products = products.filter((p) =>
-      [p.name, p.code, p.category, p.rackNumber].some((field) =>
-        String(field).toLowerCase().includes(term)
+      [p.name, p.code, p.category, p.subCategory, p.subCategoryB, p.rackNumber, p.sap?.code].some(
+        (field) => String(field ?? "").toLowerCase().includes(term)
       )
     );
   }
 
-  if (category) products = products.filter((p) => p.category === category);
-  if (subCategory) products = products.filter((p) => p.subCategory === subCategory);
-  if (storeRoom) products = products.filter((p) => p.rooms.some((r) => r.room === storeRoom));
+  // Case-insensitive, matching how the levels are shown ("Tools" = "TOOLS").
+  if (category) products = products.filter((p) => levelKey(p.category) === levelKey(category));
+  if (subCategory)
+    products = products.filter((p) => levelKey(p.subCategory) === levelKey(subCategory));
+  if (subCategoryB)
+    products = products.filter((p) => levelKey(p.subCategoryB) === levelKey(subCategoryB));
+  // A company's items: what it holds, plus every SAP item that belongs to it -
+  // in stock or not - so the list matches that company's list in SAP.
+  if (storeRoom)
+    products = products.filter((p) => p.homeStore === storeRoom || p.rooms.some((r) => r.room === storeRoom));
 
   if (stockStatus === "low") {
     // A minimum of zero is not a minimum, so an item nobody set one for is not
@@ -330,8 +447,27 @@ export const listCategories = async () => {
  */
 export const listSubCategories = async (category = "") => {
   const products = await readCatalog();
-  const scoped = category ? products.filter((p) => p.category === category) : products;
+  const scoped = category
+    ? products.filter((p) => levelKey(p.category) === levelKey(category))
+    : products;
   return [...new Set(scoped.map((p) => p.subCategory).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b)
+  );
+};
+
+/**
+ * Level-3 values (SAP U_SubTypeB) in use under one category and sub-category.
+ * Empty without both: a third-level list across the whole catalog means nothing.
+ */
+export const listSubCategoriesB = async (category = "", subCategory = "") => {
+  if (!category || !subCategory) return [];
+  const products = await readCatalog();
+  const scoped = products.filter(
+    (p) =>
+      levelKey(p.category) === levelKey(category) &&
+      levelKey(p.subCategory) === levelKey(subCategory)
+  );
+  return [...new Set(scoped.map((p) => p.subCategoryB).filter(Boolean))].sort((a, b) =>
     a.localeCompare(b)
   );
 };
@@ -350,6 +486,17 @@ export const listSubCategories = async (category = "") => {
  * in `custom_sap_item_code` if and when SAP is written to - which is exactly
  * how the 654 imported items are set up.
  */
+/**
+ * Makes sure a Brand exists. Item.brand is a Link, so a brand ERPNext has
+ * never seen is refused on save; the store types brands freely.
+ */
+export const ensureBrand = async (brand) => {
+  const name = String(brand || "").trim();
+  if (!name) return "";
+  if (!(await docExists("Brand", name))) await createDoc("Brand", { brand: name });
+  return name;
+};
+
 export const nextItemCode = async (prefix = "SAP") => {
   // Every one of them, not a page: the highest number is what matters, and
   // ordering by creation would have put SAP654 behind anything renamed since.

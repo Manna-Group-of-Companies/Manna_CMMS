@@ -7,6 +7,8 @@ import {
   update,
   decide,
   recordSap,
+  options,
+  retry,
 } from "../controllers/namingRequestController.js";
 import { protect, requireRole } from "../middleware/session.js";
 import { requireView } from "../config/access.js";
@@ -25,12 +27,15 @@ router.use(protect);
  * approving it for the whole group.
  */
 router.get("/", requireView("itemNaming"), list);
+// The SAP lists the form offers. Above /:id, or "options" is read as a request id.
+router.get("/options", requireRole("Maintenance Manager"), options);
 router.get("/:id", requireView("itemNaming"), detail);
 
-// Naming is the Maintenance Manager's job. The Manager can raise one too -
-// refusing them would only mean asking somebody else to type it.
-router.post("/", requireRole("Manager", "Maintenance Manager"), raise);
-router.put("/:id", requireRole("Manager", "Maintenance Manager"), update);
+// Creating an item is the Maintenance Manager's alone (decided 25 Sep 2026):
+// they fill in the SAP fields and send it for approval.
+router.post("/", requireRole("Maintenance Manager"), raise);
+router.put("/:id", requireRole("Maintenance Manager"), update);
+router.post("/:id/retry", requireRole("Maintenance Manager"), retry);
 
 /**
  * Deciding is the VP Operations', with the Admin able to unblock a queue when
@@ -42,7 +47,10 @@ router.put("/:id", requireRole("Manager", "Maintenance Manager"), update);
  * exists in SAP, which is a different assertion from approving what it is
  * called.
  */
-router.post("/:id/decide", requireRole("Manager", "VP Operations"), decide);
+// 25 Sep 2026: the VP Operations approves or rejects; the Maintenance Manager
+// may only Reopen a rejected request (checked per action in the repository).
+// Approving queues the item for creation in SAP.
+router.post("/:id/decide", requireRole("VP Operations", "Maintenance Manager"), decide);
 router.post("/:id/sap", requireRole("Manager"), recordSap);
 
 export default router;

@@ -1,236 +1,137 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
-import { Loader2, X, Boxes, Lock, ShieldAlert, RotateCcw } from "lucide-react";
-import { COMMON_STATUSES } from "../../utils/productStatus";
+import { Loader2, X, Boxes, Lock, RotateCcw, Hash } from "lucide-react";
 import ItemNameBuilder, {
   NameComplianceNotice,
   EMPTY_NAMING,
   isNamingBlank,
 } from "../../components/ItemNameBuilder";
-import DuplicateWarning, { useDuplicateCheck } from "../../components/DuplicateWarning";
 import TaxonomySelect, {
-  useCategoryOptions,
   useSubCategoryOptions,
+  useSubCategoryBOptions,
 } from "../../components/TaxonomySelect";
-import { AUDIT_FREQUENCIES } from "../../utils/audit";
+import CategorySyncNote from "../../components/CategorySyncNote";
 import { useFormDraft, describeWhen } from "../../hooks/useFormDraft";
 
+/**
+ * Add or edit an engineering item - as a SAP item master record.
+ *
+ * Since 25 Sep 2026 the catalog is SAP's, so the form is SAP's item master:
+ *
+ *   SAP field            here
+ *   (company database)   SAP company
+ *   ItemsGroupCode       Item group            (that company's engineering groups)
+ *   U_SubTypeA / B       Sub-category A / B
+ *   ItemName             Description           (built with the SOP naming builder)
+ *   ForeignName          Foreign name
+ *   Inventory/Purchasing/Sales UoM   Unit      (one unit, as SAP is used here)
+ *   ChapterID            HSN code              (from that company's SAP HSN list)
+ *   U_TaxRate            Tax rate
+ *   MinInventory         Minimum stock         (also the CMMS low-stock limit)
+ *   -                    Brand                 (the CMMS's own)
+ *
+ * Adding sends a request for the VP Operations to approve; on approval the SAP
+ * server creates the item in SAP with the company's next item code and it
+ * appears here. Editing saves at once and the same sync updates SAP. The item
+ * code, company and unit are fixed once an item exists (SAP refuses a new
+ * inventory unit after the first transaction).
+ */
+
 const EMPTY = {
-  code: "",
-  name: "",
-  category: "",
+  company: "",
+  itemGroup: "",
   subCategory: "",
-  plant: "",
+  subCategoryB: "",
+  name: "",
+  foreignName: "",
+  unit: "NOS",
+  hsnCode: "",
+  taxRate: "18%",
+  minStock: 0,
   brand: "",
-  status: "Good Condition",
-  rackNumber: "",
-  quantity: 0,
-  unit: "Nos",
-  minStock: 5,
-  unitCost: 0,
-  auditFrequency: "Monthly",
-  storeRoom: "",
-  description: "",
-  image: "",
-  reason: "",
 };
 
-/**
- * Whether what has been typed is worth keeping as a draft.
- *
- * The form starts with real defaults — Pcs, a minimum of 5, Monthly audit, and
- * a company filled in from the list — so "anything differs from EMPTY" would
- * call an untouched form a draft and offer to restore it forever. Only the
- * fields a person actually fills in count.
- */
-const isWorthKeeping = ({ form, naming } = {}) => {
-  if (!form) return false;
-  const typed = ["name", "brand", "category", "subCategory", "rackNumber", "description"];
-  if (typed.some((f) => String(form[f] || "").trim())) return true;
-  if (String(form.reason || "").trim()) return true;
-  return !isNamingBlank(naming || EMPTY_NAMING);
-};
+/** SAP limits. */
+const NAME_MAX = 100;
+const SUB_MAX = 50;
 
-/**
- * Create or edit a product directly, as an Admin.
- *
- * Supervisors change the catalog by raising ADD/EDIT requests; this is the
- * Admin's direct path.
- *
- * **Adding** asks for everything. **Editing** is deliberately narrow: only the
- * classification and the descriptive fields — category, sub-category, rack,
- * condition, image, description.
- *
- * The name is not among them. It is settled at intake and is what the catalog,
- * every issue record and the SAP hand-off refer to the item by, so it is shown
- * on an edit but never typed over. The SOI1/SOP1 builder is the intake tool for
- * arriving at it and is likewise not offered here.
- *
- * Everything else is read-only here because it has a proper home elsewhere:
- * quantity and company move real stock (Companies page), and code, unit,
- * min stock and cost are identity and purchasing figures that should not drift
- * from a form somebody opened to fix a shelf label.
- */
+/** Only a form with something typed into it is worth keeping as a draft. */
+const isWorthKeeping = ({ form, naming } = {}) =>
+  Boolean(
+    form &&
+      (form.name || form.foreignName || form.brand || form.subCategory || form.hsnCode) ||
+      (naming && !isNamingBlank(naming))
+  );
+
 const ProductFormModal = ({ product, onClose, onSaved }) => {
   const { showToast } = useNotifications();
   const isEdit = Boolean(product);
+  const notSap = isEdit && !product.sapCategory;
 
   const [form, setForm] = useState(EMPTY);
-  const [rooms, setRooms] = useState([]);
-  const [units, setUnits] = useState({ inUse: [], others: [] });
-  const [plants, setPlants] = useState([]);
+  const [companies, setCompanies] = useState(null);
+  const [loadError, setLoadError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-
-  // The SOI1/SOP1 fields the name is built from (ST-09). Kept beside the form
-  // rather than inside it because they are saved as their own sub-document.
+  const [problem, setProblem] = useState("");
   const [naming, setNaming] = useState(EMPTY_NAMING);
-  const [showBuilder, setShowBuilder] = useState(false);
+  const [showBuilder, setShowBuilder] = useState(!isEdit);
 
-  /**
-   * The half-finished form, kept across a close.
-   *
-   * Intake only. On an edit there is a real record behind the form, and
-   * restoring a draft over it would quietly put back values the user had
-   * already decided against.
-   */
-  const draft = useFormDraft("add-engineering-stock", {
-    enabled: !isEdit,
-    isWorthKeeping,
-  });
+  // The half-finished add form survives a close; an edit never restores a draft.
+  const draft = useFormDraft("add-engineering-stock-sap", { enabled: !isEdit, isWorthKeeping });
+  const savedDraft = draft.restored;
+  const { save: saveDraft, saveNow: saveDraftNow, clear: clearDraft } = draft;
   const [restoredFrom, setRestoredFrom] = useState(null);
 
-  // Read once when the form mounts and stable thereafter, so it can sit in the
-  // dependency list below without the effect re-running and restoring over
-  // whatever has been typed since.
-  const savedDraft = draft.restored;
+  const company = useMemo(
+    () => (companies || []).find((c) => c.abbr === form.company) || null,
+    [companies, form.company]
+  );
+  const group = company?.groups.find((g) => g.name === form.itemGroup) || null;
+  const subOptions = useSubCategoryOptions(form.itemGroup);
+  const subBOptions = useSubCategoryBOptions(form.itemGroup, form.subCategory);
 
-  // Pulled out because the hook returns a fresh object every render. Depending
-  // on `draft` itself made the effects below tear down and re-run on each
-  // render - which meant a synchronous localStorage write per keystroke, and a
-  // debounce that was reset before it could ever fire. These three are
-  // useCallback'd and stable.
-  const { save: saveDraft, saveNow: saveDraftNow, clear: clearDraft } = draft;
+  // The SAP lists, per company.
+  useEffect(() => {
+    API.get("/naming-requests/options")
+      .then(({ data }) => setCompanies(Array.isArray(data) ? data : []))
+      .catch((e) => setLoadError(e.response?.data?.message || "Could not load the SAP lists."));
+  }, []);
 
-  /**
-   * What the server refused, and what the user has since confirmed.
-   *
-   * Both intake checks are advisory: the API answers 422 for a non-compliant
-   * name and 409 for a possible duplicate, and re-accepts the same payload once
-   * the matching flag is set. Holding the refusal here is what lets the form
-   * show *why* and offer "save anyway" rather than just failing.
-   */
-  const [nameIssues, setNameIssues] = useState(null);
-  const [duplicateBlock, setDuplicateBlock] = useState(null);
-  const [acknowledgeNaming, setAcknowledgeNaming] = useState(false);
-  const [allowDuplicate, setAllowDuplicate] = useState(false);
-
-  // The classifications already in use, so the catalog stops accumulating
-  // "Bearing" / "Bearings" / "BEARING" as three separate categories.
-  const categoryOptions = useCategoryOptions();
-  const subCategoryOptions = useSubCategoryOptions(form.category);
-
-  // Live duplicate check while the name is typed (ST-14). Intake only: an edit
-  // cannot change the name, so there is nothing here that could newly collide —
-  // and reopening a product must not accuse it of duplicating itself.
-  const { matches, checking: checkingDuplicates } = useDuplicateCheck({
-    name: form.name,
-    code: form.code,
-    brand: form.brand,
-    category: form.category,
-    excludeId: product?._id || "",
-    enabled: !isEdit,
-  });
-
+  // Fill the form: from the item on an edit, from a draft or blank on an add.
   useEffect(() => {
     if (product) {
       setForm({
-        code: product.code || "",
-        name: product.name || "",
-        category: product.category || "",
+        company: product.sapCategory?.company || "",
+        itemGroup: product.sapCategory?.group || product.category || "",
         subCategory: product.subCategory || "",
+        subCategoryB: product.subCategoryB || "",
+        name: product.name || "",
+        foreignName: product.foreignName || "",
+        unit: product.unit || "",
+        hsnCode: product.hsnCode || "",
+        taxRate: product.taxRate || "",
+        minStock: product.minStock ?? 0,
         brand: product.brand || "",
-        status: product.status || "",
-        rackNumber: product.rackNumber || "",
-        quantity: product.quantity ?? 0,
-        unit: product.unit || "Pcs",
-        minStock: product.minStock ?? 5,
-        unitCost: product.unitCost ?? 0,
-        auditFrequency: product.auditFrequency || "Monthly",
-        storeRoom: product.storeRoom || "",
-        description: product.description || "",
-        image: product.image || "",
       });
     } else if (savedDraft?.form) {
-      // Picked up where they left off. Announced rather than done silently —
-      // a form that opens with text already in it looks like a bug when you
-      // are not expecting it.
       setForm({ ...EMPTY, ...savedDraft.form });
       setNaming(savedDraft.naming || EMPTY_NAMING);
       setRestoredFrom(savedDraft.savedAt || null);
-    } else {
-      setForm(EMPTY);
     }
-
-    // Nothing on an edit is built from these: the builder is not shown and the
-    // name is not sent, so the sub-document is only ever assembled at intake.
-    // A restored draft has already set them just above, so it is left alone.
-    if (!savedDraft?.form) setNaming(EMPTY_NAMING);
-    setShowBuilder(true);
-
-    setNameIssues(null);
-    setDuplicateBlock(null);
-    setAcknowledgeNaming(false);
-    setAllowDuplicate(false);
   }, [product, savedDraft]);
 
+  // One company in the list? Pick it.
   useEffect(() => {
-    const loadRooms = async () => {
-      try {
-        const { data } = await API.get("/stock-rooms");
-        setRooms(data);
-        // A new product needs a room; default to the first one on file.
-        setForm((prev) => ({ ...prev, storeRoom: prev.storeRoom || data[0]?.name || "" }));
-      } catch (error) {
-        console.error("Error loading stock rooms:", error);
-      }
-    };
-    loadRooms();
+    if (!isEdit && companies?.length === 1 && !form.company) setForm((f) => ({ ...f, company: companies[0].abbr }));
+  }, [companies, isEdit, form.company]);
 
-    // The units ERPNext actually holds. Typed free text reached the server as
-    // "Pieces" and came back "Could not find Unit: Pieces" — `uom` is a Link
-    // field, so it only accepts a name that exists.
-    API.get("/products/units")
-      .then(({ data }) => setUnits(data))
-      .catch(() => setUnits({ inUse: [], others: [] }));
-
-    // The sites, for "which plant wants this". `plant` is a Link to CMMS Plant
-    // on the request, so it has to be picked rather than typed.
-    API.get("/assets/plants")
-      .then(({ data }) => setPlants(Array.isArray(data) ? data : []))
-      .catch(() => setPlants([]));
-  }, []);
-
-  /**
-   * The draft is written on a debounce while typing, and once more on the way
-   * out.
-   *
-   * Saving on unmount rather than from an onClose handler is deliberate: the
-   * form can be left by the X, by Cancel, by clicking the backdrop, or by the
-   * page navigating away, and only unmount catches all of them. Wiring each
-   * exit separately is how one of them ends up forgotten.
-   */
   const latest = useRef({ form, naming });
   latest.current = { form, naming };
-
-  // Set once the item is actually saved, so leaving does not immediately
-  // write back a draft of something that no longer needs one.
   const finished = useRef(false);
-
   useEffect(() => {
     if (!isEdit) saveDraft({ form, naming });
   }, [form, naming, isEdit, saveDraft]);
-
   useEffect(
     () => () => {
       if (!isEdit && !finished.current) saveDraftNow(latest.current);
@@ -238,173 +139,95 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
     [isEdit, saveDraftNow]
   );
 
-  /** Throws the draft away and puts the form back to a blank one. */
   const startFresh = () => {
     clearDraft();
     setRestoredFrom(null);
-    setForm({ ...EMPTY, storeRoom: rooms[0]?.name || "" });
+    setForm(EMPTY);
     setNaming(EMPTY_NAMING);
-    setNameIssues(null);
-    setDuplicateBlock(null);
-    setAcknowledgeNaming(false);
-    setAllowDuplicate(false);
+    setProblem("");
   };
 
-  const set = (field) => (e) => {
-    setForm({ ...form, [field]: e.target.value });
-
-    // Editing the name invalidates both confirmations — they were given about
-    // a different name, and carrying them forward would let a fresh problem
-    // through unremarked.
-    if (field === "name") {
-      setNameIssues(null);
-      setDuplicateBlock(null);
-      setAcknowledgeNaming(false);
-      setAllowDuplicate(false);
-    }
-  };
-
-  /** Applies a name built by the builder, and re-opens both checks on it. */
-  const applyBuiltName = (name) => {
-    setForm((prev) => ({ ...prev, name }));
-    setNameIssues(null);
-    setDuplicateBlock(null);
-    setAcknowledgeNaming(false);
-    setAllowDuplicate(false);
-  };
-
-  /**
-   * Changing the main category invalidates the sub-category under it — "Ring
-   * Spanners" is not a sub-category of "Bearings" — so it is cleared rather
-   * than left pointing at the wrong parent.
-   */
-  const setCategory = (category) =>
-    setForm((prev) => ({
-      ...prev,
-      category,
-      subCategory: category === prev.category ? prev.subCategory : "",
-    }));
-
-  // The standard conditions, plus whatever this product already carries. A few
-  // catalog rows use one-off phrasings ("BreakDown on High loads") that predate
-  // the list; opening one in the form must not quietly rewrite it.
-  const statusOptions =
-    form.status && !COMMON_STATUSES.includes(form.status)
-      ? [form.status, ...COMMON_STATUSES]
-      : COMMON_STATUSES;
-
-  // A pending refusal holds the save until it is answered, so the button never
-  // re-sends a payload the API has already turned down.
-  const awaitingConfirmation =
-    (Boolean(nameIssues) && !acknowledgeNaming) ||
-    (Boolean(duplicateBlock) && !allowDuplicate);
+  const set = (field, value) =>
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      // A lower level only makes sense under the level above it.
+      if (field === "company") {
+        next.itemGroup = "";
+        next.subCategory = "";
+        next.subCategoryB = "";
+        next.hsnCode = "";
+      }
+      if (field === "itemGroup") {
+        next.subCategory = "";
+        next.subCategoryB = "";
+      }
+      if (field === "subCategory") next.subCategoryB = "";
+      return next;
+    });
+  const bind = (field) => (e) => set(field, e.target.value);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setProblem("");
+    if (!form.company) return setProblem("Choose the SAP company.");
+    if (!form.itemGroup) return setProblem("Choose the item group.");
+    if (!form.name.trim()) return setProblem("Build the description with the SOP naming builder (or type it).");
+    if (form.name.trim().length > NAME_MAX) return setProblem(`The description can be at most ${NAME_MAX} characters - SAP's limit.`);
+    if (form.subCategoryB && !form.subCategory) return setProblem("Sub-category B needs a Sub-category A above it.");
+    if (!form.unit) return setProblem("Choose the unit.");
 
-    if (!form.name.trim()) return showToast("Engineering Stock name is required", "error");
-    if (!form.category.trim()) return showToast("Category is required", "error");
-    if (!isEdit && !form.plant.trim()) {
-      return showToast("Choose which plant this is for", "error");
-    }
-
-    if (!isEdit) {
-      if (!form.unit.trim()) return showToast("A unit is required", "error");
-    }
+    const payload = {
+      itemGroup: form.itemGroup,
+      subCategory: form.subCategory,
+      subCategoryB: form.subCategoryB,
+      foreignName: form.foreignName,
+      hsnCode: form.hsnCode,
+      taxRate: form.taxRate,
+      minStock: Number(form.minStock) || 0,
+      brand: form.brand,
+    };
 
     try {
       setSubmitting(true);
-
       if (isEdit) {
-        // Editing sends only what it is allowed to change. Posting the
-        // untouched rest back would be harmless today — the API no-ops a zero
-        // delta — but it invites a future field to be written by a form that
-        // never offered it.
-        //
-        // The name is deliberately absent: the form does not let it be changed,
-        // and echoing it back would put a legacy name through the convention on
-        // a save that only meant to fix a shelf label.
-        await API.put(`/products/${product._id}`, {
-          category: form.category,
-          subCategory: form.subCategory,
-          rackNumber: form.rackNumber,
-          status: form.status,
-          image: form.image,
-          description: form.description,
-          acknowledgeNaming,
-          allowDuplicate,
+        await API.put(`/products/${encodeURIComponent(product.code)}`, {
+          ...payload,
+          category: form.itemGroup,
+          name: form.name.trim(),
+          ...(isNamingBlank(naming) ? {} : { naming }),
         });
-        showToast(`"${form.name}" updated`, "success");
+        showToast("Saved. SAP is updated by the item master sync.", "success");
       } else {
-        // Adding is a proposal now, not a creation. An item entering the
-        // catalog is what every issue slip, every audit and eventually SAP
-        // refers to the thing by, so a name goes in front of the Manager
-        // before it becomes real.
         const { data } = await API.post("/naming-requests", {
-          proposedName: form.name,
-          naming: isNamingBlank(naming) ? null : naming,
-          plant: form.plant,
-          category: form.category,
-          subCategory: form.subCategory,
+          ...payload,
+          company: form.company,
           unit: form.unit,
-          brand: form.brand,
-          rackLocation: form.rackNumber,
-          minStock: Number(form.minStock) || 0,
-          description: form.description,
-          reason: form.reason || "",
+          proposedName: form.name.trim(),
+          naming: isNamingBlank(naming) ? null : naming,
         });
-        showToast(`${data.id} sent for approval`, "success");
+        finished.current = true;
+        clearDraft();
+        showToast(`${data.id} sent to the VP Operations for approval`, "success");
       }
-
-      finished.current = true;
-      clearDraft();
-
-      onSaved();
+      onSaved?.();
       onClose();
     } catch (error) {
-      const refusal = error.response?.data;
-
-      // 422 and 409 are not failures — they are the two intake checks asking
-      // for confirmation (ST-10, ST-14). Show what was found and let the user
-      // decide; the retry carries the matching override.
-      if (error.response?.status === 422 && refusal?.code === "NAME_NOT_COMPLIANT") {
-        setNameIssues(refusal.issues || []);
-        showToast("Check the engineering stock name before saving", "error");
-        return;
-      }
-      if (error.response?.status === 409 && refusal?.code === "POSSIBLE_DUPLICATE") {
-        setDuplicateBlock(refusal);
-        showToast(refusal.message || "This item may already exist", "error");
-        return;
-      }
-
-      console.error(isEdit ? "Error saving product:" : "Error raising the request:", error);
-      // The server's own message names the field or the link it refused, which
-      // is more use than a generic failure. A message-less error is almost
-      // always the request never leaving the browser.
-      showToast(
-        refusal?.message ||
-          (isEdit
-            ? "Failed to save engineering stock"
-            : `Could not send it for approval: ${error.message}`),
-        "error"
-      );
+      setProblem(error.response?.data?.message || "Could not save.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const field = "field";
   const label = "field-label";
+  const hint = "mt-1 text-[11px] text-slate-500";
+  const locked = isEdit;
 
   return (
     <div className="modal max-w-2xl">
       <div className="modal-head">
         <h3 className="modal-title truncate">
           <Boxes className="h-[18px] w-[18px] text-brand-700 shrink-0" />
-          <span className="truncate">
-            {isEdit ? `Edit ${product.name}` : "Propose a new engineering item"}
-          </span>
+          <span className="truncate">{isEdit ? `Edit ${product.name}` : "New engineering item (SAP item master)"}</span>
         </h3>
         <button onClick={onClose} className="modal-close" aria-label="Close">
           <X className="h-5 w-5" />
@@ -413,379 +236,209 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
 
       <form onSubmit={handleSubmit} className="contents">
         <div className="modal-body space-y-4">
-        {/* Says plainly that the form was not blank when it opened, and offers
-            the way out. Without this, a restored draft reads as the form
-            having remembered something it should not have. */}
-        {restoredFrom && (
-          <div className="note note-brand items-center justify-between">
-            <span className="flex items-center gap-2">
-              <RotateCcw className="h-4 w-4 shrink-0" />
-              Picked up where you left off, saved {describeWhen(restoredFrom)}.
-            </span>
-            <button
-              type="button"
-              onClick={startFresh}
-              className="shrink-0 font-semibold underline underline-offset-2 hover:no-underline cursor-pointer"
-            >
-              Start fresh
-            </button>
-          </div>
-        )}
-        {/* Intake only. The naming convention comes first there, because the
-            name it produces is what every other field on the form hangs off —
-            but on an edit the name is already settled and not up for changing,
-            so a builder would only offer something this form cannot apply. */}
-        {!isEdit && (
-          <>
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowBuilder((open) => !open)}
-                className="btn btn-sm btn-subtle"
-              >
-                {showBuilder ? "Hide" : "Show"} standard name builder (SOI1/SOP1)
+          {restoredFrom && (
+            <div className="note note-brand items-center justify-between">
+              <span className="flex items-center gap-2">
+                <RotateCcw className="h-4 w-4 shrink-0" />
+                Picked up where you left off, saved {describeWhen(restoredFrom)}.
+              </span>
+              <button type="button" onClick={startFresh} className="shrink-0 font-semibold underline underline-offset-2 hover:no-underline cursor-pointer">
+                Start fresh
               </button>
-            </div>
-
-            {showBuilder && (
-              <ItemNameBuilder
-                value={naming}
-                onChange={setNaming}
-                onApply={applyBuiltName}
-                disabled={submitting}
-              />
-            )}
-          </>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="sm:col-span-2">
-            {/* No asterisk on an edit: nothing is being asked for. */}
-            <label className={label}>Engineering Stock Name{isEdit ? "" : " *"}</label>
-            {isEdit ? (
-              <>
-                {/* Shown, never typed over. The name is how the catalog, the
-                    issue history and SAP all refer to this item, so it is fixed
-                    at intake rather than left open to a form somebody opened to
-                    correct a rack number. */}
-                <input
-                  type="text"
-                  value={form.name}
-                  readOnly
-                  className={`${field} bg-slate-50 text-slate-600 cursor-not-allowed`}
-                />
-                <p className="mt-1.5 text-[11px] text-slate-500">
-                  Set when the item was taken in and not changed here.
-                </p>
-              </>
-            ) : (
-              <>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={set("name")}
-                  required
-                  className={field}
-                />
-                {/* Only worth showing where it can be acted on — which, now that
-                    the name is fixed once saved, is intake and nowhere else. */}
-                <NameComplianceNotice name={form.name} />
-              </>
-            )}
-          </div>
-
-          {/*
-            Which site wants the item.
-            Add only: the queue had no way to say which company a pending name
-            was for, so four plants' requests read as one undifferentiated
-            list. Not shown on edit, because the catalog itself is group-wide -
-            this records who asked, not where the stock lives.
-          */}
-          {!isEdit && (
-            <div>
-              <label className={label}>Plant *</label>
-              <select
-                value={form.plant}
-                onChange={(e) => setForm((prev) => ({ ...prev, plant: e.target.value }))}
-                className="field"
-                disabled={submitting}
-                required
-              >
-                <option value="">Select a plant…</option>
-                {/* The docname, not the short code: `plant` is a Link to CMMS
-                    Plant and a short code would be refused on save. */}
-                {plants.map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
             </div>
           )}
 
-          {/* --- the editable classification, on both add and edit --- */}
-          <div>
-            <label className={label}>Category *</label>
-            <TaxonomySelect
-              value={form.category}
-              options={categoryOptions}
-              onChange={setCategory}
-              placeholder="Select a category…"
-              disabled={submitting}
-              required
-            />
-          </div>
-          <div>
-            <label className={label}>Sub-Category</label>
-            <TaxonomySelect
-              value={form.subCategory}
-              options={subCategoryOptions}
-              onChange={(subCategory) => setForm((prev) => ({ ...prev, subCategory }))}
-              placeholder={form.category ? "Select a sub-category…" : "Pick a category first"}
-              disabled={submitting || !form.category}
-            />
-          </div>
-          <div>
-            <label className={label}>Condition</label>
-            <select
-              value={form.status}
-              onChange={set("status")}
-              className={`${field} cursor-pointer`}
-            >
-              <option value="">Not recorded</option>
-              {statusOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className={label}>Rack Number</label>
-            <input
-              type="text"
-              value={form.rackNumber}
-              onChange={set("rackNumber")}
-              placeholder="e.g. A-1"
-              className={field}
-            />
-          </div>
+          {notSap && (
+            <div className="note note-amber text-sm">
+              This item is not in SAP, so it cannot be edited here. Items are created and edited as SAP items now.
+            </div>
+          )}
 
-          {/* --- asked for once, when the item is first taken in --- */}
+          {isEdit && !notSap && <CategorySyncNote compact />}
           {!isEdit && (
+            <p className="text-[13px] text-slate-600">
+              Goes to the VP Operations for approval. Once approved, the SAP server creates it in SAP with the next item
+              code and it appears in the catalog.
+            </p>
+          )}
+
+          {loadError && <div className="note note-rose text-sm">{loadError}</div>}
+          {!companies && !loadError && (
+            <div className="flex items-center gap-2 text-slate-500 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading SAP lists…
+            </div>
+          )}
+
+          {companies && !notSap && (
             <>
-              <div>
-                <label className={label}>Brand</label>
-                <input
-                  type="text"
-                  value={form.brand}
-                  onChange={set("brand")}
-                  placeholder="e.g. Taparia"
-                  className={field}
-                />
+              {/* --- where it lives in SAP --- */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className={label} htmlFor="sap-company">SAP company *</label>
+                  {locked ? (
+                    <LockedValue value={company ? `${company.company} (${company.sapDb})` : form.company} />
+                  ) : (
+                    <select id="sap-company" className="field cursor-pointer" value={form.company} onChange={bind("company")} required>
+                      <option value="">Choose…</option>
+                      {companies.map((c) => (
+                        <option key={c.abbr} value={c.abbr}>
+                          {c.company}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div>
+                  <label className={label} htmlFor="sap-group">Item group *</label>
+                  <select
+                    id="sap-group"
+                    className="field cursor-pointer"
+                    value={form.itemGroup}
+                    onChange={bind("itemGroup")}
+                    disabled={!company}
+                    required
+                  >
+                    <option value="">{company ? "Choose…" : "Choose the company first"}</option>
+                    {(company?.groups || []).map((g) => (
+                      <option key={g.code} value={g.name}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={label} htmlFor="sap-sub-a">Sub-category A</label>
+                  <TaxonomySelect id="sap-sub-a" value={form.subCategory} options={subOptions} onChange={(v) => set("subCategory", v.slice(0, SUB_MAX))} placeholder="None" disabled={!form.itemGroup} />
+                </div>
+                <div>
+                  <label className={label} htmlFor="sap-sub-b">Sub-category B</label>
+                  <TaxonomySelect id="sap-sub-b" value={form.subCategoryB} options={subBOptions} onChange={(v) => set("subCategoryB", v.slice(0, SUB_MAX))} placeholder="None" disabled={!form.subCategory} />
+                </div>
               </div>
-              <div>
-                <label className={label}>Unit *</label>
-                <select
-                  value={form.unit}
-                  onChange={set("unit")}
-                  required
-                  className={`${field} cursor-pointer`}
-                >
-                  {/* The ones the store already uses first — the full ERPNext
-                      list is mostly furlongs and troy ounces. */}
-                  {units.inUse.length > 0 && (
-                    <optgroup label="Used in this store">
-                      {units.inUse.map((u) => (
+
+              {/* --- the item code --- */}
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-700">
+                <Hash className="h-4 w-4 text-slate-400 shrink-0" />
+                {isEdit ? (
+                  <span>
+                    Item code <span className="mono text-brand-700">{product.sap?.code || product.code}</span> (SAP) · <span className="mono">{product.code}</span> here
+                  </span>
+                ) : group ? (
+                  group.automatic ? (
+                    <span>Item code: assigned by SAP's automatic numbering when the item is created.</span>
+                  ) : (
+                    <span>
+                      Item code will be <span className="mono font-semibold text-brand-700">{group.nextCode}</span>, or the next free one - SAP confirms it when the item is created.
+                    </span>
+                  )
+                ) : (
+                  <span className="text-slate-500">The item code follows the company's SAP numbering once the group is chosen.</span>
+                )}
+              </div>
+
+              {/* --- description: the SOP name --- */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className={label + " mb-0"} htmlFor="sap-name">Description * <span className="text-slate-400 font-normal">(SAP item description)</span></label>
+                  <button type="button" className="text-[12px] font-semibold text-brand-700 hover:underline cursor-pointer" onClick={() => setShowBuilder((s) => !s)}>
+                    {showBuilder ? "Hide the SOP naming builder" : "Build it with the SOP naming builder"}
+                  </button>
+                </div>
+                {showBuilder && (
+                  <ItemNameBuilder value={naming} onChange={setNaming} onApply={(name) => set("name", String(name || "").slice(0, NAME_MAX))} disabled={submitting} />
+                )}
+                <input id="sap-name" className="field" value={form.name} onChange={bind("name")} maxLength={NAME_MAX} placeholder="e.g. 50SQMM*10MM Cable Leg Ring Type CU" required />
+                <div className="flex justify-between gap-2">
+                  <NameComplianceNotice name={form.name} />
+                  <span className="text-[11px] text-slate-400 shrink-0">{form.name.length}/{NAME_MAX}</span>
+                </div>
+              </div>
+
+              {/* --- the rest of the item master --- */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <label className={label} htmlFor="sap-foreign">Foreign name</label>
+                  <input id="sap-foreign" className="field" value={form.foreignName} onChange={bind("foreignName")} maxLength={NAME_MAX} placeholder="Optional - a second name, e.g. the supplier's" />
+                </div>
+                <div>
+                  <label className={label} htmlFor="sap-unit">Unit *</label>
+                  {locked ? (
+                    <LockedValue value={form.unit} note="Fixed once the item exists" />
+                  ) : (
+                    <select id="sap-unit" className="field cursor-pointer" value={form.unit} onChange={bind("unit")} disabled={!company} required>
+                      {(company?.units || [form.unit]).map((u) => (
                         <option key={u} value={u}>
                           {u}
                         </option>
                       ))}
-                    </optgroup>
+                    </select>
                   )}
-                  {units.others.length > 0 && (
-                    <optgroup label="Everything else">
-                      {units.others.map((u) => (
-                        <option key={u} value={u}>
-                          {u}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {units.inUse.length === 0 && units.others.length === 0 && (
-                    <option value={form.unit}>{form.unit}</option>
-                  )}
-                </select>
-              </div>
-              <div className="sm:col-span-2">
-                <label className={label}>Why it is needed</label>
-                <input
-                  type="text"
-                  value={form.reason}
-                  onChange={set("reason")}
-                  placeholder="e.g. arrived with the new press; the old one has no name"
-                  className={field}
-                />
-              </div>
-              <div>
-                <label className={label}>Min Stock</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={form.minStock}
-                  onChange={set("minStock")}
-                  className={field}
-                />
-              </div>
-              <div>
-                <label className={label}>Audit Frequency</label>
-                <select
-                  value={form.auditFrequency}
-                  onChange={set("auditFrequency")}
-                  className={field}
-                >
-                  {AUDIT_FREQUENCIES.map((frequency) => (
-                    <option key={frequency} value={frequency}>
-                      {frequency}
-                    </option>
-                  ))}
-                </select>
-                {/* Monthly is the default and the safe answer. Moving an item
-                    to a longer cycle is a decision about how often it is worth
-                    walking to, so it is said here rather than inferred from
-                    how fast the item moves. */}
-                <p className="mt-1 text-[10px] text-slate-500">
-                  How often this item has to be physically counted.
-                </p>
+                  {!locked && <p className={hint}>Inventory, purchasing and sales unit in SAP.</p>}
+                </div>
+                <div>
+                  <label className={label} htmlFor="sap-hsn">HSN code</label>
+                  <input
+                    id="sap-hsn"
+                    className="field mono"
+                    list="sap-hsn-list"
+                    value={form.hsnCode}
+                    onChange={(e) => set("hsnCode", e.target.value.replace(/[^\d.]/g, ""))}
+                    placeholder="e.g. 84819090"
+                    disabled={!company}
+                  />
+                  <datalist id="sap-hsn-list">
+                    {(company?.hsn || []).map((h) => (
+                      <option key={h} value={h} />
+                    ))}
+                  </datalist>
+                  <p className={hint}>From {company?.company || "the company"}'s HSN list in SAP.</p>
+                </div>
+                <div>
+                  <label className={label} htmlFor="sap-tax">Tax rate</label>
+                  <select id="sap-tax" className="field cursor-pointer" value={form.taxRate} onChange={bind("taxRate")} disabled={!company}>
+                    <option value="">None</option>
+                    {(company?.taxRates || []).map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={label} htmlFor="sap-min">Minimum stock</label>
+                  <input id="sap-min" type="number" min="0" step="any" className="field" value={form.minStock} onChange={bind("minStock")} />
+                  <p className={hint}>SAP's Minimum Inventory, and the low-stock limit here.</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className={label} htmlFor="sap-brand">Brand</label>
+                  <input id="sap-brand" className="field" value={form.brand} onChange={bind("brand")} placeholder="Optional - kept in the CMMS only" />
+                </div>
               </div>
             </>
           )}
-        </div>
 
-        <div>
-          <label className={label}>Image URL</label>
-          <input type="text" value={form.image} onChange={set("image")} placeholder="https://…" className={field} />
-        </div>
-
-        <div>
-          <label className={label}>Description</label>
-          <textarea
-            value={form.description}
-            onChange={set("description")}
-            rows="3"
-            className={`${field} field-area`}
-          ></textarea>
-        </div>
-
-        {/* Still shown on edit, just not editable — the figures are needed to
-            make sense of the item, and each says where it is actually changed. */}
-        {isEdit && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-            <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-              <Lock className="h-3.5 w-3.5 text-slate-400" /> Not changed here
-            </h4>
-            <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
-              {[
-                ["Engineering Stock Code", product.code, "fixed identity"],
-                ["Brand", product.brand || "—", "raise a new item if it differs"],
-                ["Unit", product.unit, "fixed identity"],
-                [
-                  "Total Quantity",
-                  `${product.quantity} ${product.unit}`,
-                  "moves on Companies",
-                ],
-                ["Home Company", product.storeRoom, "moves on Companies"],
-                ["Min Stock", `${product.minStock} ${product.unit}`, "purchasing figure"],
-              ].map(([term, value, why]) => (
-                <div key={term} className="min-w-0">
-                  <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                    {term}
-                  </dt>
-                  <dd className="text-xs font-semibold text-slate-800 truncate" title={value}>
-                    {value}
-                  </dd>
-                  <dd className="text-[10px] text-slate-400">{why}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        )}
-
-        {/* ST-14 — what the catalog already holds that looks like this. Shown
-            live while typing, and again (with the confirmation) if the save was
-            refused. */}
-        {!duplicateBlock && (
-          <DuplicateWarning matches={matches} checking={checkingDuplicates} />
-        )}
-
-        {duplicateBlock && (
-          <div className="space-y-2">
-            <DuplicateWarning
-              matches={duplicateBlock.matches || []}
-              heading={duplicateBlock.message}
-            />
-            <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={allowDuplicate}
-                onChange={(e) => setAllowDuplicate(e.target.checked)}
-                className="mt-0.5 cursor-pointer"
-              />
-              <span>
-                This is a <strong>different item</strong> from the ones above — create it
-                anyway.
-              </span>
-            </label>
-          </div>
-        )}
-
-        {/* ST-10 — a non-compliant name is flagged before it is saved, not
-            silently accepted and not outright refused. */}
-        {nameIssues && (
-          <div className="space-y-2">
-            <div className="note note-rose flex-col gap-1 items-start">
-              <span className="font-bold flex items-center gap-1.5">
-                <ShieldAlert className="h-4 w-4" /> "{form.name}" does not follow SOI1/SOP1
-              </span>
-              <ul className="list-disc pl-4 space-y-0.5">
-                {nameIssues.map((issue) => (
-                  <li key={issue.code + issue.message}>{issue.message}</li>
-                ))}
-              </ul>
-            </div>
-            <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={acknowledgeNaming}
-                onChange={(e) => setAcknowledgeNaming(e.target.checked)}
-                className="mt-0.5 cursor-pointer"
-              />
-              <span>
-                Save with this name anyway — it will be marked{" "}
-                <strong>non-compliant</strong> in the catalog.
-              </span>
-            </label>
-          </div>
-        )}
-
+          {problem && <div className="note note-rose text-sm">{problem}</div>}
         </div>
 
         <div className="modal-foot">
           <button type="button" onClick={onClose} className="btn btn-neutral">
             Cancel
           </button>
-          <button
-            type="submit"
-            disabled={submitting || awaitingConfirmation}
-            className="btn btn-primary"
-          >
+          <button type="submit" disabled={submitting || !companies || notSap} className="btn btn-primary">
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            {isEdit ? "Save Changes" : "Send for approval"}
+            {isEdit ? "Save" : "Send for approval"}
           </button>
         </div>
       </form>
     </div>
   );
 };
+
+const LockedValue = ({ value, note = "" }) => (
+  <div className="field flex items-center gap-2 bg-slate-50 text-slate-600 cursor-not-allowed" title={note}>
+    <Lock className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+    <span className="truncate">{value || "—"}</span>
+  </div>
+);
 
 export default ProductFormModal;

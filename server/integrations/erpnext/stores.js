@@ -39,15 +39,32 @@ export const ERP_ABBR = process.env.ERPNEXT_ABBR || "MRPPL";
  * spelled identically, or a plant head sees an empty catalog rather than an
  * error that would tell somebody why.
  */
+/*
+ * 24 Sep 2026: the engineering catalog was replaced with SAP's, one set per SAP
+ * company, and each company's stock was opened in its OWN ERPNext company's
+ * store ("Stores - HRI", "Stores - MT", "Stores - MTR") - the user's choice. So
+ * those three stores now read those warehouses. The "<Company> Store - MRPPL"
+ * warehouses they replace were empty. Manna Rubber Products keeps its store.
+ *
+ * `company` / `abbr` say which ERPNext company a store's stock is booked in, and
+ * `abbr` is also the code prefix of that company's SAP items (MT-I-13136).
+ * repository/stock.js (not wired to any screen yet) still posts every movement
+ * as ERP_COMPANY; it must use the store's `company` before issuing or moving
+ * stock in the three non-MRPPL stores - ERPNext refuses a warehouse of another
+ * company, and a transfer between two companies is not one Stock Entry.
+ */
 export const STORES = [
-  { key: "manna-rubber-products", label: "Manna Rubber Products", warehouse: `Manna Rubber Products Store - ${ERP_ABBR}`, isMain: true },
-  { key: "hi-tech-rubber-industries", label: "Hi-Tech Rubber Industries", warehouse: `Hi-Tech Rubber Industries Store - ${ERP_ABBR}` },
-  { key: "manna-treads", label: "Manna Treads", warehouse: `Manna Treads Store - ${ERP_ABBR}` },
+  { key: "manna-rubber-products", label: "Manna Rubber Products", warehouse: `Manna Rubber Products Store - ${ERP_ABBR}`, company: ERP_COMPANY, abbr: ERP_ABBR, isMain: true },
+  { key: "hi-tech-rubber-industries", label: "Hi-Tech Rubber Industries", warehouse: "Stores - HRI", company: "Hi-Tech Rubber Industries", abbr: "HRI" },
+  { key: "manna-treads", label: "Manna Treads", warehouse: "Stores - MT", company: "Manna Treads", abbr: "MT" },
   // Added when the plant heads were scoped to their own sites: Manna Tyre
   // Retreads was a plant with no store, so its head would have been shown an
-  // empty catalog. The warehouse exists in ERPNext and starts empty.
-  { key: "manna-tyre-retreads", label: "Manna Tyre Retreads", warehouse: `Manna Tyre Retreads Store - ${ERP_ABBR}` },
+  // empty catalog.
+  { key: "manna-tyre-retreads", label: "Manna Tyre Retreads", warehouse: "Stores - MTR", company: "Manna Tyre Retreads", abbr: "MTR" },
 ];
+
+/** The store of the ERPNext company with this abbreviation (= SAP item code prefix), or null. */
+export const storeForCompany = (abbr) => STORES.find((s) => s.abbr === abbr) || null;
 
 /**
  * Where returned stock waits for a merge.

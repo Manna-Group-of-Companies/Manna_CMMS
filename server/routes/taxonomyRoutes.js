@@ -1,6 +1,6 @@
 import express from "express";
 
-import { tree, add, rename, move, remove } from "../controllers/taxonomyController.js";
+import { tree, add, rename, move, remove, sapTree, sapRename } from "../controllers/taxonomyController.js";
 import { protect, requireRole } from "../middleware/session.js";
 import { requireView } from "../config/access.js";
 
@@ -23,6 +23,11 @@ router.get("/", requireView("categories"), tree);
  * given the screen back, they belong here again.
  */
 const WRITE = requireRole("Maintenance Manager");
+
+// The SAP three-level tree (item group > Sub-category A > Sub-category B). A
+// rename rewrites every item under it and reaches SAP through the flagged sync.
+router.get("/sap", requireView("categories"), sapTree);
+router.put("/sap/rename", WRITE, sapRename);
 
 // Above /:name, or "rename" and "move" are read as group names.
 router.put("/rename", WRITE, rename);

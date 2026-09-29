@@ -10,9 +10,13 @@ import * as requests from "../repository/namingRequests.js";
  */
 
 const fail = (res, error, fallback = "Something went wrong") => {
+  // Our own refusals (400 bad input, 404, 403 wrong role) carry a message meant for the person.
+  if (error?.status === 400 || error?.status === 404) {
+    return res.status(error.status).json({ message: error.message });
+  }
   if (error?.status === 403) {
     return res.status(403).json({
-      message: "Your ERPNext role does not allow that step.",
+      message: error.message || "Your ERPNext role does not allow that step.",
       detail: error.message,
     });
   }
@@ -105,6 +109,31 @@ export const decide = async (req, res) => {
     );
   } catch (error) {
     fail(res, error, "Could not record the decision");
+  }
+};
+
+/**
+ * @desc    What the form offers per SAP company: item groups (with the next item
+ *          code), units, HSN codes, tax rates - published from SAP by the sync
+ * @route   GET /api/naming-requests/options
+ */
+export const options = async (_req, res) => {
+  try {
+    res.json(await requests.requestOptions());
+  } catch (error) {
+    fail(res, error, "Could not load the SAP options");
+  }
+};
+
+/**
+ * @desc    Send an approved request whose SAP creation failed to SAP again
+ * @route   POST /api/naming-requests/:id/retry
+ */
+export const retry = async (req, res) => {
+  try {
+    res.json(await requests.retrySapCreation(req.params.id, { user: req.user }));
+  } catch (error) {
+    fail(res, error, "Could not send it to SAP again");
   }
 };
 

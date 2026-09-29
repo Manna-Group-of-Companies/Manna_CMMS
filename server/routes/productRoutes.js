@@ -4,6 +4,11 @@ import {
   getProductById,
   getCategories,
   getSubCategories,
+  getSubCategoriesB,
+  getCategorySync,
+  getCategoryOptions,
+  putCategory,
+  putProduct,
   getUnits,
   createProduct,
   updateProduct,
@@ -52,6 +57,9 @@ router.use(protect, requireView("engineeringStock"));
 router.get("/", getProducts);
 router.get("/categories", getCategories);
 router.get("/subcategories", getSubCategories);
+// Level 3 (SAP U_SubTypeB) and the SAP category sync. Above /:id, like the rest.
+router.get("/subcategories-b", getSubCategoriesB);
+router.get("/category-sync", getCategorySync);
 router.get("/units", getUnits);
 
 // The intake checks. All three are named routes and must stay above "/:id",
@@ -64,9 +72,13 @@ router.post("/", requireRole("Manager"), createProduct);
 
 router.get("/:id", getProductById);
 router.get("/:id/rooms", getProductRooms);
+// Editing an item writes SAP (through the flagged sync). The Maintenance Manager's
+// alone, like creating one (25 Sep 2026).
+router.get("/:id/category-options", getCategoryOptions);
+router.put("/:id/category", requireRole("Maintenance Manager"), putCategory);
 router.post("/:id/stock-in", notYetMoved("Adding stock"));
 router.put("/:id/sap", requireRole("Manager"), notYetMoved("Setting the SAP code"));
-router.put("/:id", requireRole("Manager", "Supervisor"), notYetMoved("Editing an item"));
+router.put("/:id", requireRole("Maintenance Manager"), putProduct);
 router.delete("/:id", requireRole("Manager"), deleteProduct);
 
 export default router;

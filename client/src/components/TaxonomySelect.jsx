@@ -66,6 +66,34 @@ export const useSubCategoryOptions = (category) => {
 };
 
 /**
+ * Level-3 values (SAP Sub-category B) in use under [category] > [subCategory].
+ * Empty until both are chosen.
+ */
+export const useSubCategoryBOptions = (category, subCategory) => {
+  const [options, setOptions] = useState([]);
+
+  useEffect(() => {
+    if (!category || !subCategory) {
+      setOptions([]);
+      return;
+    }
+
+    let live = true;
+    API.get("/products/subcategories-b", { params: { category, subCategory } })
+      .then(({ data }) => {
+        if (live) setOptions((data || []).filter(Boolean));
+      })
+      .catch((error) => console.error("Error loading sub-categories B:", error));
+
+    return () => {
+      live = false;
+    };
+  }, [category, subCategory]);
+
+  return options;
+};
+
+/**
  * A dropdown over [options], with a "type a new one" mode.
  *
  * The mode is latched in state rather than derived from whether `value` is in
