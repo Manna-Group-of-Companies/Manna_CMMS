@@ -1,0 +1,16 @@
+{
+  "erpnext": {
+    "url": "https://mannarubber.m.frappe.cloud",
+    "api_key": "PUT_ERPNEXT_API_KEY_HERE",
+    "api_secret": "PUT_ERPNEXT_API_SECRET_HERE"
+  },
+  "sap": {
+    "url": "https://PUT_SAP_SERVER_HERE:50000/b1s/v1",
+    "username": "PUT_SAP_USERNAME_HERE",
+    "password": "PUT_SAP_PASSWORD_HERE",
+    "password_overrides": {
+      "MANNA_TYRE_LIVE": "PUT_MANNA_TYRE_LIVE_PASSWORD_HERE"
+    }
+  },
+  "control_doctype": "SAP Item Category Sync Control"
+}

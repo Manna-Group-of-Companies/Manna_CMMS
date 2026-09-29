@@ -1,0 +1,7 @@
+# Live-only files: secrets, SAP data, run output. Never commit these.
+config.json
+poller.config.json
+*.bak-*
+logs/
+snapshots/
+backup/
