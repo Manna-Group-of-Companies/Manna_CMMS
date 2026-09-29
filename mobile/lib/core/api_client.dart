@@ -55,9 +55,11 @@ class ApiClient {
   final http.Client _http;
 
   /// How long a single request may take. Long enough to cover a cold start on
-  /// the hosted API and the upload of a product photo over a phone connection,
-  /// short enough that an unreachable host does not leave the UI spinning.
-  Duration timeout = const Duration(seconds: 30);
+  /// the hosted API — which sleeps after a spell of no traffic, so the first
+  /// request after a phone has sat idle has to wait for it to boot — and the
+  /// upload of a photo over a phone connection. Was 30 seconds, which a
+  /// measured 52-second cold start overran.
+  Duration timeout = ServerConfig.cloudWakeTimeout;
 
   String? token;
 
