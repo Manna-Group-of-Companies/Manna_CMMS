@@ -53,7 +53,7 @@ const PRIORITY_STYLE = {
 const NEXT_LABEL = {
   Reported: "Start repair",
   "Under Repair": "Machine running",
-  Repaired: "Root cause",
+  Repaired: "Close",
 };
 
 /** Now, in the format a datetime-local input wants. */
@@ -81,9 +81,10 @@ const hoursLabel = (h) => {
  */
 const Breakdowns = () => {
   const { user } = useAuth();
-  // A production manager raises breakdowns for their own plant and follows
-  // them. Moving one on is maintenance's, so the row offers no action.
-  const canAdvance = user?.role !== PRODUCTION_MANAGER;
+  // A production manager raises breakdowns for their own plant, follows them
+  // and closes them once repaired. The steps in between are maintenance's, so
+  // their rows offer only Close.
+  const canAdvance = (state) => user?.role !== PRODUCTION_MANAGER || state === "Repaired";
   /**
    * Who may report one in the first place.
    *
@@ -254,7 +255,7 @@ const Breakdowns = () => {
                         so it read as fact while resting on an estimate. */}
                     <td>{hoursLabel(r.stoppedForHours)}</td>
                     <td className="text-right">
-                      {next && canAdvance && (
+                      {next && canAdvance(r.state) && (
                         <button className="btn btn-sm btn-primary" onClick={() => setOpened(r.id)}>
                           {next}
                         </button>

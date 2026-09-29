@@ -255,14 +255,16 @@ export const REQUEST_WORKFLOW = {
     { state: "Requested", action: "Start Work", next_state: "In Progress", allowed: "Store Maintenance Manager", allow_self_approval: 1 },
     { state: "In Progress", action: "Mark Complete", next_state: "Completed", allowed: "Store Maintenance Manager", allow_self_approval: 1 },
     /**
-     * Closing belongs to the requester, not to maintenance.
+     * Closing belongs to the plant and to maintenance.
      *
-     * A workflow can only name a role, and the rule is narrower than that — it
-     * is the one person who raised this request. That is checked against the
-     * signed-in user in maintenanceRequestStages.js; the role here is the
-     * floor, not the whole rule.
+     * It was the requester's alone until 29 Sep 2026; now any plant manager on
+     * that plant, or the Maintenance Manager, closes it. "Close as Manager" was
+     * the Admin's way round the old rule and the application no longer offers
+     * it; the transition is left in place so a workflow that already has it is
+     * not changed underneath anybody.
      */
     { state: "Completed", action: "Close Request", next_state: "Closed", allowed: "Plant Manager", allow_self_approval: 1 },
+    { state: "Completed", action: "Close Request", next_state: "Closed", allowed: "Store Maintenance Manager", allow_self_approval: 1 },
     { state: "Completed", action: "Close as Manager", next_state: "Closed", allowed: "Store Manager", allow_self_approval: 1 },
     // Maintenance will not do it, or the requester no longer needs it. Both
     // land in the same state; who stamped it and the reason say which.

@@ -42,6 +42,23 @@ const fail = (res, error, fallback = "Something went wrong") => {
 };
 
 /**
+ * True when this breakdown is on a plant this person may see.
+ *
+ * Reading one was always confined; acting on one was not, so a plant head who
+ * knew another site's breakdown id could withdraw it or attach a file to it.
+ * The same answer `detail` gives: somebody else's plant is missing, not
+ * forbidden.
+ */
+const inScope = async (user, id) => {
+  const scope = await scopeFor(user);
+  if (!scope.scoped) return true;
+  const breakdown = await maintenance.getBreakdown(id);
+  return Boolean(breakdown) && withinScope(scope, breakdown.plant);
+};
+
+const notFound = (res) => res.status(404).json({ message: "Breakdown not found" });
+
+/**
  * @desc    Breakdowns, newest first
  * @route   GET /api/breakdowns
  * @access  Private
@@ -158,6 +175,7 @@ export const act = async (req, res) => {
   if (!action) return res.status(400).json({ message: "An action is required" });
 
   try {
+    if (!(await inScope(req.user, req.params.id))) return notFound(res);
     res.json(await maintenance.saveAndAdvance(req.params.id, action, fields || {}, req.user));
   } catch (error) {
     // An incomplete stage is the user's to fix, and the screen needs to know
@@ -219,6 +237,7 @@ export const reliabilityReport = async (req, res) => {
  */
 export const attach = async (req, res) => {
   try {
+    if (!(await inScope(req.user, req.params.id))) return notFound(res);
     res.status(201).json(await maintenance.attachToBreakdown(req.params.id, req.body || {}));
   } catch (error) {
     fail(res, error, "Could not attach the file");
@@ -228,6 +247,7 @@ export const attach = async (req, res) => {
 /** @route DELETE /api/breakdowns/:id/files/:fileId */
 export const detach = async (req, res) => {
   try {
+    if (!(await inScope(req.user, req.params.id))) return notFound(res);
     res.json(await maintenance.detachFromBreakdown(req.params.id, req.params.fileId));
   } catch (error) {
     fail(res, error, "Could not remove the file");

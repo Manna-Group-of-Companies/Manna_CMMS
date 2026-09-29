@@ -77,28 +77,48 @@ export const STAGES = {
   },
 
   /**
-   * What happened, recorded while the machine is open.
+   * What happened, why, and what changes because of it.
    *
-   * Facts only at this stage — what was done, when it ran again, who did it,
-   * what it took. Why it failed is asked at closing, because a cause worked
-   * out with the machine back in production is a considered answer rather than
-   * something written to get the form closed.
+   * Maintenance's last step, and the one the whole module exists for: a
+   * breakdown closed with no cause and no action is one that will be reported
+   * again.
+   *
+   * The root cause and the prevention actions are asked here, with the repair,
+   * since 29 Sep 2026. They used to be asked at closing, so the cause was worked
+   * out with the machine back in production. Closing is now the plant's
+   * confirmation that the machine is back, and the plant does not evaluate a
+   * breakdown - so the evaluation has to be done by maintenance before the
+   * record reaches them.
+   *
+   * "Has this happened before" moved with them. At the moment a machine stops
+   * nobody has the history in front of them; here the machine's earlier
+   * failures are on screen, so the question can be answered by looking. Not
+   * required, deliberately: a false repeat flag is worse than a missing one,
+   * because the report highlights on it.
    */
   "Machine Running": {
     allowedRoles: ["Manager", "Maintenance Manager"],
     from: "Under Repair",
     to: "Repaired",
     title: "Machine running again",
-    blurb: "What was done, when it was handed back to production, and what it took.",
+    blurb: "What was done, when it was handed back, what it took, why it failed and what changes now.",
     fields: [
       "actions_performed",
       "completed_at",
       "failure_mode",
       "repaired_by",
       "spares_required",
+      "root_cause",
+      "prevention_actions",
+      "repeat_failure",
+      "repeat_of",
     ],
-    required: ["actions_performed", "completed_at", "failure_mode"],
+    required: ["actions_performed", "completed_at", "failure_mode", "root_cause", "prevention_actions"],
     labels: {
+      root_cause: "Root cause",
+      prevention_actions: "Prevention actions",
+      repeat_failure: "This has happened before",
+      repeat_of: "The earlier breakdown",
       actions_performed: "What was done",
       /**
        * The hand-over, not the last turn of the spanner.
@@ -117,32 +137,57 @@ export const STAGES = {
   },
 
   /**
-   * The analysis, and what changes because of it.
+   * The plant accepts the machine back.
    *
-   * This is the stage the whole module exists for, and it is the Manager's on
-   * purpose: somebody other than the person who did the repair has to look at
-   * whether anything was learned. A breakdown closed with no cause and no
-   * action is one that will be reported again.
+   * Open to the plant manager and to maintenance (29 Sep 2026; it was the
+   * Admin's alone). The plant reports a breakdown and closes it; everything in
+   * between is maintenance's. Nothing is collected - the repair and its
+   * evaluation are already on the record, and the plant is not asked to write
+   * either.
+   *
+   * The root cause and prevention actions are still required, checked against
+   * the record rather than asked for, so nothing reaches Closed without them.
+   * A breakdown that got to Repaired before they moved into "Machine Running"
+   * has neither; `nextActionFor` sends it to "Close with Root Cause" instead.
+   *
+   * `conditional` rather than `required` on purpose. `required` goes to the
+   * screens, and the phone checks it against its own form - which on this
+   * step has no fields, so it would refuse every close. The server's check
+   * reads the record, so that is where the guard lives.
    */
   Close: {
-    allowedRoles: ["Manager"],
+    allowedRoles: ["Manager", "Maintenance Manager", "Production Manager"],
     from: "Repaired",
     to: "Closed",
-    title: "Root cause and prevention",
+    title: "Close the breakdown",
+    blurb: "The machine is back in production and the repair is accepted.",
+    fields: [],
+    required: [],
+    conditional: () => ["root_cause", "prevention_actions"],
+    labels: {
+      root_cause: "Root cause (maintenance records it)",
+      prevention_actions: "Prevention actions (maintenance records them)",
+    },
+    stamp: () => ({ closed_at: now() }),
+  },
+
+  /**
+   * Closing one that reached Repaired under the old flow.
+   *
+   * Until 29 Sep 2026 the root cause was asked at closing, so a breakdown
+   * repaired before then has none, and the plant's close above would refuse
+   * it. Maintenance records the cause and closes it in one step, as before.
+   * Offered only for such a record - see `nextActionFor`. It is the same
+   * ERPNext transition as Close, so the workflow needs nothing new.
+   */
+  "Close with Root Cause": {
+    allowedRoles: ["Manager", "Maintenance Manager"],
+    erpAction: "Close",
+    catchUp: true,
+    from: "Repaired",
+    to: "Closed",
+    title: "Record the root cause and close",
     blurb: "Why it failed, whether it has happened before, and what changes now.",
-    /**
-     * "Has this happened before" is asked here and nowhere else.
-     *
-     * At the moment a machine stops nobody has the history in front of them,
-     * and a guess at the report is a guess recorded as fact. At closing the
-     * machine's whole record is on screen, so the question can actually be
-     * answered — and it is the answer that turns four ordinary repairs into one
-     * problem somebody has to solve.
-     *
-     * Not required, deliberately. Forcing an answer would get a tick from
-     * whoever wanted the form closed, and a false repeat flag is worse than a
-     * missing one: the report highlights on it.
-     */
     fields: ["root_cause", "prevention_actions", "repeat_failure", "repeat_of"],
     required: ["root_cause", "prevention_actions"],
     labels: {
@@ -177,9 +222,23 @@ export const STAGES = {
   },
 };
 
-/** The action that moves a breakdown on from the state it is in. */
-export const nextActionFor = (state) =>
-  Object.entries(STAGES).find(([action, s]) => s.from === state && !action.startsWith("Cancel"))?.[0] || "";
+/**
+ * The action that moves a breakdown on from the state it is in.
+ *
+ * Takes the record as well as its state for one case: a breakdown repaired
+ * before the root cause moved into "Machine Running" has none, so its next
+ * step is maintenance's catch-up close rather than the plant's.
+ */
+export const nextActionFor = (state, doc = {}) => {
+  if (state === "Repaired" && (!isGiven(doc.root_cause) || !isGiven(doc.prevention_actions))) {
+    return "Close with Root Cause";
+  }
+  return (
+    Object.entries(STAGES).find(
+      ([action, s]) => s.from === state && !action.startsWith("Cancel") && !s.catchUp
+    )?.[0] || ""
+  );
+};
 
 /** Every field any stage may write, for the update allow-list. */
 export const WRITABLE_FIELDS = [

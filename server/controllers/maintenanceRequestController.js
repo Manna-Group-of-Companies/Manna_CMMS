@@ -159,6 +159,16 @@ export const act = async (req, res) => {
   if (!action) return res.status(400).json({ message: "An action is required" });
 
   try {
+    // A plant manager closes their own plant's requests, not any request whose
+    // id they know. Missing rather than forbidden, the same answer `detail`
+    // gives for somebody else's plant.
+    const scope = await scopeFor(req.user);
+    if (scope.scoped) {
+      const request = await requests.getRequest(req.params.id);
+      if (!request || !withinScope(scope, request.plant)) {
+        return res.status(404).json({ message: "Request not found" });
+      }
+    }
     res.json(await requests.saveAndAdvanceRequest(req.params.id, action, fields || {}, req.user));
   } catch (error) {
     if (error.forbidden) return res.status(403).json({ message: error.message });

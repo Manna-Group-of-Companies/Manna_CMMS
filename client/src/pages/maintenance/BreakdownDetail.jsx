@@ -649,7 +649,7 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
 
         {stage.fields.length === 0 && (
           <p className="text-sm text-slate-500">
-            Nothing to fill in. The plan is already recorded.
+            Nothing to fill in. What maintenance recorded is below.
           </p>
         )}
       </div>
@@ -875,9 +875,11 @@ const Crew = ({ rows, onChange, people }) => {
 /**
  * Has this happened before?
  *
- * Asked at closing and nowhere else. At the moment a machine stops nobody has
- * the history in front of them, and a guess made then is a guess recorded as
- * fact. Here the machine's earlier failures are on screen, so the question can
+ * Asked when the machine runs again, with the root cause (it was asked at
+ * closing until 29 Sep 2026, when closing became the plant's). At the moment a
+ * machine stops nobody has the history in front of them, and a guess made then
+ * is a guess recorded as fact. Here the machine's earlier failures are on
+ * screen, so the question can
  * be answered by looking rather than by remembering — otherwise the flag ends
  * up measuring who has a good memory rather than which machines keep failing.
  *
@@ -1084,7 +1086,9 @@ const Report = ({ record }) => {
         </Block>
       )}
 
-      {reached("Closed") && (
+      {/* From Repaired, not Closed: the root cause is recorded when the machine
+          runs again, and the plant manager reads it before closing. */}
+      {reached("Repaired") && (record.rootCause || reached("Closed")) && (
         <Block title="Root cause analysis">
           <KV label="Root cause" value={record.rootCause} wide />
           <KV label="Closed at" value={when(record.closedAt)} />

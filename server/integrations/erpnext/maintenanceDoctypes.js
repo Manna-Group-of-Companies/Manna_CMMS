@@ -421,8 +421,11 @@ export const BREAKDOWN_WORKFLOW = {
      */
     { state: "Reported", action: "Start Repair", next_state: "Under Repair", allowed: "Store Maintenance Manager", allow_self_approval: 1 },
     { state: "Under Repair", action: "Machine Running", next_state: "Repaired", allowed: "Store Maintenance Manager", allow_self_approval: 1 },
-    // Closing is the Manager's, not maintenance's: it is the check that a root
-    // cause and a prevention action were actually recorded rather than skipped.
+    // The plant accepts the machine back. Since 29 Sep 2026 the plant manager
+    // or the Maintenance Manager closes it, the root cause having been recorded
+    // at Machine Running; the Manager keeps it as a fallback.
+    { state: "Repaired", action: "Close", next_state: "Closed", allowed: "Plant Manager", allow_self_approval: 1 },
+    { state: "Repaired", action: "Close", next_state: "Closed", allowed: "Store Maintenance Manager", allow_self_approval: 1 },
     { state: "Repaired", action: "Close", next_state: "Closed", allowed: "Store Manager", allow_self_approval: 1 },
     // A report that turns out to be nothing. Available to whoever raised it.
     { state: "Reported", action: "Cancel", next_state: "Cancelled", allowed: "Plant Manager", allow_self_approval: 1 },

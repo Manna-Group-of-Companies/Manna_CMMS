@@ -56,7 +56,7 @@ const BREAKDOWN_FIELDS = [
 const WAITING_ON = {
   Reported: "Maintenance to start work",
   "Under Repair": "Machine to run again",
-  Repaired: "Manager to record the root cause",
+  Repaired: "Maintenance to record the root cause and close it",
   Closed: "",
   Cancelled: "",
 };
@@ -138,7 +138,7 @@ export const listBreakdowns = async ({ plant = "", state = "", open = false, lim
 /**
  * The earlier failures on the same machine.
  *
- * Offered on the closing form so "has this happened before" can be answered by
+ * Offered on the Machine Running form so "has this happened before" can be answered by
  * looking rather than by remembering. Without the list the question gets a tick
  * from whoever has a good memory and a blank from whoever does not, and the
  * repeat count ends up measuring the staff rather than the machines.
@@ -184,11 +184,12 @@ export const getBreakdown = async (id) => {
 
   return {
     ...toSummary(doc),
-    // Only fetched once the record has reached the stage that asks the
-    // question. On every earlier stage it is a second round trip to ERPNext for
-    // a list nothing on screen shows.
+    // Only fetched once the record has reached a stage that asks the question
+    // - "Machine Running", or the catch-up close for one repaired before that.
+    // On every earlier stage it is a second round trip to ERPNext for a list
+    // nothing on screen shows.
     priorFailures:
-      doc.workflow_state === "Repaired" || doc.repeat_failure
+      ["Under Repair", "Repaired"].includes(doc.workflow_state) || doc.repeat_failure
         ? await priorFailuresOf(doc.machine, id, doc.stopped_at)
         : [],
     estimatedRepairHours: Number(doc.estimated_repair_hours || 0),
@@ -231,8 +232,8 @@ export const getBreakdown = async (id) => {
     })),
     // What the next step is and what it still wants, so the screen can say so
     // before somebody fills a form in and is refused at the end of it.
-    nextAction: nextActionFor(doc.workflow_state),
-    missing: missingFor(nextActionFor(doc.workflow_state), doc),
+    nextAction: nextActionFor(doc.workflow_state, doc),
+    missing: missingFor(nextActionFor(doc.workflow_state, doc), doc),
   };
 };
 
@@ -470,7 +471,9 @@ export const saveAndAdvance = async (id, action, fields = {}, user = {}) => {
 
   if (Object.keys(edits).length) await updateDoc("CMMS Breakdown", id, edits);
 
-  return applyAction(id, action);
+  // A stage can apply another's ERPNext transition: the catch-up close is
+  // the workflow's own "Close", so the workflow needed no new action.
+  return applyAction(id, stage.erpAction || action);
 };
 
 /* --------------------------------------------- what changed, per machine */

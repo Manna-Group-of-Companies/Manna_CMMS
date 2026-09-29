@@ -84,7 +84,12 @@ class _StageFormState extends State<StageForm> {
         _values[field] = existing is String && existing.isNotEmpty
             ? existing
             : _stamp(DateTime.now());
-      } else if (field == 'repeat_failure' || field == 'satisfied') {
+      } else if (field == 'satisfied') {
+        // Ticked unless the record says otherwise, as on the web: closing a
+        // job that went fine stays one tap, and an unticked box sent without
+        // being read would file it as unsatisfactory.
+        _values[field] = existing != false;
+      } else if (field == 'repeat_failure') {
         _values[field] = existing == true;
       } else {
         final text = existing?.toString() ?? '';

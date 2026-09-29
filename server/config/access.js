@@ -142,23 +142,21 @@ export const VIEWS = {
  * exactly what has to be reconstructed when a screen is turned back on. Adding
  * a name here is the whole of putting one back.
  */
-// itemNaming released 25 Sep 2026 so the VP Operations can approve new items (made in SAP on approval).
-export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "itemNaming"]);
+// 29 Sep 2026: back to breakdowns and maintenance requests only, for every role. itemNaming
+// (released 25 Sep for the VP Operations) is held back again; add it here to bring it back.
+export const RELEASED = new Set(["breakdowns", "maintenanceRequests"]);
 
 
 /**
  * Roles the release scope does not apply to.
  *
- * The Maintenance Manager is setting the system up - filling in machines,
- * checklists and the asset register - and cannot do that through two screens.
- * They see everything the matrix above grants them; everybody else still gets
- * only what `RELEASED` names, so the narrow release holds for the people it was
- * narrowed for.
- *
- * This is not "sees everything": the matrix still decides. A screen the
- * Maintenance Manager is not on stays invisible to them.
+ * The Maintenance Manager used to be here, to set the system up through the
+ * screens the release holds back - machines, checklists, the asset register.
+ * They are off it: this release is the two maintenance screens for them too.
+ * Putting a role back here gives it every screen the matrix grants it again.
  */
-const RELEASE_EXEMPT = [MAINTENANCE_MANAGER];
+// 29 Sep 2026: was [MAINTENANCE_MANAGER].
+const RELEASE_EXEMPT = [];
 
 /**
  * The roles that may see a screen, given the matrix and the release.

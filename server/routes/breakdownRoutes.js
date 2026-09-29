@@ -52,7 +52,11 @@ router.get("/plants", READ, plants);
 router.get("/", READ, list);
 router.post("/", READ, REPORT, report);
 router.get("/:id", READ, detail);
-router.put("/:id", READ, update);
+// Writes a stage's fields - root cause and prevention included - without
+// moving the record, so it is maintenance's like the stages themselves. It was
+// open to everyone who could see the list, which let a plant head write the
+// evaluation of their own breakdown. Nothing in the web or the app calls it.
+router.put("/:id", READ, requireRole("Manager", "Maintenance Manager"), update);
 router.post("/:id/action", READ, act);
 
 // Attaching a file: the signed log sheet (maintenance's) and now a photo taken
