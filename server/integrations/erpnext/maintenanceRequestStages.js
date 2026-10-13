@@ -28,9 +28,11 @@ const now = () => erpNow();
  * honest; this is the check that actually holds. See breakdownStages.js for
  * the full account of how that was discovered.
  *
- * `requesterOnly` is the rule a workflow cannot express: closing is not open to
- * a role, it is open to the one person who asked for the work. Anybody else
- * closing it means the queue is being tidied rather than the job accepted.
+ * `requesterOnly` is the rule a workflow cannot express: a step open not to a
+ * role but to the one person who asked for the work. Only withdrawing carries
+ * it now. Closing did until 29 Sep 2026; since then the plant raises a request
+ * and closes it, the Maintenance Manager does every step in between, and the
+ * Maintenance Manager may close it too.
  */
 export const REQUEST_STAGES = {
   /**
@@ -91,44 +93,33 @@ export const REQUEST_STAGES = {
   },
 
   /**
-   * The requester accepts it.
+   * The job is signed off.
    *
-   * Restricted to the person who raised it, which no workflow role can express.
+   * The plant manager's, and the Maintenance Manager's too (29 Sep 2026). It
+   * used to be the requester's alone. A plant manager may close any request on
+   * their own plant - the controller holds them to it - not only the ones they
+   * raised, so a request the Admin raised for their site is not stuck. The
+   * Admin keeps it as a fallback.
+   *
    * Nothing is required: forcing a remark to close would only produce "ok", and
-   * an "ok" recorded as feedback is worse than a blank. The tick that says
+   * an "ok" recorded as a remark is worse than a blank. The tick that says
    * whether it was done to satisfaction is the answer that matters, and it has
    * a default so closing stays one click when it went fine.
+   *
+   * "Close as Manager" is gone with the requester-only rule. It existed so the
+   * Admin could close a request whose requester had left; with closing open to
+   * the plant and to maintenance it had nothing left to do. The transition is
+   * still in the ERPNext workflow, and nothing here offers it.
    */
   "Close Request": {
-    allowedRoles: ["Manager", "Maintenance Manager", "Supervisor", "Production Manager"],
-    requesterOnly: true,
+    allowedRoles: ["Manager", "Maintenance Manager", "Production Manager"],
     from: "Completed",
     to: "Closed",
     title: "Close the request",
-    blurb: "You asked for this work. Confirm it is what you wanted.",
+    blurb: "Check the work is finished and sign the request off.",
     fields: ["closing_remarks", "satisfied"],
     required: [],
     labels: { closing_remarks: "Closing remarks", satisfied: "Done to satisfaction" },
-    stamp: (user) => ({ closed_by: user?.email || "", closed_at: now() }),
-  },
-
-  /**
-   * Closing a request whose requester has gone.
-   *
-   * People leave, and a completed job that can never be closed sits in the
-   * queue forever looking like outstanding work. Kept as a separate action
-   * rather than a wider rule on the one above, so the record says plainly that
-   * somebody other than the requester signed it off.
-   */
-  "Close as Manager": {
-    allowedRoles: ["Manager"],
-    from: "Completed",
-    to: "Closed",
-    title: "Close on the requester's behalf",
-    blurb: "For a request whose requester is no longer here to close it.",
-    fields: ["closing_remarks", "satisfied"],
-    required: ["closing_remarks"],
-    labels: { closing_remarks: "Why you are closing it", satisfied: "Done to satisfaction" },
     stamp: (user) => ({ closed_by: user?.email || "", closed_at: now() }),
   },
 
@@ -169,7 +160,7 @@ export const REQUEST_STAGES = {
 /** The action that moves a request on from the state it is in. */
 export const nextRequestActionFor = (state) =>
   Object.entries(REQUEST_STAGES).find(
-    ([action, s]) => s.from === state && !["Reject", "Withdraw", "Close as Manager"].includes(action)
+    ([action, s]) => s.from === state && !["Reject", "Withdraw"].includes(action)
   )?.[0] || "";
 
 /** A value counts as given when it is not blank, and not an empty table. */
@@ -202,8 +193,7 @@ export const missingForRequest = (action, doc = {}) => {
  *
  * `requesterOnly` narrows it further than any role can: the signed-in user has
  * to be the one who raised the request. A Manager is exempt because somebody
- * has to be able to unblock a record whose requester has left, and the separate
- * "Close as Manager" action records that they did.
+ * has to be able to unblock a record whose requester has left.
  */
 export const mayTakeRequestStep = (action, user = {}, request = {}) => {
   const stage = REQUEST_STAGES[action];

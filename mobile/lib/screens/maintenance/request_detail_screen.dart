@@ -86,14 +86,16 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
     final mayTakeNext = next != null && next.allows(role);
 
     // Withdraw is the requester's own; anyone else with the right role rejects.
+    // `mine` already decides which of the two it is, so the role is the only
+    // check left - this also asked for "mine or the Admin", which kept Reject
+    // from the Maintenance Manager, the person turning requests down.
     final mine = record != null && user != null && user.email == record.requestedBy;
     final endAction = mine ? 'Withdraw' : 'Reject';
     final end = _stages[endAction];
     final mayEnd = record != null &&
         end != null &&
         record.state == end.from &&
-        end.allows(role) &&
-        (mine || role == 'Manager');
+        end.allows(role);
 
     return PopScope(
       canPop: false,

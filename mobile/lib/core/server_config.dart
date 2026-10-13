@@ -18,14 +18,15 @@ import 'lan_discovery.dart';
 ///   1. `--dart-define=API_URL=...`      (compile-time pin, wins outright)
 ///   2. the address the user saved in the app
 ///   3. `--dart-define=API_HOST=...` and the platform defaults
-///   4. a sweep of the device's own Wi-Fi subnet for the API port
+///   4. the deployed server on Render, [cloudUrl]
+///   5. a sweep of the device's own Wi-Fi subnet for the API port
 ///
-/// There is deliberately no hosted fallback. This used to try
-/// manna-cmms.onrender.com when nothing on the local network answered — a
-/// deployment that had gone stale, was serving code from before the move onto
-/// ERPNext, and was never asked for by name. A device now either finds a real
-/// server or is told plainly that none was found, rather than being silently
-/// pointed at one nobody chose.
+/// The hosted server is back as of 29 Sep 2026. It was taken out on 24 Sep
+/// because the Render deployment had gone stale and was serving code from
+/// before the move onto ERPNext; it has since been redeployed, and it is the
+/// address the business asked this app to use. A local API still wins over
+/// it, so a developer running the server on their own machine is not sent to
+/// the live one.
 abstract final class ServerConfig {
   static const prefsKey = 'api_base_url';
 
@@ -35,14 +36,29 @@ abstract final class ServerConfig {
   /// Matches `PORT` in `server/.env`.
   static const port = int.fromEnvironment('API_PORT', defaultValue: 5000);
 
+  /// The deployed Manna CMMS API. Reachable from anywhere, so it is what the
+  /// app settles on unless a server answers on the local network first.
+  static const cloudUrl = 'https://manna-cmms.onrender.com/api';
+
+  /// Render puts a free instance to sleep after a spell of inactivity, and the
+  /// request that wakes it has to wait for the whole server to boot. Measured
+  /// at 52 seconds on 29 Sep 2026 — longer than the 45 this used to allow, so
+  /// a phone opening the app first thing reported a working server as down.
+  static const cloudWakeTimeout = Duration(seconds: 90);
+
+  /// Pings [cloudUrl] with enough patience for a sleeping instance to boot.
+  static Future<bool> wakeCloud({http.Client? client}) =>
+      ping(cloudUrl, timeout: cloudWakeTimeout, client: client);
+
   /// How long a single address is given to answer.
   ///
   /// LAN probes must stay snappy — a dead one on the local subnet is refused
-  /// instantly anyway — while an address the user typed by hand (their own
-  /// server, on whatever host they chose) is given longer, since it may be a
-  /// real network hop away rather than the next machine on the same Wi-Fi.
+  /// instantly anyway. An address the user typed by hand is given longer, since
+  /// it may be a real network hop away, and the hosted server longest of all,
+  /// since it may be asleep.
   static Duration timeoutFor(String baseUrl) {
     final host = hostOf(baseUrl);
+    if (host == hostOf(cloudUrl)) return cloudWakeTimeout;
     final isLocal =
         host == 'localhost' || host == '127.0.0.1' || _ipv4.hasMatch(host);
     return isLocal ? const Duration(seconds: 2) : const Duration(seconds: 15);
@@ -114,6 +130,12 @@ abstract final class ServerConfig {
   }
 
   /// Addresses worth trying before falling back to a network sweep.
+  ///
+  /// A server on the developer's own machine wins over the hosted one, so a
+  /// local API keeps taking precedence during development; on a phone the
+  /// local addresses fail fast and the app lands on [cloudUrl]. Probed with the
+  /// short LAN timeout, so this only finds the hosted server when it is awake —
+  /// [wakeCloud] is the patient second attempt.
   static List<String> quickCandidates() {
     final candidates = <String>[
       if (_envHost.isNotEmpty) normalize(_envHost),
@@ -122,18 +144,15 @@ abstract final class ServerConfig {
         'http://10.0.2.2:$port/api',
       'http://localhost:$port/api',
       'http://127.0.0.1:$port/api',
+      cloudUrl,
     ];
     return candidates.toSet().toList();
   }
 
-  /// The address used when nothing answers.
-  ///
-  /// Empty rather than a guessed host: there is nothing left to name once the
-  /// saved address, the quick candidates and the network sweep have all failed,
-  /// and naming one anyway is what silently pointed the app at a stale Render
-  /// deployment. [ServerStatusBanner] treats an empty host as "nothing
-  /// configured yet" rather than "cannot reach X".
-  static String fallback() => '';
+  /// The address used when nothing answers — so error messages can name
+  /// something concrete, and a retry goes somewhere a phone off the office
+  /// Wi-Fi can actually reach.
+  static String fallback() => cloudUrl;
 
   /// True when [baseUrl] serves `GET /api/health`.
   ///

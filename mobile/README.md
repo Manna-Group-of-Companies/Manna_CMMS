@@ -38,21 +38,19 @@ takes the first address that answers `GET /api/health`:
 2. the address saved in the app (from the **Server address** sheet)
 3. `--dart-define=API_HOST=…`, then `10.0.2.2` (Android emulator),
    `localhost`, `127.0.0.1`
-4. a sweep of the device's own Wi-Fi subnet for port 5000, run automatically
+4. the deployed server, `https://manna-cmms.onrender.com/api`
+5. a sweep of the device's own Wi-Fi subnet for port 5000, run automatically
    when everything above fails
 
-There is no hosted fallback. That used to be
-`https://manna-cmms.onrender.com/api` — reachable from any network, so it was
-where a phone landed whenever nothing on the local network answered — but that
-deployment went stale (it was still serving pre-ERPNext code) and was never
-something anyone chose by name. A device that finds nothing now says so
-plainly, with a box to type a real address into, rather than being silently
-pointed at a server nobody asked for.
+On a phone the local addresses fail at once, so the app lands on the deployed
+server; a developer running the API on their own machine still gets that one
+first. The Render instance sleeps when idle and takes most of a minute to wake
+(52 s measured on 29 Sep 2026), so it is given 90 seconds to answer, and so is
+every request.
 
-If the app needs to reach the API from outside the local network, that means
-deploying the same `server/` code somewhere reachable and pointing the app at
-it — either with `--dart-define=API_URL=…` at build time, or by entering the
-address in the **Server address** sheet once installed.
+The hosted fallback was removed on 24 Sep 2026, when that deployment had gone
+stale and was still serving pre-ERPNext code. It was redeployed and put back on
+29 Sep 2026.
 
 The login screen shows the current address at the bottom; tapping it opens a
 sheet to type one in, re-run auto-detection, or jump straight back to the hosted

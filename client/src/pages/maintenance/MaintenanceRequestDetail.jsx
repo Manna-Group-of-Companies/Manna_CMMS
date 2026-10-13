@@ -123,10 +123,10 @@ const MaintenanceRequestDetail = ({ id, onClose, onChanged }) => {
   /**
    * Whether the signed-in user may actually take the step that is due.
    *
-   * Worked out here as well as on the server, and not to save a round trip: the
-   * step that is due on a Completed request belongs to the person who raised
-   * it, and showing everybody else a form they will be refused at the end of is
-   * worse than showing them who they are waiting on.
+   * Worked out here as well as on the server, and not to save a round trip:
+   * the steps between raising and closing are maintenance's, and showing the
+   * plant a form they will be refused at the end of is worse than showing them
+   * who they are waiting on.
    */
   const mayAct = useMemo(() => {
     if (!stage || !record || !user) return false;
@@ -527,7 +527,6 @@ const StageForm = ({ action, stage, record, people, onDone }) => {
               label={stage.labels?.closing_remarks || "Closing remarks"}
               required={stage.required.includes("closing_remarks")}
               invalid={isMissing("closing_remarks")}
-              hint="Optional unless you are closing somebody else's request."
             >
               <textarea
                 className="field field-area"

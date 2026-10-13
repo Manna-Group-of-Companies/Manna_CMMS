@@ -164,22 +164,19 @@ export const VIEWS = {
  * exactly what has to be reconstructed when a screen is turned back on. Adding
  * a name here is the whole of putting one back.
  */
-// itemNaming released 25 Sep 2026 so the VP Operations can approve new items (made in SAP on approval).
+// itemNaming released 25 Sep 2026 for the VP Operations, held back again 29 Sep (its approval step went on 10 Oct).
 // attendance released 12 Oct 2026: it is the whole of what a Maintenance Member has, so it ships with them.
-export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "itemNaming", "attendance"]);
+export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "attendance"]);
 
 
 /**
  * Roles the release scope does not apply to.
  *
- * The Maintenance Manager is setting the system up - filling in machines,
- * checklists and the asset register - and cannot do that through two screens.
- * They see everything the matrix above grants them; everybody else still gets
- * only what `RELEASED` names, so the narrow release holds for the people it was
- * narrowed for.
- *
- * This is not "sees everything": the matrix still decides. A screen the
- * Maintenance Manager is not on stays invisible to them.
+ * The Maintenance Manager. Taken off on 29 Sep 2026, when the release became the two maintenance
+ * screens for every role; back on since the merge of 13 Oct 2026, because from 9 Oct they run the
+ * engineering store from the CMMS - new items with no approval step, goods receipts, stock additions,
+ * purchase requests, item groups and the SAP sync (user, 9 Oct 2026). Everybody else still gets only
+ * what `RELEASED` names, and the matrix still decides: a screen they are not on stays invisible.
  */
 const RELEASE_EXEMPT = [MAINTENANCE_MANAGER];
 
