@@ -26,10 +26,10 @@ import {
  *   1. The Maintenance Manager fills in the SAP item master fields - SAP
  *      company, item group, Sub-category A/B, the description from the SOP
  *      naming builder, foreign name, unit, HSN code, tax rate - plus minimum
- *      stock and brand, and sends it for approval.
- *   2. The VP Operations approves it (or rejects it). Approving marks it
- *      `sap_create_status = Queued` and raises the flag on "SAP Item Category
- *      Sync Control".
+ *      stock, brand and any opening quantity, and saves it.
+ *   2. Saving approves it at once (no approval step since 9 Oct 2026; before
+ *      that the VP Operations approved it), marks it `sap_create_status =
+ *      Queued` and raises the flag on "SAP Item Category Sync Control".
  *   3. On the SAP server, the flagged sync creates the item in that SAP company
  *      with the company's next item code (ENG-437, EL-20, or SAP's automatic
  *      series), creates its ERPNext copy "<abbr>-<SAP code>", fills in
@@ -78,6 +78,7 @@ const FIELDS = [
   "sap_create_status",
   "sap_create_error",
   "sap_response",
+  "opening_qty",
   "modified",
 ];
 
@@ -88,7 +89,8 @@ const forbidden = (message) => Object.assign(new Error(message), { status: 403 }
 
 /** What each state is waiting for, in the words the screen shows. */
 const waitingOn = (row) => {
-  if (row.workflow_state === "Awaiting Approval") return "The VP Operations to approve it";
+  // Only requests raised before 9 Oct 2026 can still be here: adding an item approves it at once.
+  if (row.workflow_state === "Awaiting Approval") return "Raised before approvals were removed - add it again from Engineering Stock";
   if (row.workflow_state === "Approved") {
     if (row.sap_create_status === "Failed") return "The Maintenance Manager to fix it and send it to SAP again";
     return "The SAP server to create it in SAP";
@@ -115,6 +117,7 @@ const toSummary = (row) => ({
   brand: row.brand || "",
   rackLocation: row.rack_location || "",
   minStock: Number(row.min_stock || 0),
+  openingQty: Number(row.opening_qty || 0),
   description: row.description || "",
   reason: row.reason || "",
   raisedBy: row.raised_by,
@@ -255,14 +258,27 @@ const checkName = ({ proposedName, naming }) => {
 };
 
 /**
- * Raises a request (the Maintenance Manager). The SOP name becomes SAP's
- * item description; everything else is checked against SAP's own lists for the
+ * Adds an item (the Maintenance Manager). The SOP name becomes SAP's item
+ * description; everything else is checked against SAP's own lists for the
  * chosen company.
+ *
+ * No approval since 9 Oct 2026: the request is approved in the same call - by
+ * the integration account, through the workflow, so ERPNext still stamps the
+ * step - and queued for the SAP server, which creates the item in SAP and then
+ * in ERPNext. The record stays as the item's creation history and as the place
+ * a SAP refusal is shown.
+ *
+ * HSN and tax rate may be left empty: an item put on the shelf with no bill
+ * has neither. Its first goods receipt fills them in from the bill.
+ * `openingQty` is stock already on the shelf; the sync receives it at nil value
+ * once the item exists in SAP.
  */
 export const raiseRequest = async (body = {}) => {
   const name = checkName(body);
   const sap = await checkSapFields(body);
   const brand = await ensureBrand(body.brand);
+  const openingQty = Number(body.openingQty || 0);
+  if (!Number.isFinite(openingQty) || openingQty < 0) throw badRequest("The opening quantity must be zero or more.");
 
   const created = await createDoc(DOCTYPE, {
     doctype: DOCTYPE,
@@ -277,10 +293,18 @@ export const raiseRequest = async (body = {}) => {
     uom: resolveUom(sap.fields.sap_uom).uom,
     brand,
     description: name.proposed_name,
+    opening_qty: openingQty,
     raised_by: body.raisedBy,
     raised_at: now(),
+    decided_by: body.raisedBy,
+    decided_at: now(),
+    decision_note: "Added directly in Engineering Stock - no approval step since 9 Oct 2026.",
+    sap_create_status: "Queued",
   });
 
+  const fresh = await getDoc(DOCTYPE, created.name);
+  await callMethod("frappe.model.workflow.apply_workflow", { doc: fresh, action: "Approve" });
+  await raiseSapFlag(body.raisedBy);
   return getRequest(created.name);
 };
 

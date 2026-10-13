@@ -42,6 +42,19 @@ const COLUMNS = [
     text: true,
     value: (p) => String(p.category || "").toLowerCase(),
   },
+  // SAP's U_SubTypeA and U_SubTypeB, A first: A is how the store looks things up.
+  {
+    key: "subCategory",
+    label: "Sub-category A",
+    text: true,
+    value: (p) => String(p.subCategory || "").toLowerCase(),
+  },
+  {
+    key: "subCategoryB",
+    label: "Sub-category B",
+    text: true,
+    value: (p) => String(p.subCategoryB || "").toLowerCase(),
+  },
   {
     key: "storeRoom",
     label: "Company",
@@ -168,6 +181,7 @@ const LowStockReport = () => {
         product.name,
         product.category,
         product.subCategory,
+        product.subCategoryB,
         product.rackNumber,
       ].some((field) => String(field || "").toLowerCase().includes(term));
     });
@@ -212,7 +226,8 @@ const LowStockReport = () => {
       "Code",
       "Engineering Stock",
       "Category",
-      "Sub-Category",
+      "Sub-category A",
+      "Sub-category B",
       "Company",
       "Rack",
       "In Stock",
@@ -233,6 +248,7 @@ const LowStockReport = () => {
         product.name,
         product.category,
         product.subCategory,
+        product.subCategoryB,
         product.storeRoom,
         product.rackNumber,
         product.quantity ?? 0,
@@ -408,7 +424,7 @@ const LowStockReport = () => {
         </div>
       ) : (
         <>
-          {/* Phone: the same rows, re-laid as cards. Eleven columns on a 390px
+          {/* Phone: the same rows, re-laid as cards. Thirteen columns on a 390px
               screen is a sideways scroll and nothing else, so each shortfall
               gets a card and every cell keeps its column header as a label. */}
           <div className="space-y-3 md:hidden">
@@ -445,12 +461,11 @@ const LowStockReport = () => {
                     <CardRow label="Reorder Cost">
                       {product.unitCost ? formatCurrency(reorderCostOf(product)) : "—"}
                     </CardRow>
-                    <CardRow label="Category">
-                      <div>{product.category}</div>
-                      {product.subCategory && (
-                        <div className="text-[11px] text-slate-500">{product.subCategory}</div>
-                      )}
-                    </CardRow>
+                    <CardRow label="Category">{product.category || "—"}</CardRow>
+                    <CardRow label="Sub-category A">{product.subCategory || "—"}</CardRow>
+                    {product.subCategoryB && (
+                      <CardRow label="Sub-category B">{product.subCategoryB}</CardRow>
+                    )}
                     <CardRow label="Company">
                       <span className="badge badge-slate badge-soft">{product.storeRoom}</span>
                     </CardRow>
@@ -486,11 +501,10 @@ const LowStockReport = () => {
                           <div className="cell-title max-w-[280px] truncate" title={product.name}>
                             {product.name}
                           </div>
-                          {product.subCategory && (
-                            <div className="text-[11px] text-slate-500">{product.subCategory}</div>
-                          )}
                         </td>
                         <td className="text-slate-600">{product.category}</td>
+                        <td className="text-slate-600">{product.subCategory || "—"}</td>
+                        <td className="text-slate-600">{product.subCategoryB || "—"}</td>
                         <td>
                           <span className="badge badge-slate badge-soft">{product.storeRoom}</span>
                         </td>

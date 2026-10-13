@@ -1,4 +1,4 @@
-import { getDoc, updateDoc } from "../integrations/erpnext/client.js";
+import { createDoc, getDoc, listDocs, updateDoc } from "../integrations/erpnext/client.js";
 import { erpNow } from "../integrations/erpnext/time.js";
 import { catalogProducts, forgetCatalog, levelKey } from "./catalog.js";
 
@@ -18,10 +18,12 @@ import { catalogProducts, forgetCatalog, levelKey } from "./catalog.js";
  * Sync-SapItemCategories.ps1, which patches those three SAP fields and clears
  * the pending mark. (The item master sync, deployed on the SAP server.)
  *
- * Level 1 can only move an item between the engineering item groups that
- * already exist in its own SAP company - creating or renaming a SAP item group
- * is SAP configuration and stays in the SAP client. Levels 2 and 3 are free
- * text in SAP (50 characters), so they can be typed, and renamed in bulk.
+ * Level 1 moves an item between its own SAP company's engineering item groups.
+ * A new group is asked for here (requestItemGroup) and created in SAP by the
+ * same sync, with the accounts of the company's existing engineering group
+ * (decided 9 Oct 2026); renaming a group stays in the SAP client. Levels 2 and
+ * 3 are free text in SAP (50 characters), so they can be typed, and renamed in
+ * bulk - a new value reaches SAP with the item it is given to.
  */
 export const CONTROL = "SAP Item Category Sync Control";
 
@@ -192,7 +194,7 @@ export const updateItemCategory = async (code, { category, subCategory, subCateg
   if (!group) {
     throw badRequest(
       `"${wanted}" is not an engineering item group of ${options.company} in SAP. ` +
-        `Choose one of: ${options.groups.join(", ")}. New item groups are created in the SAP client.`
+        `Choose one of: ${options.groups.join(", ")}. A new item group is added on the Categories page first.`
     );
   }
   const a = checkText("Sub-category A", subCategory);
@@ -343,6 +345,89 @@ export const updateSapItem = async (code, body = {}, user, { resolveName, ensure
   return (await catalogProducts()).find((p) => p.code === code);
 };
 
+/* ------------------------------------------------------------- new item groups */
+
+const GROUP_REQUEST = "CMMS SAP Item Group Request";
+
+/** SAP's OITB.ItmsGrpNam is 20 characters. */
+const SAP_GROUP_NAME_MAX = 20;
+
+const toGroupRequest = (row) => ({
+  id: row.name,
+  company: row.company,
+  name: row.group_name,
+  prefix: row.code_prefix || "",
+  status: row.status || "Queued",
+  sapGroupCode: row.sap_group_code || null,
+  error: row.error || "",
+  raisedBy: row.raised_by || "",
+  raisedAt: row.raised_at || null,
+});
+
+export const listItemGroupRequests = async ({ limit = 50 } = {}) =>
+  (
+    await listDocs(GROUP_REQUEST, {
+      fields: ["name", "company", "group_name", "code_prefix", "status", "sap_group_code", "error", "raised_by", "raised_at"],
+      orderBy: "creation desc",
+      limit,
+    })
+  ).map(toGroupRequest);
+
+/**
+ * Asks for a new engineering item group in one SAP company.
+ *
+ * The sync creates it in SAP copying every account and setting of the
+ * company's existing engineering group (`template`, by default the one most of
+ * its items are in), then publishes it, so items can be filed under it.
+ *
+ * @param prefix  item code prefix for items made in it ("ENG-", "EL-"), or "" for SAP's automatic numbering
+ */
+export const requestItemGroup = async ({ company, name, prefix = "", template = "" } = {}, user) => {
+  const abbr = tidy(company).toUpperCase();
+  const options = (await itemMasterOptions())[abbr];
+  if (!options) throw badRequest("Choose the SAP company the item group is for.");
+  const label = options.company || abbr;
+
+  const groupName = tidy(name);
+  if (!groupName) throw badRequest("Give the new item group a name.");
+  if (groupName.length > SAP_GROUP_NAME_MAX) throw badRequest(`An item group name can be at most ${SAP_GROUP_NAME_MAX} characters - that is SAP's limit.`);
+  if ((options.groups || []).some((g) => levelKey(g.name) === levelKey(groupName))) {
+    throw badRequest(`${label} already has an item group called "${groupName}".`);
+  }
+  const waiting = await listDocs(GROUP_REQUEST, {
+    fields: ["name"],
+    filters: [[GROUP_REQUEST, "company", "=", abbr], [GROUP_REQUEST, "group_name", "=", groupName], [GROUP_REQUEST, "status", "in", ["Queued", "Failed"]]],
+    limit: 1,
+  });
+  if (waiting.length) throw badRequest(`"${groupName}" is already waiting to be created in SAP (${waiting[0].name}).`);
+
+  const cleanPrefix = tidy(prefix).toUpperCase();
+  if (cleanPrefix && !/^[A-Z]{1,6}-$/.test(cleanPrefix)) throw badRequest(`A code prefix is letters followed by a dash, e.g. "ENG-" or "EL-" - or leave it empty for SAP's automatic numbering.`);
+
+  // The template: the group named, else the group with the most of this company's items.
+  const products = await catalogProducts();
+  const counts = new Map();
+  for (const p of products) if (p.sapCategory?.company === abbr) counts.set(levelKey(p.sapCategory.group), (counts.get(levelKey(p.sapCategory.group)) || 0) + 1);
+  const groups = options.groups || [];
+  if (!groups.length) throw badRequest(`${label} has no engineering item group in SAP to copy the accounts from.`);
+  const base =
+    groups.find((g) => levelKey(g.name) === levelKey(template)) ||
+    [...groups].sort((x, y) => (counts.get(levelKey(y.name)) || 0) - (counts.get(levelKey(x.name)) || 0))[0];
+
+  const created = await createDoc(GROUP_REQUEST, {
+    doctype: GROUP_REQUEST,
+    company: abbr,
+    group_name: groupName,
+    code_prefix: cleanPrefix,
+    template_group_code: Number(base.code),
+    status: "Queued",
+    raised_by: user?.email || "",
+    raised_at: erpNow(),
+  });
+  await raiseFlag(user?.email);
+  return toGroupRequest(await getDoc(GROUP_REQUEST, created.name));
+};
+
 /* ------------------------------------------------------------- the tree */
 
 /**
@@ -353,7 +438,11 @@ export const updateSapItem = async (code, body = {}, user, { resolveName, ensure
  * in use. Items not mirrored from SAP are counted apart, not filed.
  */
 export const readSapTree = async () => {
-  const [products, map] = await Promise.all([catalogProducts(), engineeringGroups()]);
+  const [products, map, groupRequests] = await Promise.all([
+    catalogProducts(),
+    engineeringGroups(),
+    listItemGroupRequests().catch(() => []),
+  ]);
 
   const tree = new Map();
   const node = (name) => {
@@ -406,6 +495,8 @@ export const readSapTree = async () => {
 
   return {
     categories,
+    // New groups asked for and not yet created in SAP (and failures to fix).
+    groupRequests: groupRequests.filter((r) => r.status !== "Created"),
     companies: Object.fromEntries(Object.entries(map).map(([abbr, e]) => [abbr, { company: e.company, sapDb: e.sap_db }])),
     totals: {
       items: products.length - notFromSap,

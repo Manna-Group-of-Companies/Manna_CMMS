@@ -25,6 +25,16 @@ export const PRODUCTION_MANAGER = "Production Manager";
 export const HIGHER_MANAGEMENT = "Higher Management";
 /** The Vice President, Operations. */
 export const VP_OPERATIONS = "VP Operations";
+/**
+ * A hand on the maintenance team — a fitter or electrician who clocks in and
+ * out and applies for leave on the phone. Sunny, Ramesh and Saji as of
+ * October 2026.
+ *
+ * Deliberately not in `ROLES` below: that list stands for the people who work
+ * the stores and the plants, and it is handed whole to the catalog and the
+ * asset register. A member clocks in; they do not browse the catalog.
+ */
+export const MAINTENANCE_MEMBER = "Maintenance Member";
 
 export const ROLES = [
   MANAGER,
@@ -109,6 +119,18 @@ export const VIEWS = {
   preventive: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR],
 
   /**
+   * The maintenance team's attendance and leave, on the phone only.
+   *
+   * A member punches in and out, looks at their month and applies for leave;
+   * the Maintenance Manager decides their requests and keeps their leave
+   * schemes. The Admin is here as the usual fallback. Which side of that a
+   * role is on is decided per route in routes/attendanceRoutes.js — this only
+   * says who sees the screen at all. Brought across from the field-sales app
+   * on 12 Oct 2026.
+   */
+  attendance: [MAINTENANCE_MEMBER, MAINTENANCE_MANAGER, MANAGER],
+
+  /**
    * The three screens that have no content yet. Kept to the Admin until they
    * do, rather than shown half-built to people who would have to be told to
    * ignore them.
@@ -143,7 +165,8 @@ export const VIEWS = {
  * a name here is the whole of putting one back.
  */
 // itemNaming released 25 Sep 2026 so the VP Operations can approve new items (made in SAP on approval).
-export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "itemNaming"]);
+// attendance released 12 Oct 2026: it is the whole of what a Maintenance Member has, so it ships with them.
+export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "itemNaming", "attendance"]);
 
 
 /**

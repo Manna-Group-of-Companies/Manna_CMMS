@@ -24,6 +24,7 @@ import {
 import {
   categoryOptionsFor,
   categorySyncStatus,
+  raiseSapFlag,
   updateItemCategory,
   updateSapItem,
 } from "../repository/sapCategories.js";
@@ -143,6 +144,20 @@ export const getCategorySync = async (req, res) => {
     res.json(await categorySyncStatus());
   } catch (error) {
     sendCategoryError(res, error, "Could not read the SAP category sync status");
+  }
+};
+
+// @desc    Ask the SAP server for a sync now: pushes what is waiting (items, edits,
+//          receipts, purchase requests) and fetches the engineering items and their
+//          stock from SAP. Raises the flag only; the poller owns the status.
+// @route   POST /api/products/category-sync
+// @access  Private (Maintenance Manager)
+export const requestCategorySync = async (req, res) => {
+  try {
+    await raiseSapFlag(req.user?.email);
+    res.json(await categorySyncStatus());
+  } catch (error) {
+    sendCategoryError(res, error, "Could not ask the SAP server for a sync");
   }
 };
 

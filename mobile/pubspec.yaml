@@ -40,6 +40,10 @@ dependencies:
   intl: ^0.20.3
   # Camera / gallery capture for product photos.
   image_picker: ^1.2.0
+  # Where the phone was when a maintenance member punched in or out. Best
+  # effort only - see lib/core/location_fix.dart; a missing fix never blocks
+  # a punch.
+  geolocator: ^14.0.3
   package_info_plus: ^10.2.1
   path_provider: ^2.1.6
   crypto: ^3.0.7

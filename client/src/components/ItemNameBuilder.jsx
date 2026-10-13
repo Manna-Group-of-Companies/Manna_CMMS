@@ -193,7 +193,7 @@ const ItemNameBuilder = ({ value, onChange, onApply, disabled = false }) => {
         </h4>
         <p className="text-[11px] text-slate-500 mt-0.5">
           Fill in what applies. Dimensions first, then rating, item name, type, material and
-          item code — the name assembles itself below.
+          serial number — the name assembles itself below.
         </p>
       </div>
 
@@ -299,7 +299,7 @@ const ItemNameBuilder = ({ value, onChange, onApply, disabled = false }) => {
           />
         </div>
         <div className="sm:col-span-2">
-          <label className={label}>Item Code</label>
+          <label className={label}>Serial Number</label>
           <input
             type="text"
             value={naming.itemCode}

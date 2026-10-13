@@ -4,7 +4,6 @@ import {
   Boxes,
   CalendarCheck,
   ClipboardCheck,
-  ClipboardList,
   Contact,
   Factory,
   FolderTree,
@@ -12,6 +11,7 @@ import {
   Hammer,
   KeyRound,
   PackageOpen,
+  ShoppingCart,
   TrendingDown,
   Wrench,
 } from "lucide-react";
@@ -38,6 +38,12 @@ export const PRODUCTION_MANAGER = "Production Manager";
 export const HIGHER_MANAGEMENT = "Higher Management";
 /** The Vice President, Operations. */
 export const VP_OPERATIONS = "VP Operations";
+/**
+ * A hand on the maintenance team. Served by the phone app only — they clock
+ * in and out there — so the web console offers them nothing and lands them on
+ * the no-access page. Not in `ROLES`, which is handed whole to the catalog.
+ */
+export const MAINTENANCE_MEMBER = "Maintenance Member";
 
 export const ROLES = [
   MANAGER,
@@ -68,22 +74,9 @@ export const VIEWS = {
    */
   categories: [MAINTENANCE_MANAGER, VP_OPERATIONS, SUPERVISOR],
   lowStock: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, HIGHER_MANAGEMENT],
-  /**
-   * The item-naming queue.
-   *
-   * Raised by maintenance, agreed by operations. The plant heads were on this
-   * list and are deliberately off it: every naming request went to all four of
-   * them plus the Admin, and a queue that is everybody's is nobody's. The
-   * catalog is not split by plant either, so a plant head approving a name was
-   * approving it for the whole group.
-   *
-   * The Maintenance Manager is new here. They raise every one of these and
-   * could not previously see where any of them got to, which was a gap rather
-   * than a decision.
-   */
-  // 25 Sep 2026: the Maintenance Manager creates items and the VP Operations approves them,
-  // so the queue is theirs. Was [MANAGER, MAINTENANCE_MANAGER, VP_OPERATIONS, HIGHER_MANAGEMENT, SUPERVISOR].
-  itemNaming: [MAINTENANCE_MANAGER, VP_OPERATIONS],
+  // itemNaming (the "New Items" page, /requests) removed 10 Oct 2026: it was the VP Operations'
+  // approval queue for new items, and since 9 Oct 2026 items go straight to SAP with no approval.
+  // The server keeps its entry, which still guards the /naming-requests read API.
   breakdowns: [MANAGER, MAINTENANCE_MANAGER, HIGHER_MANAGEMENT, PRODUCTION_MANAGER, SUPERVISOR],
   assets: ROLES,
   breakdownReport: [MANAGER, MAINTENANCE_MANAGER, VP_OPERATIONS],
@@ -99,6 +92,13 @@ export const VIEWS = {
    */
   maintenanceRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR],
   preventive: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR],
+
+  /**
+   * The maintenance team's attendance and leave. Phone only — there is no
+   * page for it here and no NAV entry — but the key is kept so this file holds
+   * the same set of screens as the server's, which is what the mirror is for.
+   */
+  attendance: [MAINTENANCE_MEMBER, MAINTENANCE_MANAGER, MANAGER],
 
   /** No content behind these yet, so they stay with the Admin until there is. */
   stockAudits: [MANAGER],
@@ -125,8 +125,8 @@ export const VIEWS = {
  * exactly what has to be reconstructed when a screen is turned back on. Adding
  * a name here is the whole of putting one back.
  */
-// itemNaming released 25 Sep 2026 so the VP Operations can approve new items (made in SAP on approval).
-export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "itemNaming"]);
+// itemNaming was released 25 Sep 2026 for the VP Operations to approve new items, and removed 10 Oct 2026.
+export const RELEASED = new Set(["breakdowns", "maintenanceRequests"]);
 
 
 /**
@@ -166,9 +166,10 @@ export const consoleFor = (role) => (role === SUPERVISOR ? "/supervisor" : "/adm
  */
 export const NAV = [
   { view: "engineeringStock", label: "Engineering Stock", path: "products", icon: Boxes },
+  { view: "engineeringStock", label: "Goods Receipts", path: "goods-receipts", icon: ClipboardCheck },
+  { view: "engineeringStock", label: "Purchase Requests", path: "purchase-requests", icon: ShoppingCart },
   { view: "categories", label: "Categories", path: "categories", icon: FolderTree },
   { view: "lowStock", label: "Low Stock", path: "low-stock", icon: AlertTriangle },
-  { view: "itemNaming", label: "Item Naming", path: "requests", icon: ClipboardList },
   { view: "breakdowns", label: "Breakdowns", path: "breakdowns", icon: Wrench },
   {
     view: "maintenanceRequests",

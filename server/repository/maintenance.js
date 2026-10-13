@@ -10,9 +10,24 @@ import {
 } from "../integrations/erpnext/client.js";
 import { STAGES, mayTake, missingFor, nextActionFor } from "../integrations/erpnext/breakdownStages.js";
 import { plantsFor } from "./plantScope.js";
+import {
+  cancelIssue,
+  draftIssue,
+  issueForBreakdown,
+  prepareIssue,
+  releaseIssue,
+  resendIssue,
+  sparesFor,
+} from "./goodsIssues.js";
 
 // Re-exported so the breakdown controller keeps its one import.
-export { plantsFor };
+export { plantsFor, resendIssue };
+
+/** The spares a breakdown can take: its plant's store items, with what is available of each. */
+export const sparesForBreakdown = async (id) => {
+  const doc = await getDoc("CMMS Breakdown", id);
+  return sparesFor(doc.plant);
+};
 import { erpNow } from "../integrations/erpnext/time.js";
 import { attach, detach, listAttachments } from "./attachments.js";
 
@@ -222,6 +237,11 @@ export const getBreakdown = async (id) => {
       description: s.description,
       qtyRequired: Number(s.qty_required || 0),
     })),
+    // Where the spares' goods issue stands in SAP. Only looked up when a spare
+    // was picked from the store; free-text spares from before 10 Oct 2026 had none.
+    sparesIssue: (doc.spares_required || []).some((s) => s.item_code)
+      ? await issueForBreakdown(id)
+      : null,
     preventionActions: (doc.prevention_actions || []).map((a) => ({
       actionType: a.action_type,
       description: a.description,
@@ -301,25 +321,6 @@ export const applyAction = async (id, action) => {
   }
   return after;
 };
-
-/**
- * The spares used on a repair.
- *
- * Deliberately not checked against the catalog. The engineering store is being
- * renamed and recounted, so an item code typed here may not match anything yet
- * - and refusing a spare because the catalog has not caught up would mean the
- * spare simply goes unrecorded. Description and quantity are what matter; the
- * code is free text for whoever has one to hand.
- */
-const toSpareRows = (spares = []) =>
-  (spares || [])
-    .filter((s) => String(s.description || "").trim())
-    .map((s) => ({
-      doctype: "CMMS Breakdown Spare",
-      item_code: String(s.item_code || "").trim(),
-      description: String(s.description).trim(),
-      qty_required: Number(s.qty_required || 0),
-    }));
 
 /** Prevention actions, normalised for ERPNext's child table. */
 const toPreventionRows = (actions = []) =>
@@ -401,8 +402,18 @@ export const saveAndAdvance = async (id, action, fields = {}, user = {}) => {
     if (fields[field] !== undefined) edits[field] = fields[field];
   }
 
+  /**
+   * The spares used on a repair, picked from the plant's store (10 Oct 2026).
+   *
+   * They used to be free text, unchecked, while the catalog was being renamed
+   * and recounted. The catalog now mirrors SAP, and the spares are issued in
+   * SAP against the breakdown, so each one must be a store item and no more
+   * than is available of it. Checked before anything is written.
+   */
+  let issue = null;
   if (edits.spares_required) {
-    edits.spares_required = toSpareRows(edits.spares_required);
+    issue = await prepareIssue(doc.plant, edits.spares_required);
+    edits.spares_required = issue.rows;
   }
   if (edits.prevention_actions) {
     edits.prevention_actions = toPreventionRows(edits.prevention_actions);
@@ -468,9 +479,30 @@ export const saveAndAdvance = async (id, action, fields = {}, user = {}) => {
 
   Object.assign(edits, stage.stamp(user));
 
-  if (Object.keys(edits).length) await updateDoc("CMMS Breakdown", id, edits);
+  // The spares' goods issue is written first, held back from SAP, so a repair
+  // the workflow refuses takes nothing off the shelf: it is cancelled if the step
+  // fails, and released to SAP only once the breakdown has moved on.
+  const draft = issue?.lines.length
+    ? await draftIssue({ company: issue.company, lines: issue.lines, breakdown: doc, user })
+    : null;
 
-  return applyAction(id, action);
+  let after;
+  try {
+    if (Object.keys(edits).length) await updateDoc("CMMS Breakdown", id, edits);
+    after = await applyAction(id, action);
+  } catch (error) {
+    if (draft) await cancelIssue(draft.name);
+    throw error;
+  }
+
+  if (!draft) return after;
+  try {
+    await releaseIssue(draft.name, user);
+  } catch (error) {
+    // The repair is saved; the issue stays Draft and the breakdown offers to send it.
+    console.warn(`${draft.name} saved but not sent to SAP:`, error.message);
+  }
+  return { ...after, sparesIssue: await issueForBreakdown(id) };
 };
 
 /* --------------------------------------------- what changed, per machine */

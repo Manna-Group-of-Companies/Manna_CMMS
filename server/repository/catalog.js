@@ -456,15 +456,16 @@ export const listSubCategories = async (category = "") => {
 };
 
 /**
- * Level-3 values (SAP U_SubTypeB) in use under one category and sub-category.
- * Empty without both: a third-level list across the whole catalog means nothing.
+ * Level-3 values (SAP U_SubTypeB) in use under one Sub-category A, narrowed to
+ * a category when one is given. Sub-category A leads: B means nothing without
+ * the A above it, but an A is a fine place to start without picking a group.
  */
 export const listSubCategoriesB = async (category = "", subCategory = "") => {
-  if (!category || !subCategory) return [];
+  if (!subCategory) return [];
   const products = await readCatalog();
   const scoped = products.filter(
     (p) =>
-      levelKey(p.category) === levelKey(category) &&
+      (!category || levelKey(p.category) === levelKey(category)) &&
       levelKey(p.subCategory) === levelKey(subCategory)
   );
   return [...new Set(scoped.map((p) => p.subCategoryB).filter(Boolean))].sort((a, b) =>

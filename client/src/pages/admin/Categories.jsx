@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ChevronRight, FolderTree, Loader2, Merge, Pencil, RefreshCw, Search, X } from "lucide-react";
+import { AlertTriangle, ChevronRight, FolderTree, Loader2, Merge, Pencil, Plus, RefreshCw, Search, X } from "lucide-react";
 
 import API from "../../services/api";
 import { useAuth, MAINTENANCE_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import CategorySyncNote from "../../components/CategorySyncNote";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 
 /**
  * The engineering catalog's categories, as SAP files them. Three levels:
@@ -15,8 +16,10 @@ import CategorySyncNote from "../../components/CategorySyncNote";
  *
  * Read from the items themselves (GET /api/taxonomy/sap). Renaming a level-2 or
  * level-3 value rewrites every item under it here at once, and SAP follows
- * through the flagged category sync on the SAP server. Item groups are SAP
- * configuration, so level 1 is shown but renamed in the SAP client.
+ * through the flagged category sync on the SAP server. Since 9 Oct 2026 the
+ * Maintenance Manager can ask for a new item group (level 1) here: the SAP
+ * server creates it in SAP, copying the G/L accounts and settings of one of the
+ * company's groups, within a minute. Renaming a group stays in the SAP client.
  *
  * Spellings that differ only in capitals ("Tools", "TOOLS") are one category
  * here, shown under the spelling most items use.
@@ -27,7 +30,8 @@ const label = (name) => name || "(none)";
 
 const Categories = () => {
   const { user } = useAuth();
-  // Kept in step with PUT /api/taxonomy/sap/rename (Maintenance Manager only).
+  // Kept in step with PUT /api/taxonomy/sap/rename and POST /api/taxonomy/sap/groups
+  // (Maintenance Manager only).
   const canEdit = user?.role === MAINTENANCE_MANAGER;
 
   const [tree, setTree] = useState(null);
@@ -37,10 +41,12 @@ const Categories = () => {
   const [selected1, setSelected1] = useState("");
   const [selected2, setSelected2] = useState(null); // null = nothing picked; "" = "(none)"
   const [renaming, setRenaming] = useState(null);
+  const [addingGroup, setAddingGroup] = useState(false);
   const [syncKey, setSyncKey] = useState(0);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // [silent] is the poll while a new group waits for SAP: no spinner, no sync-note re-read.
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const { data } = await API.get("/taxonomy/sap");
       setTree(data);
@@ -49,16 +55,22 @@ const Categories = () => {
         data.categories.some((c) => c.name === current) ? current : data.categories[0]?.name || ""
       );
     } catch (err) {
-      setError(err.response?.data?.message || `Cannot reach the server at ${API.defaults.baseURL}.`);
+      if (!silent) setError(err.response?.data?.message || `Cannot reach the server at ${API.defaults.baseURL}.`);
     } finally {
-      setLoading(false);
-      setSyncKey((k) => k + 1);
+      if (!silent) {
+        setLoading(false);
+        setSyncKey((k) => k + 1);
+      }
     }
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // A new item group takes the SAP server about a minute; re-read until it is there.
+  const groupRequests = tree?.groupRequests || [];
+  useAutoRefresh(() => load({ silent: true }), { enabled: groupRequests.some((g) => g.status === "Queued") });
 
   const groups = useMemo(() => {
     if (!tree) return [];
@@ -98,14 +110,42 @@ const Categories = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn btn-sm btn-neutral" onClick={load} disabled={loading}>
+          <button className="btn btn-sm btn-neutral" onClick={() => load()} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </button>
+          {canEdit && (
+            <button className="btn btn-sm btn-primary" onClick={() => setAddingGroup(true)}>
+              <Plus className="h-4 w-4" />
+              New item group
+            </button>
+          )}
         </div>
       </div>
 
       <CategorySyncNote refreshKey={syncKey} />
+
+      {groupRequests.length > 0 && (
+        <div className="table-card">
+          <div className="p-3 border-b border-slate-200">
+            <p className="eyebrow">New item groups · waiting for SAP</p>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {groupRequests.map((g) => (
+              <li key={g.id} className="px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="text-sm font-semibold text-slate-800">{g.name}</span>
+                <span className="text-[12px] text-slate-500">
+                  {companyName(g.company)} · {g.prefix ? `codes ${g.prefix}…` : "SAP automatic numbering"}
+                </span>
+                <span className={`badge ${g.status === "Failed" ? "badge-rose" : "badge-amber badge-soft"}`}>
+                  {g.status === "Failed" ? "Failed" : "Waiting for the SAP server"}
+                </span>
+                {g.error && <span className="basis-full text-[12px] text-rose-700">SAP said: {g.error}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {error && (
         <div className="note note-rose">
@@ -177,8 +217,9 @@ const Categories = () => {
                 )}
               </ul>
               <p className="px-4 py-2.5 text-[11px] text-slate-500 border-t border-slate-100">
-                Item groups are SAP configuration: add or rename them in the SAP client. An item is moved between its
-                company's groups from the catalog (the folder button on the item).
+                {canEdit ? "New item groups are created here (New item group); " : "New item groups are created here by the Maintenance Manager; "}
+                renaming a group stays in the SAP client. An item is moved between its company's groups from the catalog
+                (the folder button on the item).
               </p>
             </div>
 
@@ -221,6 +262,16 @@ const Categories = () => {
           onClose={() => setRenaming(null)}
           onSaved={() => {
             setRenaming(null);
+            load();
+          }}
+        />
+      )}
+
+      {addingGroup && (
+        <NewGroupModal
+          onClose={() => setAddingGroup(false)}
+          onSaved={() => {
+            setAddingGroup(false);
             load();
           }}
         />
@@ -356,6 +407,189 @@ const RenameModal = ({ level, category, subCategory, from, siblings, onClose, on
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving || !name.trim() || name.trim() === from}>
             {saving ? "Saving…" : clash ? `Merge into ${clash}` : "Rename"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+/** SAP's limit on an item group name. */
+const GROUP_NAME_MAX = 20;
+const OTHER = "__other";
+
+/** "ENG-437" -> "ENG-": the code prefixes a company's groups already number with. */
+const prefixesOf = (groups = []) => [
+  ...new Set(groups.map((g) => String(g.nextCode || "").replace(/\d+$/, "")).filter(Boolean)),
+];
+
+/**
+ * Asks the SAP server for a new engineering item group in one company. It is
+ * created in SAP with the G/L accounts and settings of the group it copies, and
+ * appears in the tree once SAP has it.
+ */
+const NewGroupModal = ({ onClose, onSaved }) => {
+  const { showToast } = useNotifications();
+  const [companies, setCompanies] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const [company, setCompany] = useState("");
+  const [name, setName] = useState("");
+  const [prefixChoice, setPrefixChoice] = useState("");
+  const [otherPrefix, setOtherPrefix] = useState("");
+  const [template, setTemplate] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
+
+  useEffect(() => {
+    API.get("/naming-requests/options")
+      .then(({ data }) => {
+        const list = Array.isArray(data) ? data : [];
+        setCompanies(list);
+        if (list.length === 1) pickCompany(list[0].abbr, list);
+      })
+      .catch((e) => setLoadError(e.response?.data?.message || "Could not load the SAP companies."));
+  }, []);
+
+  const chosen = (companies || []).find((c) => c.abbr === company) || null;
+  const prefixes = prefixesOf(chosen?.groups);
+  const clash = chosen?.groups.find((g) => g.name.toLowerCase() === name.trim().toLowerCase()) || null;
+  const prefix = prefixChoice === OTHER ? otherPrefix.trim().toUpperCase() : prefixChoice;
+
+  // A new company: its own groups, defaulting to the prefix most of them share.
+  function pickCompany(abbr, list = companies) {
+    const next = (list || []).find((c) => c.abbr === abbr);
+    setCompany(abbr);
+    setTemplate("");
+    setOtherPrefix("");
+    setPrefixChoice(prefixesOf(next?.groups)[0] || "");
+  }
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setProblem("");
+    if (prefixChoice === OTHER && !/^[A-Z]{1,6}-$/.test(prefix)) {
+      return setProblem('A code prefix is letters followed by a dash, e.g. "ENG-" or "EL-".');
+    }
+    setSaving(true);
+    try {
+      const { data } = await API.post("/taxonomy/sap/groups", { company, name: name.trim(), prefix, template });
+      showToast(`${data.name} sent to SAP. It appears under item groups once SAP has created it.`, "success");
+      onSaved();
+    } catch (err) {
+      setProblem(err.response?.data?.message || "Could not ask for the item group");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="modal max-w-lg" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="modal-head">
+          <h3 className="modal-title">New item group</h3>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="modal-body space-y-4">
+          <p className="text-[13px] text-slate-600">
+            Created in SAP by the SAP server within a minute, with the same G/L accounts as the group it copies. Items
+            can be filed under it once it is created.
+          </p>
+
+          {loadError && <div className="note note-rose text-sm">{loadError}</div>}
+          {!companies && !loadError && (
+            <div className="flex items-center gap-2 text-slate-500 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading SAP companies…
+            </div>
+          )}
+
+          {companies && (
+            <>
+              <div>
+                <label className="field-label" htmlFor="grp-company">SAP company *</label>
+                <select id="grp-company" className="field cursor-pointer" value={company} onChange={(e) => pickCompany(e.target.value)} required>
+                  <option value="">Choose…</option>
+                  {companies.map((c) => (
+                    <option key={c.abbr} value={c.abbr}>
+                      {c.company}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="field-label" htmlFor="grp-name">Group name *</label>
+                <input
+                  id="grp-name"
+                  className="field"
+                  value={name}
+                  maxLength={GROUP_NAME_MAX}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Pneumatics"
+                  disabled={!chosen}
+                  required
+                />
+                <div className="mt-1 flex justify-between gap-2 text-[11px]">
+                  <span className="text-rose-700">{clash ? `${chosen.company} already has “${clash.name}”.` : ""}</span>
+                  <span className="text-slate-400 shrink-0">{name.length}/{GROUP_NAME_MAX} (SAP's limit)</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="field-label" htmlFor="grp-prefix">Item code prefix</label>
+                <select id="grp-prefix" className="field cursor-pointer" value={prefixChoice} onChange={(e) => setPrefixChoice(e.target.value)} disabled={!chosen}>
+                  {prefixes.map((p) => (
+                    <option key={p} value={p}>
+                      {p} (as its other groups)
+                    </option>
+                  ))}
+                  <option value="">SAP automatic numbering</option>
+                  <option value={OTHER}>Other…</option>
+                </select>
+                {prefixChoice === OTHER && (
+                  <input
+                    className="field mono mt-2"
+                    value={otherPrefix}
+                    maxLength={7}
+                    onChange={(e) => setOtherPrefix(e.target.value.toUpperCase())}
+                    placeholder="e.g. PN-"
+                    required
+                  />
+                )}
+                <p className="mt-1 text-[11px] text-slate-500">
+                  {!prefix
+                    ? "SAP's automatic series gives items made in it their codes."
+                    : prefixes.includes(prefix)
+                      ? `Items made in it carry on the company's ${prefix} series (next ${chosen.groups.find((g) => g.nextCode.startsWith(prefix))?.nextCode}).`
+                      : `Items made in it get codes ${prefix}1, ${prefix}2… (or the next free number).`}
+                </p>
+              </div>
+
+              <div>
+                <label className="field-label" htmlFor="grp-template">Copy accounts and settings from</label>
+                <select id="grp-template" className="field cursor-pointer" value={template} onChange={(e) => setTemplate(e.target.value)} disabled={!chosen}>
+                  <option value="">Automatic (the group most of its items are in)</option>
+                  {(chosen?.groups || []).map((g) => (
+                    <option key={g.code} value={g.name}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
+
+          {problem && <div className="note note-rose text-sm">{problem}</div>}
+        </div>
+
+        <div className="modal-foot">
+          <button type="button" className="btn btn-neutral" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving || !chosen || !name.trim() || Boolean(clash)}>
+            {saving ? "Sending…" : "Create in SAP"}
           </button>
         </div>
       </form>

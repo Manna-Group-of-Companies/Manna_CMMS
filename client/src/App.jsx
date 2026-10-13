@@ -12,7 +12,6 @@ import BranchLayout from "./layouts/BranchLayout";
 import Login from "./pages/auth/Login";
 import ChecklistSheetPreview from "./pages/maintenance/ChecklistSheetPreview";
 import NoAccess from "./pages/auth/NoAccess";
-import NamingRequests from "./pages/admin/NamingRequests";
 import Categories from "./pages/admin/Categories";
 import AssetManagement from "./pages/maintenance/AssetManagement";
 import MaintenanceRequests from "./pages/maintenance/MaintenanceRequests";
@@ -20,6 +19,8 @@ import PreventiveMaintenance from "./pages/maintenance/PreventiveMaintenance";
 import BreakdownReport from "./pages/admin/BreakdownReport";
 import AdminProductList from "./pages/admin/ProductList";
 import AdminLowStock from "./pages/admin/LowStockReport";
+import GoodsReceipts from "./pages/admin/GoodsReceipts";
+import PurchaseRequests from "./pages/admin/PurchaseRequests";
 import ProductList from "./pages/supervisor/ProductList";
 import MyReturns from "./pages/supervisor/MyReturns";
 import BranchDashboard from "./pages/branch/BranchDashboard";
@@ -99,6 +100,28 @@ function App() {
                   </RequireView>
                 }
               />
+              {/* Stock brought in by goods receipt or as opening stock (no bill), and
+                  whether SAP has posted it. Reading follows Engineering Stock;
+                  entering them is the Maintenance Manager's (server-enforced). */}
+              <Route
+                path="goods-receipts"
+                element={
+                  <RequireView view="engineeringStock">
+                    <GoodsReceipts />
+                  </RequireView>
+                }
+              />
+              {/* Purchase requests sent to SAP, and where each stands. Reading
+                  follows Engineering Stock; raising them is the Maintenance
+                  Manager's (server-enforced). */}
+              <Route
+                path="purchase-requests"
+                element={
+                  <RequireView view="engineeringStock">
+                    <PurchaseRequests />
+                  </RequireView>
+                }
+              />
               <Route
                 path="categories"
                 element={
@@ -112,14 +135,6 @@ function App() {
                 element={
                   <RequireView view="lowStock">
                     <AdminLowStock />
-                  </RequireView>
-                }
-              />
-              <Route
-                path="requests"
-                element={
-                  <RequireView view="itemNaming">
-                    <NamingRequests />
                   </RequireView>
                 }
               />
@@ -237,10 +252,18 @@ function App() {
                 }
               />
               <Route
-                path="requests"
+                path="goods-receipts"
                 element={
-                  <RequireView view="itemNaming">
-                    <NamingRequests />
+                  <RequireView view="engineeringStock">
+                    <GoodsReceipts />
+                  </RequireView>
+                }
+              />
+              <Route
+                path="purchase-requests"
+                element={
+                  <RequireView view="engineeringStock">
+                    <PurchaseRequests />
                   </RequireView>
                 }
               />

@@ -13,5 +13,7 @@ data/
 # from the database whenever they are needed.
 exports/
 # Credentials copied aside during a key rotation. Never in the repo.
+# sap-tools\Set-ErpNextSecret.ps1 names its copies .env.bak-<timestamp>-secret (12 Oct 2026).
 .env.backup*
+.env.bak*
 .env.*.local

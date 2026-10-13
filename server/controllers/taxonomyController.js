@@ -1,5 +1,5 @@
 import * as taxonomy from "../repository/taxonomy.js";
-import { readSapTree, renameCategoryValue } from "../repository/sapCategories.js";
+import { listItemGroupRequests, readSapTree, renameCategoryValue, requestItemGroup } from "../repository/sapCategories.js";
 
 /**
  * The SAP three-level tree (item group > Sub-category A > Sub-category B),
@@ -22,6 +22,24 @@ export const sapTree = async (_req, res) => {
 };
 
 /** @route PUT /api/taxonomy/sap/rename  { level: 2|3, category, subCategory?, from, to } */
+/** New engineering item groups asked for, and where each stands in SAP. */
+export const sapGroupRequests = async (_req, res) => {
+  try {
+    res.json(await listItemGroupRequests());
+  } catch (error) {
+    failSap(res, error, "Could not load the item group requests");
+  }
+};
+
+/** Asks the SAP server to create a new engineering item group. */
+export const sapAddGroup = async (req, res) => {
+  try {
+    res.status(201).json(await requestItemGroup(req.body || {}, req.user));
+  } catch (error) {
+    failSap(res, error, "Could not ask for the item group");
+  }
+};
+
 export const sapRename = async (req, res) => {
   try {
     res.json(await renameCategoryValue(req.body || {}, req.user));

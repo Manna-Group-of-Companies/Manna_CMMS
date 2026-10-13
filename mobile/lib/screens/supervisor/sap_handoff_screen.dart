@@ -77,7 +77,7 @@ class _SapHandoffScreenState extends State<SapHandoffScreen> {
     return [
       product.name,
       'Code: ${product.code}',
-      if (naming?.itemCode.isNotEmpty == true) 'Item code: ${naming!.itemCode}',
+      if (naming?.itemCode.isNotEmpty == true) 'Serial number: ${naming!.itemCode}',
       'Category: ${product.category}'
           '${product.subCategory.isEmpty ? '' : ' / ${product.subCategory}'}',
       if (product.brand.isNotEmpty) 'Brand: ${product.brand}',

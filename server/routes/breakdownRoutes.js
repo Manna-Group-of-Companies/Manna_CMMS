@@ -13,6 +13,8 @@ import {
   attach,
   detach,
   verify,
+  spares,
+  resendSpares,
 } from "../controllers/breakdownController.js";
 import { protect, requireRole } from "../middleware/session.js";
 import { requireView } from "../config/access.js";
@@ -54,6 +56,13 @@ router.post("/", READ, REPORT, report);
 router.get("/:id", READ, detail);
 router.put("/:id", READ, update);
 router.post("/:id/action", READ, act);
+
+// The spares used on a repair are picked from the plant's store and issued in
+// SAP (10 Oct 2026). Recording the repair is the Manager's and the Maintenance
+// Manager's ("Machine Running" in breakdownStages.js), so these are theirs too.
+const REPAIR = requireRole("Manager", "Maintenance Manager");
+router.get("/:id/spares", READ, REPAIR, spares);
+router.post("/:id/spares-issue/resend", READ, REPAIR, resendSpares);
 
 // Attaching a file: the signed log sheet (maintenance's) and now a photo taken
 // when a breakdown is reported (the plant's). Only the Manager confirms he has

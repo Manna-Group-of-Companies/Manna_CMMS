@@ -421,8 +421,10 @@ export const BREAKDOWN_WORKFLOW = {
      */
     { state: "Reported", action: "Start Repair", next_state: "Under Repair", allowed: "Store Maintenance Manager", allow_self_approval: 1 },
     { state: "Under Repair", action: "Machine Running", next_state: "Repaired", allowed: "Store Maintenance Manager", allow_self_approval: 1 },
-    // Closing is the Manager's, not maintenance's: it is the check that a root
-    // cause and a prevention action were actually recorded rather than skipped.
+    // Closing records the root cause and a prevention action. The CMMS lets the
+    // Manager and, since 12 Oct 2026, the Maintenance Manager take it - enforced
+    // in breakdownStages.js, since every transition is applied by the
+    // integration account; this row documents the original intent.
     { state: "Repaired", action: "Close", next_state: "Closed", allowed: "Store Manager", allow_self_approval: 1 },
     // A report that turns out to be nothing. Available to whoever raised it.
     { state: "Reported", action: "Cancel", next_state: "Cancelled", allowed: "Plant Manager", allow_self_approval: 1 },

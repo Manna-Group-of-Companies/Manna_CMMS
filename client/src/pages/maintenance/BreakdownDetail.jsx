@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Circle,
   Loader2,
@@ -9,6 +10,7 @@ import {
   Plus,
   Printer,
   Repeat2,
+  Send,
   ShieldCheck,
   Trash2,
   Users,
@@ -226,7 +228,7 @@ const BreakdownDetail = ({ id, onClose, onChanged }) => {
 
               <CancelReport record={record} stages={stages} user={user} onDone={done} />
 
-              <Report record={record} />
+              <Report record={record} user={user} onChanged={load} />
             </div>
           </>
         )}
@@ -437,13 +439,29 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
     repeat_of: record.repeatOf || "",
   }));
 
+  // Only spares picked from the store come back into the form; free-text ones
+  // from before 10 Oct 2026 cannot be issued in SAP.
   const [spares, setSpares] = useState(() =>
-    (record.spares || []).map((s) => ({
-      item_code: s.itemCode,
-      description: s.description,
-      qty_required: s.qtyRequired,
-    }))
+    (record.spares || [])
+      .filter((s) => s.itemCode)
+      .map((s) => ({
+        item_code: s.itemCode,
+        description: s.description,
+        qty_required: s.qtyRequired,
+      }))
   );
+  // The plant's store: { company, companyName, items: [{ code, name, available, ... }] }.
+  const [spareStore, setSpareStore] = useState(null);
+  const [spareStoreError, setSpareStoreError] = useState("");
+  const asksSpares = has("spares_required");
+  useEffect(() => {
+    if (!asksSpares) return;
+    API.get(`/breakdowns/${record.id}/spares`)
+      .then(({ data }) => setSpareStore(data))
+      .catch((err) =>
+        setSpareStoreError(err.response?.data?.message || "Could not load the store's spares.")
+      );
+  }, [asksSpares, record.id]);
   const [crew, setCrew] = useState(() =>
     (record.repairedBy || []).map((w) => ({ ...w }))
   );
@@ -469,14 +487,37 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
 
   const submit = async (e) => {
     e.preventDefault();
-    setSaving(true);
     setProblem("");
     setMissing([]);
+
+    // The same check the server makes, before the round trip: every spare
+    // needs a quantity, and no more than the store has available.
+    if (asksSpares && spares.length) {
+      const byCode = new Map((spareStore?.items || []).map((i) => [i.code, i]));
+      const bad = spares.find((s) => {
+        const qty = Number(s.qty_required);
+        const item = byCode.get(s.item_code);
+        return !(qty > 0) || qty > (item?.available ?? 0) || (item?.whole && !Number.isInteger(qty));
+      });
+      if (bad) {
+        const item = byCode.get(bad.item_code);
+        setProblem(
+          `${bad.description}: enter a ${item?.whole ? "whole number" : "quantity"} above zero and no more than the ${
+            item?.available ?? 0
+          } available.`
+        );
+        return;
+      }
+    }
+    setSaving(true);
 
     const fields = {};
     for (const field of stage.fields) {
       if (field === "spares_required") {
-        fields.spares_required = spares.filter((s) => s.description?.trim());
+        fields.spares_required = spares.map((s) => ({
+          item_code: s.item_code,
+          qty_required: Number(s.qty_required),
+        }));
       } else if (field === "prevention_actions") {
         fields.prevention_actions = actions.filter((a) => a.description?.trim());
       } else if (field === "repaired_by") {
@@ -565,7 +606,14 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
           </Field>
         )}
 
-        {has("spares_required") && <Spares rows={spares} onChange={setSpares} />}
+        {asksSpares && (
+          <Spares
+            rows={spares}
+            onChange={setSpares}
+            store={spareStore}
+            loadError={spareStoreError}
+          />
+        )}
 
         {has("repaired_by") && <Crew rows={crew} onChange={setCrew} people={lookups.people} />}
 
@@ -709,68 +757,222 @@ const Field = ({ label, hint, required, invalid, children }) => (
   </div>
 );
 
+/** The dropdown lists this many at most; typing narrows it. */
+const MAX_SPARES_SHOWN = 100;
+
 /**
- * Spares needed for the repair.
+ * Spares used on the repair, picked from the plant's store (10 Oct 2026).
  *
- * The item code is optional. Half of what a stopped machine needs is not in
- * the catalog at all, and refusing to record it until somebody creates an Item
- * would mean it simply does not get recorded.
+ * They were free text while the catalog was being renamed and recounted. The
+ * catalog now mirrors SAP and saving the repair issues the spares in SAP, so
+ * each one is an item of the breakdown's company and its quantity cannot go
+ * above what is available there - the shelf, less what other breakdowns have
+ * taken that SAP has not posted yet. The server checks the same on save.
  */
-const Spares = ({ rows, onChange }) => {
+const Spares = ({ rows, onChange, store, loadError }) => {
+  const [term, setTerm] = useState("");
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+
+  const items = store?.items || null;
+  const byCode = useMemo(() => new Map((items || []).map((i) => [i.code, i])), [items]);
+  const picked = useMemo(() => new Set(rows.map((r) => r.item_code)), [rows]);
+  // Not picked already, and matching what is typed (name, code or SAP code).
+  const matches = useMemo(() => {
+    const q = term.trim().toLowerCase();
+    return (items || []).filter(
+      (i) =>
+        !picked.has(i.code) &&
+        (!q || [i.name, i.code, i.sapCode].some((v) => String(v || "").toLowerCase().includes(q)))
+    );
+  }, [items, term, picked]);
+  const shown = matches.slice(0, MAX_SPARES_SHOWN);
+
+  useEffect(() => {
+    if (open) document.getElementById(`spare-opt-${active}`)?.scrollIntoView({ block: "nearest" });
+  }, [active, open]);
+
   const set = (i, key, value) =>
     onChange(rows.map((r, n) => (n === i ? { ...r, [key]: value } : r)));
 
+  const add = (item) => {
+    if (!(item.available > 0)) return;
+    onChange([...rows, { item_code: item.code, description: item.name, qty_required: "" }]);
+    setTerm("");
+    setActive(0);
+    setOpen(false);
+  };
+
+  const onKey = (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!open) setOpen(true);
+      else setActive((i) => Math.min(i + 1, Math.max(shown.length - 1, 0)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter" && open) {
+      // Picks the highlighted spare; never submits the stage from here.
+      e.preventDefault();
+      if (shown[active]) add(shown[active]);
+    } else if (e.key === "Escape" && open) {
+      e.stopPropagation();
+      setOpen(false);
+    }
+  };
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <label className="field-label mb-0">
-          <Package className="inline h-3 w-3 mr-1" />
-          Spares used
-        </label>
-        <button
-          type="button"
-          className="btn btn-sm btn-neutral"
-          onClick={() => onChange([...rows, { item_code: "", description: "", qty_required: 1 }])}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Add
-        </button>
-      </div>
+      <label className="field-label" htmlFor="spare-search">
+        <Package className="inline h-3 w-3 mr-1" />
+        Spares used
+      </label>
+      <p className="mb-2 text-xs text-slate-500">
+        From {store?.companyName ? `${store.companyName}'s` : "the plant's"} store. Saving issues
+        them in SAP against this breakdown.
+      </p>
+
+      {loadError ? (
+        <div className="note note-rose text-sm">{loadError}</div>
+      ) : !items ? (
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading the store…
+        </div>
+      ) : (
+        <>
+          <div className="relative">
+            <input
+              id="spare-search"
+              type="text"
+              role="combobox"
+              aria-expanded={open}
+              aria-controls="spare-items"
+              aria-autocomplete="list"
+              value={term}
+              onChange={(e) => {
+                setTerm(e.target.value);
+                setActive(0);
+                setOpen(true);
+              }}
+              onFocus={() => setOpen(true)}
+              onClick={() => setOpen(true)}
+              onBlur={() => setOpen(false)}
+              onKeyDown={onKey}
+              placeholder="Pick a spare from the list, or type a code or name…"
+              className="field field-sm pr-9"
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              tabIndex={-1}
+              // mousedown, not click, so the input keeps its focus.
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setOpen((o) => !o);
+                document.getElementById("spare-search")?.focus();
+              }}
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+              aria-label={open ? "Hide spares" : "Show spares"}
+            >
+              <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+            </button>
+          </div>
+          {open && (
+            <ul
+              id="spare-items"
+              role="listbox"
+              className="mt-1 max-h-60 overflow-y-auto divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white"
+            >
+              {shown.length === 0 ? (
+                <li className="px-3 py-2 text-[13px] text-slate-500">
+                  {items.length === 0
+                    ? "This store has no items with a SAP code."
+                    : term.trim()
+                      ? "No item of this store matches."
+                      : "Every item of this store is on the list already."}
+                </li>
+              ) : (
+                shown.map((item, i) => {
+                  const none = !(item.available > 0);
+                  return (
+                    <li key={item.code} id={`spare-opt-${i}`} role="option" aria-selected={i === active} aria-disabled={none}>
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        disabled={none}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onMouseEnter={() => setActive(i)}
+                        onClick={() => add(item)}
+                        className={`flex w-full items-baseline justify-between gap-3 px-3 py-2 text-left text-[13px] disabled:cursor-not-allowed disabled:opacity-50 ${
+                          i === active && !none ? "bg-slate-100" : "hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className="min-w-0">
+                          <span className="text-slate-800">{item.name}</span>{" "}
+                          <span className="mono text-[11px] text-slate-500">SAP {item.sapCode}</span>
+                        </span>
+                        <span className="whitespace-nowrap text-[12px] text-slate-500">
+                          {none ? "none available" : `${item.available} ${item.unit} available`}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })
+              )}
+              {matches.length > shown.length && (
+                <li className="px-3 py-2 text-[12px] text-slate-500">
+                  Showing {shown.length} of {matches.length}. Type to narrow the list.
+                </li>
+              )}
+            </ul>
+          )}
+        </>
+      )}
 
       {rows.length === 0 ? (
-        <p className="text-xs text-slate-500">
-          None used. Write them in plain words — the catalog is still being renamed and recounted,
-          so nothing here is checked against it.
-        </p>
+        <p className="mt-2 text-xs text-slate-500">None used.</p>
       ) : (
-        <div className="space-y-2">
-          {rows.map((row, i) => (
-            <div key={i} className="grid grid-cols-12 gap-2 items-start">
-              <input
-                className="field field-sm col-span-8"
-                placeholder="What was used — bearing 6210, oil seal 60x80"
-                value={row.description}
-                onChange={(e) => set(i, "description", e.target.value)}
-              />
-              <input
-                type="number"
-                min="0"
-                step="0.5"
-                className="field field-sm col-span-3"
-                placeholder="qty"
-                value={row.qty_required}
-                onChange={(e) => set(i, "qty_required", e.target.value)}
-              />
-              <button
-                type="button"
-                className="icon-btn icon-btn-danger col-span-1"
-                onClick={() => onChange(rows.filter((_, n) => n !== i))}
-                aria-label="Remove"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
+        <div className="mt-2 space-y-2">
+          {rows.map((row, i) => {
+            const item = byCode.get(row.item_code);
+            const available = item?.available ?? 0;
+            const over = Number(row.qty_required) > available;
+            return (
+              <div key={row.item_code} className="grid grid-cols-12 gap-2 items-start">
+                <div className="col-span-7 min-w-0">
+                  <div className="text-sm text-slate-800 break-words leading-snug">{row.description}</div>
+                  <div className="mono text-[11px] text-slate-500">
+                    {item ? `SAP ${item.sapCode} · ${available} ${item.unit} available` : row.item_code}
+                  </div>
+                </div>
+                <div className="col-span-4">
+                  <input
+                    type="number"
+                    min="0"
+                    max={available}
+                    step={item?.whole ? 1 : "any"}
+                    inputMode={item?.whole ? "numeric" : "decimal"}
+                    className={`field field-sm ${over ? "ring-2 ring-rose-400" : ""}`}
+                    placeholder="qty"
+                    value={row.qty_required}
+                    onChange={(e) => set(i, "qty_required", e.target.value)}
+                    aria-label={`Quantity of ${row.description}`}
+                  />
+                  {over && (
+                    <p className="mt-0.5 text-[11px] text-rose-600">Only {available} available</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="icon-btn icon-btn-danger col-span-1"
+                  onClick={() => onChange(rows.filter((_, n) => n !== i))}
+                  aria-label={`Remove ${row.description}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1045,7 +1247,7 @@ const Prevention = ({ rows, onChange, people, invalid }) => {
  * than shown empty — a report full of dashes reads as a form that was ignored
  * instead of a repair that has not got there yet.
  */
-const Report = ({ record }) => {
+const Report = ({ record, user, onChanged }) => {
   const reached = (state) => JOURNEY.indexOf(record.state) >= JOURNEY.indexOf(state);
 
   return (
@@ -1080,7 +1282,9 @@ const Report = ({ record }) => {
           <KV label="Time before work started" value={hours(splitOf(record).response)} />
           <KV label="Time under repair" value={hours(splitOf(record).repair)} />
           <KV label="What was done" value={record.actionsPerformed} wide />
-          {record.spares?.length > 0 && <SpareList spares={record.spares} />}
+          {record.spares?.length > 0 && (
+            <SpareList key={record.sparesIssue?.status} record={record} user={user} onChanged={onChanged} />
+          )}
         </Block>
       )}
 
@@ -1138,18 +1342,71 @@ const KV = ({ label, value, wide }) =>
     </div>
   ) : null;
 
-const SpareList = ({ spares }) => (
-  <div className="sm:col-span-2">
-    <p className="kv-label mb-1.5">Spares used</p>
-    <ul className="text-sm text-slate-700 space-y-0.5">
-      {spares.map((s, i) => (
-        <li key={i}>
-          {s.qtyRequired} &times; {s.description}
-          {s.itemCode ? ` (${s.itemCode})` : ""}
-        </li>
-      ))}
-    </ul>
-  </div>
-);
+/** Where the spares' goods issue stands in SAP. */
+const ISSUE_STATE = {
+  Draft: { label: "Not sent to SAP", style: "badge-slate" },
+  Queued: { label: "Waiting for SAP", style: "badge-amber" },
+  Posted: { label: "Issued in SAP", style: "badge-emerald" },
+  Failed: { label: "SAP issue failed", style: "badge-rose" },
+};
+
+/** Who records the repair, and so may send its spares issue again (breakdownRoutes.js). */
+const REPAIR_ROLES = ["Manager", "Maintenance Manager"];
+
+const SpareList = ({ record, user, onChanged }) => {
+  const { showToast } = useNotifications();
+  const [issue, setIssue] = useState(record.sparesIssue);
+  const [sending, setSending] = useState(false);
+  const state = issue ? ISSUE_STATE[issue.status] || { label: issue.status, style: "badge-slate" } : null;
+  const canResend =
+    issue && ["Draft", "Failed"].includes(issue.status) && REPAIR_ROLES.includes(user?.role);
+
+  const resend = async () => {
+    setSending(true);
+    try {
+      const { data } = await API.post(`/breakdowns/${record.id}/spares-issue/resend`);
+      setIssue(data);
+      showToast(`${data.id} sent to SAP`, "success");
+      onChanged?.();
+    } catch (err) {
+      showToast(err.response?.data?.message || "That step was refused", "error");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="sm:col-span-2">
+      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+        <p className="kv-label mb-0">Spares used</p>
+        {state && <span className={`badge badge-soft ${state.style}`}>{state.label}</span>}
+      </div>
+      <ul className="text-sm text-slate-700 space-y-0.5">
+        {record.spares.map((s, i) => (
+          <li key={i}>
+            {s.qtyRequired} &times; {s.description}
+            {s.itemCode ? ` (${s.itemCode})` : ""}
+          </li>
+        ))}
+      </ul>
+      {issue && (
+        <div className="mt-1.5 text-xs text-slate-500">
+          {issue.id}
+          {issue.sapDocNumber && ` · SAP Goods Issue ${issue.sapDocNumber}`}
+          {issue.erpStockEntry && ` · ERPNext ${issue.erpStockEntry}`}
+          {issue.status === "Failed" && issue.error && (
+            <p className="mt-0.5 text-rose-700">SAP said: {issue.error}</p>
+          )}
+        </div>
+      )}
+      {canResend && (
+        <button className="btn btn-sm btn-primary mt-2 print:hidden" onClick={resend} disabled={sending}>
+          {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+          {issue.status === "Draft" ? "Send to SAP" : "Send again"}
+        </button>
+      )}
+    </div>
+  );
+};
 
 export default BreakdownDetail;

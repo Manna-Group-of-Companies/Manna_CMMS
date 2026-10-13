@@ -19,6 +19,7 @@ import {
   checkDuplicates,
   getSapPending,
   updateSapStatus,
+  requestCategorySync,
 } from "../controllers/productController.js";
 import { protect, requireRole } from "../middleware/session.js";
 import { requireView } from "../config/access.js";
@@ -60,6 +61,8 @@ router.get("/subcategories", getSubCategories);
 // Level 3 (SAP U_SubTypeB) and the SAP category sync. Above /:id, like the rest.
 router.get("/subcategories-b", getSubCategoriesB);
 router.get("/category-sync", getCategorySync);
+// The "Sync with SAP" button (9 Oct 2026): one flagged run both ways.
+router.post("/category-sync", requireRole("Maintenance Manager"), requestCategorySync);
 router.get("/units", getUnits);
 
 // The intake checks. All three are named routes and must stay above "/:id",

@@ -119,13 +119,15 @@ export const STAGES = {
   /**
    * The analysis, and what changes because of it.
    *
-   * This is the stage the whole module exists for, and it is the Manager's on
-   * purpose: somebody other than the person who did the repair has to look at
-   * whether anything was learned. A breakdown closed with no cause and no
-   * action is one that will be reported again.
+   * This is the stage the whole module exists for. It was the Manager's alone,
+   * so that somebody other than the person who did the repair looked at whether
+   * anything was learned. Since 12 Oct 2026 the Maintenance Manager takes it as
+   * well (user's decision): the maintenance office writes the root cause
+   * analysis. A breakdown closed with no cause and no action is still refused -
+   * both stay required.
    */
   Close: {
-    allowedRoles: ["Manager"],
+    allowedRoles: ["Manager", "Maintenance Manager"],
     from: "Repaired",
     to: "Closed",
     title: "Root cause and prevention",

@@ -7,7 +7,9 @@ import useStockRooms from "../../hooks/useStockRooms";
 import ProductFormModal from "./ProductFormModal";
 import CompanyBreakdown from "../../components/CompanyBreakdown";
 import CategoryEditModal from "../../components/CategoryEditModal";
+import SapSyncButton from "../../components/SapSyncButton";
 import { statusTone } from "../../utils/productStatus";
+import { formatCurrency } from "../../utils/currency";
 import {
   Search,
   Plus,
@@ -85,9 +87,37 @@ const StockBadge = ({ product }) => {
   );
 };
 
+/** Item value per unit. 0 is "nil value": stock added without a bill, which
+    takes the price of the first goods receipt against it. */
+const ValueCell = ({ product }) =>
+  Number(product.unitCost) > 0 ? (
+    <span className="whitespace-nowrap text-slate-800">{formatCurrency(product.unitCost)}</span>
+  ) : (
+    <span className="badge badge-slate badge-soft" title="Nil value: no priced receipt yet">
+      Nil
+    </span>
+  );
+
+/** Item group, then Sub-category A, then B. A is the level people file and
+    look things up by, so it is always shown, labelled, even when empty. */
+const CategoryLevels = ({ product }) => (
+  <>
+    <div>{product.category}</div>
+    <div className="text-[12px] text-slate-600">A: {product.subCategory || "—"}</div>
+    {product.subCategoryB && (
+      <div className="text-[11px] text-slate-500">B: {product.subCategoryB}</div>
+    )}
+  </>
+);
+
 /** Details / edit / delete. Shared so the table row and the phone card offer
     the same three actions in the same order. */
-const RowActions = ({ product, onOpen, canEditCategory = false, canDelete = false }) => (
+const RowActions = ({
+  product,
+  onOpen,
+  canEditCategory = false,
+  canDelete = false,
+}) => (
   <div className="flex items-center justify-end gap-1">
     {canEditCategory && product.sapCategory && (
       <button
@@ -147,10 +177,9 @@ const ProductList = () => {
   const rooms = useStockRooms();
   const { showToast } = useNotifications();
   const { user } = useAuth();
-  // Mirrors the guard on POST /naming-requests. Offering a button the server
-  // will refuse is worse than not offering it.
-  // Creating and editing items is the Maintenance Manager's alone (25 Sep 2026): a new
-  // item goes to the VP Operations for approval and is then created in SAP.
+  // Mirrors the server guards. Offering a button the server will refuse is
+  // worse than not offering it.
+  // Creating and editing items is the Maintenance Manager's alone (25 Sep 2026).
   const canProposeItem = user?.role === MAINTENANCE_MANAGER;
   const canEditCategory = canProposeItem;
   // DELETE /products/:id is the Manager's.
@@ -225,8 +254,9 @@ const ProductList = () => {
     }
   };
 
-  // Scoped to the chosen category: the catalog has far too many sub-categories
-  // for one flat list to be usable.
+  // Sub-category A, scoped to the chosen category when there is one. Without a
+  // category it lists every A: A is how people look items up, so it must work
+  // on its own.
   const fetchSubCategories = async () => {
     try {
       const { data } = await API.get("/products/subcategories", {
@@ -238,16 +268,17 @@ const ProductList = () => {
     }
   };
 
-  // Level 3 (SAP Sub-category B), only once a category and a sub-category are chosen.
+  // Level 3 (SAP Sub-category B), once a Sub-category A is chosen; the
+  // category narrows it further when one is picked.
   const fetchSubCategoriesB = async () => {
-    if (!selectedCategory || !selectedSubCategory) {
+    if (!selectedSubCategory) {
       setSubCategoriesB([]);
       return;
     }
     try {
-      const { data } = await API.get("/products/subcategories-b", {
-        params: { category: selectedCategory, subCategory: selectedSubCategory },
-      });
+      const params = { subCategory: selectedSubCategory };
+      if (selectedCategory) params.category = selectedCategory;
+      const { data } = await API.get("/products/subcategories-b", { params });
       setSubCategoriesB(data);
     } catch (error) {
       console.error("Error loading sub-categories B:", error);
@@ -322,15 +353,15 @@ const ProductList = () => {
               ))}
             </select>
 
-            {/* Sub-Category Select */}
+            {/* Sub-category A Select (SAP SubTypeA) */}
             <select
               value={selectedSubCategory}
               onChange={(e) => handleSubCategoryChange(e.target.value)}
               disabled={subCategories.length === 0}
               className="field field-sm w-full 2xl:w-auto cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
-              aria-label="Filter by sub-category"
+              aria-label="Filter by sub-category A"
             >
-              <option value="">All Sub-Categories</option>
+              <option value="">All Sub-category A</option>
               {subCategories.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -338,15 +369,15 @@ const ProductList = () => {
               ))}
             </select>
 
-            {/* Sub-Category B Select (SAP SubTypeB) */}
+            {/* Sub-category B Select (SAP SubTypeB) */}
             <select
               value={selectedSubCategoryB}
               onChange={(e) => setSelectedSubCategoryB(e.target.value)}
-              disabled={subCategoriesB.length === 0}
+              disabled={!selectedSubCategory || subCategoriesB.length === 0}
               className="field field-sm w-full 2xl:w-auto cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
               aria-label="Filter by sub-category B"
             >
-              <option value="">All Sub-Categories B</option>
+              <option value="">All Sub-category B</option>
               {subCategoriesB.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -372,26 +403,26 @@ const ProductList = () => {
         </div>
 
         {/*
-          Proposing an item is maintenance's job, and the Admin's.
-
-          This button had no guard at all, so every role that can open the
-          catalog - which is all of them - was offered it, including the plant
-          heads. The server has always refused them (POST /naming-requests is
-          Manager and Maintenance Manager only), so the button was an invitation
-          to a 403. Naming is raised by maintenance and agreed by operations;
-          a plant head has no part in it.
+          Adding items and bringing stock in are the Maintenance Manager's
+          alone, matching the server. An item is added straight to SAP (no
+          approval step), with any stock already on the shelf as its opening
+          quantity at nil value. Stock with a bill comes in on the Goods
+          Receipts page, and purchase requests live on their own page.
         */}
         {canProposeItem && (
-          <button
-            onClick={() => {
-              setSelectedProduct(null);
-              setActiveModal("form");
-            }}
-            className="btn btn-primary w-full sm:w-auto"
-          >
-            <Plus className="h-4 w-4" />
-            Add Engineering Stock
-          </button>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <SapSyncButton onDone={() => fetchProducts({ silent: true })} />
+            <button
+              onClick={() => {
+                setSelectedProduct(null);
+                setActiveModal("form");
+              }}
+              className="btn btn-primary w-full sm:w-auto"
+            >
+              <Plus className="h-4 w-4" />
+              Add Engineering Stock
+            </button>
+          </div>
         )}
       </div>
 
@@ -424,12 +455,10 @@ const ProductList = () => {
 
                 <dl className="mt-3 divide-y divide-slate-100 border-t border-slate-100 pt-1">
                   <CardRow label="Category">
-                    <div>{product.category}</div>
-                    {product.subCategory && (
-                      <div className="text-[11px] text-slate-500">
-                        {[product.subCategory, product.subCategoryB].filter(Boolean).join(" › ")}
-                      </div>
-                    )}
+                    <CategoryLevels product={product} />
+                  </CardRow>
+                  <CardRow label="Value">
+                    <ValueCell product={product} />
                   </CardRow>
                   <CardRow label="HSN · Tax">
                     <span className="mono text-slate-600">
@@ -443,7 +472,12 @@ const ProductList = () => {
 
                 <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
                   <StockBadge product={product} />
-                  <RowActions product={product} onOpen={openModal} canEditCategory={canEditCategory} canDelete={canDelete} />
+                  <RowActions
+                    product={product}
+                    onOpen={openModal}
+                    canEditCategory={canEditCategory}
+                    canDelete={canDelete}
+                  />
                 </div>
               </div>
             ))}
@@ -459,6 +493,7 @@ const ProductList = () => {
                     <th>Category</th>
                     <th>HSN · Tax</th>
                     <th>Company</th>
+                    <th className="text-right">Value</th>
                     <th className="text-center">Stock</th>
                     <th className="text-right">Actions</th>
                   </tr>
@@ -467,21 +502,21 @@ const ProductList = () => {
                   {products.map((product) => (
                     <tr key={product._id}>
                       <td>
-                        <div className="flex items-center gap-3 min-w-[200px]">
+                        {/* Capped and wrapped, not truncated: a nowrap name sizes the
+                            whole column to the longest item in the list and shoves
+                            every other column off the right edge. */}
+                        <div className="flex items-center gap-3 min-w-[200px] max-w-[380px]">
                           <div className="min-w-0">
-                            <div className="cell-title truncate">{product.name}</div>
+                            <div className="cell-title break-words leading-snug line-clamp-2" title={product.name}>
+                              {product.name}
+                            </div>
                             <div className="mono text-brand-700">{product.code}</div>
                             <ProductFlags product={product} />
                           </div>
                         </div>
                       </td>
                       <td className="text-slate-700">
-                        <div>{product.category}</div>
-                        {product.subCategory && (
-                          <div className="text-[11px] text-slate-500">
-                            {[product.subCategory, product.subCategoryB].filter(Boolean).join(" › ")}
-                          </div>
-                        )}
+                        <CategoryLevels product={product} />
                       </td>
                       <td className="mono text-slate-600 whitespace-nowrap">
                         {[product.hsnCode, product.taxRate].filter(Boolean).join(" · ") || "—"}
@@ -489,11 +524,19 @@ const ProductList = () => {
                       <td>
                         <span className="badge badge-slate badge-soft">{product.storeRoom}</span>
                       </td>
+                      <td className="text-right">
+                        <ValueCell product={product} />
+                      </td>
                       <td className="text-center">
                         <StockBadge product={product} />
                       </td>
                       <td>
-                        <RowActions product={product} onOpen={openModal} canEditCategory={canEditCategory} canDelete={canDelete} />
+                        <RowActions
+                          product={product}
+                          onOpen={openModal}
+                          canEditCategory={canEditCategory}
+                          canDelete={canDelete}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -608,11 +651,11 @@ const ProductList = () => {
                     <span className="kv-value">{selectedProduct.category}</span>
                   </div>
                   <div className="kv">
-                    <span className="kv-label">Sub-Category</span>
+                    <span className="kv-label">Sub-category A</span>
                     <span className="kv-value">{selectedProduct.subCategory || "—"}</span>
                   </div>
                   <div className="kv">
-                    <span className="kv-label">Sub-Category B</span>
+                    <span className="kv-label">Sub-category B</span>
                     <span className="kv-value">{selectedProduct.subCategoryB || "—"}</span>
                   </div>
                   <div className="kv">
@@ -639,6 +682,14 @@ const ProductList = () => {
                     <span className="kv-label">Quantity</span>
                     <span className="kv-value">
                       {selectedProduct.quantity} {selectedProduct.unit}
+                    </span>
+                  </div>
+                  <div className="kv">
+                    <span className="kv-label">Value</span>
+                    <span className="kv-value">
+                      {Number(selectedProduct.unitCost) > 0
+                        ? `${formatCurrency(selectedProduct.unitCost)} per ${selectedProduct.unit || "unit"}`
+                        : "Nil value"}
                     </span>
                   </div>
                   <div className="kv">

@@ -449,7 +449,7 @@ const ProductList = () => {
               disabled={subCategories.length === 0}
               className="px-3 py-2 text-xs rounded-xl bg-white border border-slate-200 text-slate-700 focus:outline-none focus:border-brand-500 disabled:opacity-60"
             >
-              <option value="">All Sub-Categories</option>
+              <option value="">All Sub-category A</option>
               {subCategories.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -546,8 +546,12 @@ const ProductList = () => {
                       </td>
                       <td className="py-4 px-6">
                         <div className="text-slate-800">{product.category}</div>
+                        {/* Sub-category A first: it is the level the store looks things up by. */}
                         {product.subCategory && (
-                          <div className="text-[10px] text-slate-500">{product.subCategory}</div>
+                          <div className="text-[10px] text-slate-500">A: {product.subCategory}</div>
+                        )}
+                        {product.subCategoryB && (
+                          <div className="text-[10px] text-slate-500">B: {product.subCategoryB}</div>
                         )}
                       </td>
                       <td className="py-4 px-6 whitespace-nowrap">
@@ -703,8 +707,12 @@ const ProductList = () => {
                     <span className="font-semibold text-slate-800">{selectedProduct.category}</span>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                    <span className="text-slate-500 block mb-0.5">Sub-Category</span>
+                    <span className="text-slate-500 block mb-0.5">Sub-category A</span>
                     <span className="font-semibold text-slate-800">{selectedProduct.subCategory || "—"}</span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <span className="text-slate-500 block mb-0.5">Sub-category B</span>
+                    <span className="font-semibold text-slate-800">{selectedProduct.subCategoryB || "—"}</span>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                     <span className="text-slate-500 block mb-0.5">Condition</span>
@@ -845,7 +853,7 @@ const ProductList = () => {
 
                   {/* Sub-Category — narrowed to the category above. */}
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Sub-Category</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Sub-category A</label>
                     <TaxonomySelect
                       value={productForm.subCategory}
                       options={formSubCategoryOptions}

@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/palette.dart';
+import 'screens/attendance/attendance_calendar_screen.dart';
+import 'screens/attendance/attendance_screen.dart';
+import 'screens/attendance/team_attendance_screen.dart';
+import 'screens/leave/add_leave_screen.dart';
+import 'screens/leave/apply_leave_screen.dart';
+import 'screens/leave/leave_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/maintenance/breakdown_detail_screen.dart';
 import 'screens/maintenance/breakdowns_screen.dart';
@@ -12,7 +18,8 @@ import 'screens/supervisor/settings_screen.dart';
 import 'state/auth_provider.dart';
 import 'widgets/common.dart';
 
-/// This app is Breakdowns and Maintenance Requests, and nothing else.
+/// This app is Breakdowns, Maintenance Requests and - since 12 Oct 2026 - the
+/// maintenance team's Attendance, and nothing else.
 ///
 /// It was the Supervisor and Branch stock-tracking portals - the catalog, red
 /// stock, issue history, a branch's own room. Every one of those screens is
@@ -21,8 +28,8 @@ import 'widgets/common.dart';
 /// rather than deleted, in case any of that is wanted back, but nothing routes
 /// to them any more.
 ///
-/// Who sees which of the two remaining screens mirrors
-/// `VIEWS.breakdowns` / `VIEWS.maintenanceRequests` in
+/// Who sees which screen mirrors `VIEWS.breakdowns` /
+/// `VIEWS.maintenanceRequests` / `VIEWS.attendance` in
 /// `server/config/access.js` - the same matrix the web console enforces. Kept
 /// as a literal copy here rather than fetched, the same way the web client
 /// mirrors its own copy in `client/src/config/access.js`: change one, remember
@@ -42,14 +49,29 @@ const _requestRoles = {
   'Supervisor',
 };
 
+/// Attendance and leave, brought across from the field-sales app.
+///
+/// A Maintenance Member - a fitter or electrician - punches in and out,
+/// looks at their month and applies for leave. The Maintenance Manager decides
+/// those requests and keeps the leave schemes, with the Admin as the usual
+/// fallback. Mirrors `VIEWS.attendance` on the server and the two role lists
+/// in `routes/attendanceRoutes.js`.
+const _attendanceRoles = {'Maintenance Member', 'Maintenance Manager', 'Manager'};
+const _attendanceApproverRoles = {'Maintenance Manager', 'Manager'};
+
 bool canSeeBreakdowns(String role) => _breakdownRoles.contains(role);
 bool canSeeRequests(String role) => _requestRoles.contains(role);
+bool canSeeAttendance(String role) => _attendanceRoles.contains(role);
+bool canApproveAttendance(String role) => _attendanceApproverRoles.contains(role);
+bool isMaintenanceMember(String role) => role == 'Maintenance Member';
 
 /// Whether this role has anything to do in the app at all.
-bool worksInMaintenance(String role) => canSeeBreakdowns(role) || canSeeRequests(role);
+bool worksInMaintenance(String role) =>
+    canSeeBreakdowns(role) || canSeeRequests(role) || canSeeAttendance(role);
 
 const breakdownsHome = '/maintenance/breakdowns';
 const requestsHome = '/maintenance/requests';
+const attendanceHome = '/attendance';
 const noAccessHome = '/no-access';
 
 /// The root navigator, so a dialog that belongs to the app rather than to any
@@ -57,11 +79,17 @@ const noAccessHome = '/no-access';
 /// outside the widget tree.
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 
-/// Where a signed-in account lands: the first of the two screens their role is
-/// on, or the no-access page when they are on neither.
+/// Where a signed-in account lands: the first of the screens their role is
+/// on, or the no-access page when they are on none.
+///
+/// A team member's whole app is Attendance, so that is where they land; the
+/// managers who also decide attendance keep landing on Breakdowns, which is
+/// the work they open the app for.
 String homePathFor(String role) {
+  if (isMaintenanceMember(role)) return attendanceHome;
   if (canSeeBreakdowns(role)) return breakdownsHome;
   if (canSeeRequests(role)) return requestsHome;
+  if (canSeeAttendance(role)) return attendanceHome;
   return noAccessHome;
 }
 
@@ -90,6 +118,35 @@ GoRouter buildRouter(AuthProvider auth) {
       ),
       // Profile details and sign-out.
       GoRoute(path: '/maintenance/settings', builder: (_, _) => const SettingsScreen()),
+
+      // Attendance and leave. One path, two screens: a member gets their own
+      // day, an approver gets the queue and the team.
+      GoRoute(
+        path: attendanceHome,
+        builder: (_, _) => canApproveAttendance(auth.user?.role ?? '')
+            ? const TeamAttendanceScreen()
+            : const AttendanceScreen(),
+      ),
+      GoRoute(
+        path: '/attendance/calendar',
+        builder: (_, state) {
+          final q = state.uri.queryParameters;
+          final member = q['member'] ?? '';
+          return AttendanceCalendarScreen(
+            member: member.isEmpty ? null : member,
+            label: q['label'],
+            regularizeDate: q['regularize'],
+          );
+        },
+      ),
+      GoRoute(path: '/attendance/leave', builder: (_, _) => const LeaveScreen()),
+      GoRoute(
+        path: '/attendance/leave/apply',
+        builder: (_, state) => ApplyLeaveScreen(
+          initialDate: DateTime.tryParse(state.uri.queryParameters['date'] ?? ''),
+        ),
+      ),
+      GoRoute(path: '/attendance/team/add-leave', builder: (_, _) => const AddLeaveScreen()),
     ],
     redirect: (context, state) {
       final path = state.matchedLocation;
@@ -115,6 +172,13 @@ GoRouter buildRouter(AuthProvider auth) {
       if (path.startsWith('/maintenance/breakdowns') && !canSeeBreakdowns(user.role)) return home;
       if (path.startsWith('/maintenance/requests') && !canSeeRequests(user.role)) return home;
       if (path == '/maintenance/settings' && !worksInMaintenance(user.role)) return home;
+
+      // Attendance: the screen is the matrix's; within it, applying for leave
+      // is a member's own act and the team queue is an approver's, the same
+      // split the server's routes make.
+      if (path.startsWith('/attendance') && !canSeeAttendance(user.role)) return home;
+      if (path.startsWith('/attendance/team') && !canApproveAttendance(user.role)) return home;
+      if (path.startsWith('/attendance/leave') && !isMaintenanceMember(user.role)) return home;
 
       // Everything the app used to serve — the store catalog, red stock, a
       // branch's own room — is gone. A stored route or an old shortcut from

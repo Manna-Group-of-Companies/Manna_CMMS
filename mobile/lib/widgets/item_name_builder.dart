@@ -219,7 +219,7 @@ class _ItemNameBuilderCardState extends State<ItemNameBuilderCard> {
           const SizedBox(height: 4),
           const Text(
             'Fill in what applies. Dimensions first, then rating, item name, type, '
-            'material and item code — the standard name assembles itself below.',
+            'material and serial number — the standard name assembles itself below.',
             style: TextStyle(color: AppColors.textMuted, fontSize: 11, height: 1.4),
           ),
           const SizedBox(height: 16),
@@ -356,7 +356,7 @@ class _ItemNameBuilderCardState extends State<ItemNameBuilderCard> {
           ),
           const SizedBox(height: 14),
 
-          const _MiniLabel('Item Code'),
+          const _MiniLabel('Serial Number'),
           TextField(
             controller: _itemCode,
             enabled: widget.enabled,

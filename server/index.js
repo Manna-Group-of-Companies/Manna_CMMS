@@ -33,11 +33,14 @@ import erpRoutes from "./routes/erpRoutes.js";
 import sessionRoutes from "./routes/sessionRoutes.js";
 import breakdownRoutes from "./routes/breakdownRoutes.js";
 import namingRequestRoutes from "./routes/namingRequestRoutes.js";
+import goodsReceiptRoutes from "./routes/goodsReceiptRoutes.js";
+import purchaseRequestRoutes from "./routes/purchaseRequestRoutes.js";
 import assetRoutes from "./routes/assetRoutes.js";
 import electricalRoutes from "./routes/electricalRoutes.js";
 import maintenanceRequestRoutes from "./routes/maintenanceRequestRoutes.js";
 import preventiveRoutes from "./routes/preventiveRoutes.js";
 import taxonomyRoutes from "./routes/taxonomyRoutes.js";
+import attendanceRoutes from "./routes/attendanceRoutes.js";
 
 dotenv.config();
 
@@ -121,6 +124,12 @@ app.use("/api/session", sessionRoutes);
 // without a MongoDB behind them.
 app.use("/api/breakdowns", breakdownRoutes);
 app.use("/api/naming-requests", namingRequestRoutes);
+// Engineering goods receipts (from a bill, against a SAP PO) and nil-value
+// stock additions; posted to SAP by the item master sync.
+app.use("/api/goods-receipts", goodsReceiptRoutes);
+// Purchase requests for engineering stock, posted to SAP by the same sync;
+// the purchase manager converts them to POs in SAP.
+app.use("/api/purchase-requests", purchaseRequestRoutes);
 app.use("/api/assets", assetRoutes);
 app.use("/api/electrical", electricalRoutes);
 // The planned side of Module 2, kept apart from /api/breakdowns on purpose:
@@ -129,6 +138,9 @@ app.use("/api/electrical", electricalRoutes);
 app.use("/api/maintenance-requests", maintenanceRequestRoutes);
 app.use("/api/preventive", preventiveRoutes);
 app.use("/api/taxonomy", taxonomyRoutes);
+// The maintenance team's punches, corrections and leave, brought across from
+// the field-sales app. Reads ERPNext directly, like the rest of Module 2.
+app.use("/api/attendance", attendanceRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {

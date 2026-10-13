@@ -6,6 +6,11 @@
          app to *ask*; the user still confirms every install, and on Android 8+
          they must also switch on "Allow from this source" once per device. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- A punch in or out records where the phone was, when it can tell.
+         Best effort: a refused permission or a missing fix never blocks the
+         punch - see lib/core/location_fix.dart. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <!-- usesCleartextTraffic: the dev/LAN API is served over plain http.
          Remove it once the API is reachable over https. -->
     <application

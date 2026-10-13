@@ -38,6 +38,11 @@
 	<string>StockMaster uses the camera to photograph products you add to stock.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>StockMaster needs photo access so you can attach a product image from your gallery.</string>
+	<!-- A punch in or out records where the phone was, when it can tell. Without
+	     this key every location call refuses with "Permission definitions not
+	     found in the app's Info.plist". -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Manna CMMS records where you were when you punch in and out.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

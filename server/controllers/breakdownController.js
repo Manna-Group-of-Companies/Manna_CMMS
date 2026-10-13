@@ -122,9 +122,11 @@ export const report = async (req, res) => {
 export const update = async (req, res) => {
   // An allow-list rather than passing the body through: `workflow_state` is a
   // field on this doctype, and letting it be written here would step around
-  // every transition rule the workflow exists to enforce.
+  // every transition rule the workflow exists to enforce. `spares_required` is
+  // off it since 10 Oct 2026: spares are issued in SAP, so they are taken only
+  // through the "Machine Running" step, which checks them against the store.
   const ALLOWED = [
-    "priority", "likely_cause", "failure_mode", "spares_required",
+    "priority", "likely_cause", "failure_mode",
     "assigned_to", "labour_hours",
     "actions_performed", "completed_at", "root_cause", "prevention_actions",
   ];
@@ -168,6 +170,32 @@ export const act = async (req, res) => {
     }
     if (!error.status) return res.status(400).json({ message: error.message });
     fail(res, error, "Could not move the breakdown on");
+  }
+};
+
+/**
+ * @desc    The spares this breakdown can take: its plant's store items, with what is available
+ * @route   GET /api/breakdowns/:id/spares
+ * @access  Private (Manager, Maintenance Manager - who record the repair)
+ */
+export const spares = async (req, res) => {
+  try {
+    res.json(await maintenance.sparesForBreakdown(req.params.id));
+  } catch (error) {
+    fail(res, error, "Could not load the store's spares");
+  }
+};
+
+/**
+ * @desc    Send the breakdown's spares issue to SAP again (failed, or never sent)
+ * @route   POST /api/breakdowns/:id/spares-issue/resend
+ * @access  Private (Manager, Maintenance Manager)
+ */
+export const resendSpares = async (req, res) => {
+  try {
+    res.json(await maintenance.resendIssue(req.params.id, req.user));
+  } catch (error) {
+    fail(res, error, "Could not send the spares issue again");
   }
 };
 

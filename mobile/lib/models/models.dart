@@ -24,6 +24,9 @@ class AppUser {
   bool get isSupervisor => role == 'Supervisor';
   bool get isBranch => role == 'Branch';
 
+  /// A hand on the maintenance team, whose whole app is Attendance.
+  bool get isMaintenanceMember => role == 'Maintenance Member';
+
   factory AppUser.fromJson(Map<String, dynamic> json) {
     final room = json['stockRoom'];
     // ERPNext identifies a person by their email; there is no `_id`. Falling

@@ -89,6 +89,13 @@ const ROLE_MAP = [
   // store screens while people are being moved across.
   ["Stock Manager", "Supervisor"],
   ["Stock User", "Supervisor"],
+  /**
+   * The hands on the maintenance team, who clock in and out and apply for
+   * leave on the phone and do nothing else in the CMMS. Last on purpose:
+   * anybody who also holds a store or plant role keeps the more capable view,
+   * and this one only catches the people who hold nothing else.
+   */
+  ["Store Maintenance Member", "Maintenance Member"],
 ];
 
 /** Most privileged first, so `find` picks the right one. */
@@ -245,7 +252,7 @@ export const describe = async (email, { as } = {}) => {
     throw new ErpError(
       "That account holds no CMMS role in ERPNext. Ask an administrator to give it " +
         "Store Manager, Store Maintenance Manager, Store Supervisor, Plant Manager, " +
-        "Higher Management or VP Operations.",
+        "Higher Management, VP Operations or Store Maintenance Member.",
       { status: 403 }
     );
   }

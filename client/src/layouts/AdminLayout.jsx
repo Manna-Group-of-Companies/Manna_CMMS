@@ -47,13 +47,22 @@ const AdminLayout = () => {
     ["/admin/maintenance-requests", "Maintenance Requests", ""],
     ["/admin/preventive", "Preventive Maintenance", "Checklists and what they are due on"],
     ["/admin/products", "Engineering Stock", "The catalog and what is on the shelves"],
+    [
+      "/admin/goods-receipts",
+      "Goods Receipts",
+      "Stock brought in, with or without a bill, and whether SAP has posted it",
+    ],
+    [
+      "/admin/purchase-requests",
+      "Purchase Requests",
+      "Requests sent to SAP, and the purchase orders raised from them",
+    ],
     ["/admin/categories", "Categories", "The category tree items are filed under"],
     [
       "/admin/low-stock",
       "Low Stock",
       "Every item at or below its minimum, and what refilling it takes",
     ],
-    ["/admin/requests", "Item Naming", "Approve, reject or hold a proposed item name"],
     ["/admin/assets", "Asset Management", "The machine register and everything known about each"],
     ["/admin/electrical", "Electrical Systems", "Panels, supplies and what they feed"],
     ["/admin/scrap", "Scrap & Consumption", "Value written off across the stores"],

@@ -1,6 +1,6 @@
 import express from "express";
 
-import { tree, add, rename, move, remove, sapTree, sapRename } from "../controllers/taxonomyController.js";
+import { tree, add, rename, move, remove, sapTree, sapRename, sapGroupRequests, sapAddGroup } from "../controllers/taxonomyController.js";
 import { protect, requireRole } from "../middleware/session.js";
 import { requireView } from "../config/access.js";
 
@@ -28,6 +28,9 @@ const WRITE = requireRole("Maintenance Manager");
 // rename rewrites every item under it and reaches SAP through the flagged sync.
 router.get("/sap", requireView("categories"), sapTree);
 router.put("/sap/rename", WRITE, sapRename);
+// A new engineering item group, created in SAP by the same sync (9 Oct 2026).
+router.get("/sap/groups", requireView("categories"), sapGroupRequests);
+router.post("/sap/groups", WRITE, sapAddGroup);
 
 // Above /:name, or "rename" and "move" are read as group names.
 router.put("/rename", WRITE, rename);

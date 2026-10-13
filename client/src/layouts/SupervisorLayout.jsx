@@ -14,7 +14,8 @@ import Navbar from "../components/Navbar";
  */
 const SHARED_WITH_CONSOLE = [
   "/products",
-  "/requests",
+  "/goods-receipts",
+  "/purchase-requests",
   "/assets",
   "/electrical",
   "/categories",
@@ -61,7 +62,8 @@ const SupervisorLayout = () => {
   const getPageTitle = () => {
     const path = location.pathname;
     if (path.includes("/products")) return "Browse Engineering Stock Catalog";
-    if (path.includes("/requests")) return "Item Naming";
+    if (path.includes("/goods-receipts")) return "Goods Receipts";
+    if (path.includes("/purchase-requests")) return "Purchase Requests";
     if (path.includes("/audit")) return "Monthly Stock Audit";
     if (path.includes("/returns")) return "Red Stock Room";
     if (path.includes("/breakdowns")) return "Breakdowns";

@@ -12,5 +12,15 @@
       "MANNA_TYRE_LIVE": "PUT_MANNA_TYRE_LIVE_PASSWORD_HERE"
     }
   },
-  "control_doctype": "SAP Item Category Sync Control"
+  "control_doctype": "SAP Item Category Sync Control",
+  "edit_fields": ["ItemName", "ItemsGroupCode", "U_SubTypeA", "U_SubTypeB", "ChapterID", "U_TaxRate"],
+  "create_items": false,
+  "post_receipts": false,
+  "create_groups": false,
+  "revalue_nil_stock": false,
+  "post_purchase_requests": false,
+  "post_issues": false,
+  "pull_from_sap": false,
+  "pr_requester": "",
+  "skip_companies": []
 }
