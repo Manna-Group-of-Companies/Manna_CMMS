@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { useNotifications } from "../context/NotificationContext";
 import { Bell, Check, CheckSquare, Menu } from "lucide-react";
+import SapSyncButton from "./SapSyncButton";
 
-const Navbar = ({ title, subtitle, onMenuClick }) => {
+const Navbar = ({ title, subtitle, onMenuClick, sapSync = false }) => {
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
@@ -63,6 +64,12 @@ const Navbar = ({ title, subtitle, onMenuClick }) => {
 
       {/* Actions */}
       <div className="flex items-center gap-2 shrink-0">
+        {/* Only where SAP is actually behind the screen. One run serves the
+            whole system, so this is the same job wherever it is pressed - on a
+            screen SAP has nothing to do with, it would run and change nothing
+            in sight. */}
+        {sapSync && <SapSyncButton />}
+
         {/* Notification Bell */}
         <div className="relative" ref={dropdownRef}>
           <button

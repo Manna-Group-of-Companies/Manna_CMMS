@@ -116,6 +116,14 @@ export const VIEWS = {
    * requests, which is the reason the record exists.
    */
   maintenanceRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR],
+  /**
+   * The maintenance team register - who may be named on a repair.
+   *
+   * The Maintenance Manager's alone. It decides whose name can appear in the
+   * history of every repair, which is a maintenance judgement; the plant that
+   * reports a breakdown has no business adding or retiring a fitter.
+   */
+  technicians: [MAINTENANCE_MANAGER],
   preventive: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR],
 
   /**

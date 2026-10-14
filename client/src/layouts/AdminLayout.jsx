@@ -64,6 +64,7 @@ const AdminLayout = () => {
       "Every item at or below its minimum, and what refilling it takes",
     ],
     ["/admin/assets", "Asset Management", "The machine register and everything known about each"],
+    ["/admin/technicians", "Maintenance Team", "Who may be named on a repair"],
     ["/admin/electrical", "Electrical Systems", "Panels, supplies and what they feed"],
     ["/admin/scrap", "Scrap & Consumption", "Value written off across the stores"],
     [
@@ -80,6 +81,24 @@ const AdminLayout = () => {
       (a, b) => b[0].length - a[0].length
     )[0] || ["", "Stock Master Control", ""];
 
+  /**
+   * The screens SAP is behind, and the only ones offered the sync.
+   *
+   * There is one sync for the whole system - it carries items, item groups,
+   * goods receipts and purchase requests in one run - so the question each
+   * screen answers is not "which sync" but "is any of what I show SAP's".
+   * Breakdowns, assets, preventive maintenance and attendance are ERPNext's
+   * alone; a run started from one of them would finish having changed nothing
+   * the person was looking at, which reads as a sync that failed.
+   */
+  const SAP_SYNC_PATHS = [
+    "/admin/products",
+    "/admin/goods-receipts",
+    "/admin/purchase-requests",
+    "/admin/categories",
+  ];
+  const onSapScreen = SAP_SYNC_PATHS.some((path) => location.pathname.startsWith(path));
+
   return (
     <div className="min-h-screen bg-canvas flex">
       {/* Sidebar Navigation */}
@@ -87,7 +106,12 @@ const AdminLayout = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 min-w-0 flex flex-col h-screen max-h-[100dvh] overflow-hidden">
-        <Navbar title={title} subtitle={subtitle} onMenuClick={() => setMenuOpen(true)} />
+        <Navbar
+          title={title}
+          subtitle={subtitle}
+          onMenuClick={() => setMenuOpen(true)}
+          sapSync={onSapScreen}
+        />
         <main className="flex-1 overflow-y-auto bg-canvas">
           {/* Capped so the tables do not stretch to the full width of a very
               wide monitor, which leaves the eye travelling across empty cells. */}

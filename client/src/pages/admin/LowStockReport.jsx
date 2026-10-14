@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import API from "../../services/api";
+import { useAuth, MAINTENANCE_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import useStockRooms from "../../hooks/useStockRooms";
 import { formatCurrency } from "../../utils/currency";
 import { reorderCostOf, severityOf, shortageOf } from "../../utils/lowStock";
+import PurchaseRequestModal from "./PurchaseRequestModal";
 import {
   AlertTriangle,
   ArrowDown,
@@ -16,8 +18,19 @@ import {
   Loader2,
   PackageX,
   Search,
+  ShoppingCart,
   TrendingDown,
 } from "lucide-react";
+
+/**
+ * Whether a shortfall can go on a purchase request at all.
+ *
+ * SAP buys against its own item code, so an item it has not created yet cannot
+ * be asked for - it would be a line naming something the purchase manager
+ * cannot raise a PO against.
+ */
+const requestable = (product) =>
+  Boolean(product?.sap?.code) && Boolean(product?.sapCategory?.company);
 
 const SEVERITIES = [
   { key: "", label: "All Severities" },
@@ -120,10 +133,17 @@ const CardRow = ({ label, children }) => (
  */
 const LowStockReport = () => {
   const rooms = useStockRooms();
+  const { user } = useAuth();
   const { showToast } = useNotifications();
+  // Mirrors the server's guard on POST /purchase-requests.
+  const canRequest = user?.role === MAINTENANCE_MANAGER;
 
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Ticked shortfalls, by item code - codes rather than rows, so a background
+  // refresh that replaces every object leaves the ticks where they were.
+  const [picked, setPicked] = useState(() => new Set());
+  const [requesting, setRequesting] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStoreRoom, setSelectedStoreRoom] = useState("");
@@ -198,6 +218,51 @@ const LowStockReport = () => {
       return left > right ? direction : -direction;
     });
   }, [products, searchTerm, selectedStoreRoom, severity, sort]);
+
+  /**
+   * The ticked shortfalls, and the one SAP company a request may cover.
+   *
+   * Read out of the full list rather than the visible rows, so narrowing the
+   * search does not quietly drop items from a basket already gathered.
+   *
+   * A purchase request is raised against one SAP company - the purchase
+   * manager turns it into a PO in that company's database - so the first tick
+   * decides the company and the rest of the list locks to it. Enforced at the
+   * tick rather than at the button: being told why a row cannot join is worth
+   * more than being told at the end that the basket is wrong.
+   */
+  const chosen = useMemo(() => products.filter((p) => picked.has(p.code)), [products, picked]);
+  const lockedCompany = chosen[0]?.sapCategory?.company || "";
+
+  const whyNotPickable = (product) => {
+    if (!requestable(product)) return "Not in SAP yet, so it cannot be put on a request";
+    if (lockedCompany && product.sapCategory.company !== lockedCompany) {
+      return `A request covers one SAP company, and ${lockedCompany} is already picked`;
+    }
+    return "";
+  };
+
+  const togglePicked = (code) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+
+  // Nothing ticked yet? The first requestable row on screen decides which
+  // company "all of them" means.
+  const sweepCompany = lockedCompany || rows.find(requestable)?.sapCategory?.company || "";
+  const sweepable = rows.filter(
+    (p) => requestable(p) && p.sapCategory.company === sweepCompany
+  );
+  const allSwept = sweepable.length > 0 && sweepable.every((p) => picked.has(p.code));
+
+  const toggleSweep = () =>
+    setPicked((prev) => {
+      if (prev.size > 0) return new Set();
+      return new Set(sweepable.map((p) => p.code));
+    });
 
   /** Counted off the full list, not the filtered rows: the tiles are the size
       of the problem, and a search should not appear to shrink it. */
@@ -403,7 +468,23 @@ const LowStockReport = () => {
             <Download className="h-4 w-4" />
             Export CSV
           </button>
-          <Link to="/admin/products" className="btn btn-primary flex-1 sm:flex-none">
+          {canRequest && (
+            <button
+              onClick={() => setRequesting(true)}
+              disabled={chosen.length === 0}
+              className="btn btn-primary flex-1 sm:flex-none"
+              title={
+                chosen.length === 0
+                  ? "Tick the shortfalls to put on one request"
+                  : `Request ${chosen.length} item${chosen.length === 1 ? "" : "s"} for ${lockedCompany}`
+              }
+            >
+              <ShoppingCart className="h-4 w-4" />
+              Purchase request
+              {chosen.length > 0 && ` (${chosen.length})`}
+            </button>
+          )}
+          <Link to="/admin/products" className="btn btn-neutral flex-1 sm:flex-none">
             Open Catalog
           </Link>
         </div>
@@ -430,9 +511,24 @@ const LowStockReport = () => {
           <div className="space-y-3 md:hidden">
             {rows.map((product) => {
               const level = severityOf(product);
+              const blocked = canRequest ? whyNotPickable(product) : "";
               return (
-                <div key={product._id} className="card p-4">
+                <div
+                  key={product._id}
+                  className={`card p-4 ${picked.has(product.code) ? "ring-1 ring-brand-500/40" : ""}`}
+                >
                   <div className="flex items-start justify-between gap-3">
+                    {canRequest && (
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+                        checked={picked.has(product.code)}
+                        disabled={Boolean(blocked)}
+                        onChange={() => togglePicked(product.code)}
+                        aria-label={`Put ${product.name} on a purchase request`}
+                        title={blocked || `Put ${product.name} on a purchase request`}
+                      />
+                    )}
                     <div className="min-w-0">
                       <div className="cell-title break-words leading-snug">{product.name}</div>
                       <div className="mono text-brand-700">{product.code}</div>
@@ -484,6 +580,25 @@ const LowStockReport = () => {
               <table className="tbl">
                 <thead>
                   <tr>
+                    {canRequest && (
+                      <th className="w-10">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 cursor-pointer accent-brand-600 align-middle"
+                          checked={allSwept}
+                          onChange={toggleSweep}
+                          disabled={sweepable.length === 0}
+                          aria-label="Select the shortfalls on this screen"
+                          title={
+                            picked.size > 0
+                              ? "Clear the selection"
+                              : sweepCompany
+                                ? `Select every ${sweepCompany} shortfall on this screen`
+                                : "Nothing here is in SAP yet"
+                          }
+                        />
+                      </th>
+                    )}
                     <th className="text-right">#</th>
                     {COLUMNS.map((column) => (
                       <SortHeader key={column.key} column={column} sort={sort} onSort={handleSort} />
@@ -493,8 +608,22 @@ const LowStockReport = () => {
                 <tbody>
                   {rows.map((product, index) => {
                     const level = severityOf(product);
+                    const blocked = canRequest ? whyNotPickable(product) : "";
                     return (
-                      <tr key={product._id}>
+                      <tr key={product._id} className={picked.has(product.code) ? "bg-brand-50/60" : ""}>
+                        {canRequest && (
+                          <td>
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 cursor-pointer accent-brand-600 align-middle disabled:cursor-not-allowed disabled:opacity-40"
+                              checked={picked.has(product.code)}
+                              disabled={Boolean(blocked)}
+                              onChange={() => togglePicked(product.code)}
+                              aria-label={`Put ${product.name} on a purchase request`}
+                              title={blocked || `Put ${product.name} on a purchase request`}
+                            />
+                          </td>
+                        )}
                         <td className="text-right text-slate-400">{index + 1}</td>
                         <td className="mono text-brand-700 whitespace-nowrap">{product.code}</td>
                         <td>
@@ -542,8 +671,38 @@ const LowStockReport = () => {
           <p className="text-[12px] text-slate-500">
             Showing {rows.length} of {products.length} low stock item
             {products.length === 1 ? "" : "s"}.
+            {chosen.length > 0 && (
+              <>
+                {" "}
+                <span className="font-semibold text-slate-700">
+                  {chosen.length} picked for {lockedCompany}
+                </span>
+                {/* The basket survives the filters, so some of it may be off
+                    screen - saying so beats a count that looks wrong. */}
+                <button
+                  type="button"
+                  onClick={() => setPicked(new Set())}
+                  className="ml-2 font-semibold text-brand-700 underline underline-offset-2 hover:no-underline cursor-pointer"
+                >
+                  Clear
+                </button>
+              </>
+            )}
           </p>
         </>
+      )}
+
+      {requesting && (
+        <div className="modal-backdrop">
+          <PurchaseRequestModal
+            products={chosen.map((p) => ({ ...p, suggestedQty: shortageOf(p) }))}
+            onClose={() => setRequesting(false)}
+            onSaved={() => {
+              setPicked(new Set());
+              fetchLowStock({ silent: true });
+            }}
+          />
+        </div>
       )}
     </div>
   );

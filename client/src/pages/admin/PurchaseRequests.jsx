@@ -5,6 +5,7 @@ import API from "../../services/api";
 import { useAuth, MAINTENANCE_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
+import { useSapSyncDone } from "../../hooks/useSapSync";
 import PurchaseRequestModal from "./PurchaseRequestModal";
 
 /**
@@ -82,6 +83,10 @@ const PurchaseRequests = () => {
   // Paused while the dialog is open, so the list does not shift under it.
   const anyQueued = rows.some((r) => r.status === "Queued");
   useAutoRefresh(() => load(true), { enabled: anyQueued && !raising });
+
+  // A finished run is what moves a request off Queued, so the row it moved is
+  // the one on screen. Not while the dialog is open - the list would shift.
+  useSapSyncDone(() => !raising && load(true));
 
   const retry = async (id) => {
     setBusy(id);

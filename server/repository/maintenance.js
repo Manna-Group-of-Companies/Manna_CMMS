@@ -9,6 +9,7 @@ import {
   updateDoc,
 } from "../integrations/erpnext/client.js";
 import { STAGES, mayTake, missingFor, nextActionFor } from "../integrations/erpnext/breakdownStages.js";
+import { listTechnicians } from "./technicians.js";
 import { plantsFor } from "./plantScope.js";
 import {
   cancelIssue,
@@ -695,17 +696,34 @@ export const listMachines = async ({ plant = "", limit = 500 } = {}) => {
 /**
  * The people and suppliers the plan forms link to.
  *
- * Both are ERPNext Link fields, which means a typed value that does not match a
- * record is refused on save. Offering the real list is the difference between
- * picking a name and guessing at one and being told no afterwards.
+ * `people` is the maintenance team register, not ERPNext's users.
+ *
+ * It used to be every enabled System User, which is the whole company -
+ * accountants, plant heads, the store - and still did not contain most of the
+ * maintenance team, because the fitters have no login. So the one question the
+ * list existed to answer, "who repaired this", was the one it could not, and
+ * the field was typed by hand instead. See `technicianDoctype.js`.
+ *
+ * Active only: resigned people stay on every breakdown they worked, and stop
+ * being offered on new ones.
+ *
+ * `email` carries the linked ERPNext user where there is one, keeping the shape
+ * the crew rows already read - the name is what is recorded either way.
+ *
+ * `users` stays the ERPNext accounts, and is a different question. A prevention
+ * action is owned by somebody accountable for making a change - often purchase,
+ * a plant head or the manager, rarely the fitter who did the repair - and the
+ * field behind it is a Link to User, so only a real account can be saved there.
+ * Narrowing it to the team would have offered four names that cannot be stored.
  */
 export const listLookups = async () => {
-  const [people, suppliers] = await Promise.all([
+  const [people, users, suppliers] = await Promise.all([
+    listTechnicians({ activeOnly: true }).catch(() => []),
     listAll("User", {
       fields: ["name", "full_name"],
       filters: [
         ["User", "enabled", "=", 1],
-        // Website and guest accounts are not people anybody assigns a repair to.
+        // Website and guest accounts are not people anybody makes accountable.
         ["User", "user_type", "=", "System User"],
       ],
       orderBy: "full_name asc",
@@ -714,7 +732,8 @@ export const listLookups = async () => {
   ]);
 
   return {
-    people: people.map((u) => ({ email: u.name, name: u.full_name || u.name })),
+    people: people.map((t) => ({ email: t.user || "", name: t.name, trade: t.trade || "" })),
+    users: users.map((u) => ({ email: u.name, name: u.full_name || u.name })),
     suppliers: suppliers.map((s) => s.name),
   };
 };

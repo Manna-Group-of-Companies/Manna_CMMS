@@ -62,12 +62,18 @@ export const REQUEST_STAGES = {
      *
      * The field stays on the DocType and every request already carrying one
      * keeps it; it is simply not asked for any more.
+     *
+     * Nor is "assigned to" (14 Oct 2026), for a related reason. One name at the
+     * start is a guess about who will be free: a job is shared between whoever
+     * is on shift, and the name chosen on day one is rarely the person who ends
+     * up doing it. Who actually did the work is recorded against the finished
+     * job, from the maintenance team register, where it is known rather than
+     * predicted - see "Mark Complete".
      */
-    fields: ["started_at", "assigned_to", "plan_notes"],
+    fields: ["started_at", "plan_notes"],
     required: ["started_at"],
     labels: {
       started_at: "Work started at",
-      assigned_to: "Assigned to",
       plan_notes: "How it will be done",
     },
     stamp: (user) => ({ accepted_by: user?.email || "" }),

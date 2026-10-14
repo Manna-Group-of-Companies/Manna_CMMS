@@ -125,7 +125,9 @@ const BreakdownDetail = ({ id, onClose, onChanged }) => {
 
   const [record, setRecord] = useState(null);
   const [stages, setStages] = useState({});
-  const [lookups, setLookups] = useState({ people: [], suppliers: [] });
+  // `people` is the maintenance team (who repaired it); `users` is ERPNext
+  // accounts (who owns a prevention action). Two different questions.
+  const [lookups, setLookups] = useState({ people: [], users: [], suppliers: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -551,7 +553,7 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
         </span>
         <div>
           <h3 className="section-title">{stage.title}</h3>
-          <p className="panel-sub">{stage.blurb}</p>
+          {stage.blurb && <p className="panel-sub">{stage.blurb}</p>}
         </div>
       </div>
 
@@ -568,7 +570,6 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
             label="Work started at"
             required
             invalid={isMissing("repair_started_at")}
-            hint="When somebody actually began. Both halves of the downtime split hang off this."
           >
             <div className="flex gap-2">
               <input
@@ -593,7 +594,6 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
             label="Failure mode"
             required
             invalid={isMissing("failure_mode")}
-            hint="What kind of failure. This is what lets the report say which machines keep failing, and how."
           >
             <select className="field" value={form.failure_mode} onChange={set("failure_mode")}>
               <option value="">Choose…</option>
@@ -625,7 +625,6 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
                 rows={3}
                 value={form.actions_performed}
                 onChange={set("actions_performed")}
-                placeholder="The work carried out, in the words the fitter would use."
               />
             </Field>
             <div className="grid sm:grid-cols-2 gap-4">
@@ -643,7 +642,6 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
                 label="Hand over time"
                 required
                 invalid={isMissing("completed_at")}
-                hint="When production got the machine back — not when the fitter finished."
               >
                 <input
                   type="datetime-local"
@@ -652,7 +650,7 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
                   onChange={set("completed_at")}
                 />
               </Field>
-              <Field label="Downtime" hint="Worked out from when it stopped to the hand-over.">
+              <Field label="Downtime">
                 <input className="field bg-slate-50" value={liveDowntime(record, form)} readOnly />
               </Field>
             </div>
@@ -664,14 +662,12 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
             label="Root cause"
             required
             invalid={isMissing("root_cause")}
-            hint="Why it actually failed — not what broke, but why it broke."
           >
             <textarea
               className="field field-area"
               rows={3}
               value={form.root_cause}
               onChange={set("root_cause")}
-              placeholder="The bearing ran dry because the oil level was never checked after the seal change."
             />
           </Field>
         )}
@@ -690,7 +686,9 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
           <Prevention
             rows={actions}
             onChange={setActions}
-            people={lookups.people}
+            // Accounts, not the team: the owner is a Link to User, and most of
+            // the team have no login to store there.
+            people={lookups.users}
             invalid={isMissing("prevention_actions")}
           />
         )}
@@ -986,9 +984,16 @@ const Spares = ({ rows, onChange, store, loadError }) => {
  * only the manager — who is usually just the one with a login — makes the
  * question "who actually did this" unanswerable a year later.
  *
- * The name is free text with the ERPNext users offered as suggestions, because
- * four of the six on the team are fitters with no account. Demanding a login
- * would have quietly excluded most of the people doing the work.
+ * Picked from the maintenance team register, not typed (13 Oct 2026).
+ *
+ * It was free text with every ERPNext user offered as a suggestion - the whole
+ * company, and still not the fitters, who have no login. So the suggestions
+ * never contained the people doing the work and the name was typed anyway,
+ * which is how one person reaches the history as three spellings and the
+ * question "who repairs this machine most often" stops having an answer.
+ *
+ * A name already on a record that has since left the team is kept as an option
+ * of its own, so opening an old breakdown cannot silently blank who did it.
  */
 const Crew = ({ rows, onChange, people }) => {
   const set = (i, key, value) =>
@@ -1004,7 +1009,8 @@ const Crew = ({ rows, onChange, people }) => {
         <button
           type="button"
           className="btn btn-sm btn-neutral"
-          onClick={() => onChange([...rows, { name: "", user: "", role: "Fitter", hours: "" }])}
+          // No position: a name and the hours is the whole record (13 Oct 2026).
+          onClick={() => onChange([...rows, { name: "", user: "", hours: "" }])}
         >
           <Plus className="h-3.5 w-3.5" />
           Add
@@ -1012,46 +1018,45 @@ const Crew = ({ rows, onChange, people }) => {
       </div>
 
       {rows.length === 0 ? (
-        <p className="text-xs text-slate-500">
-          Nobody named yet. Add everyone who worked on it, not just whoever signed it off.
-        </p>
+        <p className="text-xs text-slate-500">Nobody named yet.</p>
       ) : (
         <div className="space-y-2">
           {rows.map((row, i) => (
             <div key={i} className="grid grid-cols-12 gap-2 items-start">
-              <input
-                className="field field-sm col-span-5"
-                placeholder="Name"
-                list="cmms-people"
+              <select
+                className="field field-sm col-span-8"
                 value={row.name}
                 onChange={(e) => {
-                  const typed = e.target.value;
-                  // Matching a real account links it, so the record can still be
-                  // traced to a user where one exists.
-                  const match = people.find((p) => p.name === typed);
-                  set(i, "name", typed);
-                  if (match) set(i, "user", match.email);
+                  const picked = e.target.value;
+                  const match = people.find((p) => p.name === picked);
+                  onChange(
+                    rows.map((r, n) =>
+                      // Linked where that person has an account, so the row can
+                      // still be traced to a user.
+                      n === i ? { ...r, name: picked, user: match?.email || "" } : r
+                    )
+                  );
                 }}
-              />
-              <select
-                className="field field-sm col-span-4"
-                value={row.role}
-                onChange={(e) => set(i, "role", e.target.value)}
               >
-                {["Fitter", "Electrician", "Helper", "Supervisor", "Contractor"].map((r) => (
-                  <option key={r} value={r}>
-                    {r}
+                <option value="">Choose…</option>
+                {people.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
                   </option>
                 ))}
+                {row.name && !people.some((p) => p.name === row.name) && (
+                  <option value={row.name}>{row.name} (no longer on the team)</option>
+                )}
               </select>
               <input
                 type="number"
                 min="0"
                 step="0.5"
-                className="field field-sm col-span-2"
+                className="field field-sm col-span-3"
                 placeholder="hrs"
                 value={row.hours}
                 onChange={(e) => set(i, "hours", e.target.value)}
+                aria-label="Hours"
               />
               <button
                 type="button"
@@ -1063,11 +1068,6 @@ const Crew = ({ rows, onChange, people }) => {
               </button>
             </div>
           ))}
-          <datalist id="cmms-people">
-            {people.map((p) => (
-              <option key={p.email} value={p.name} />
-            ))}
-          </datalist>
         </div>
       )}
     </div>
@@ -1177,10 +1177,7 @@ const Prevention = ({ rows, onChange, people, invalid }) => {
       </div>
 
       {rows.length === 0 && (
-        <p className="text-xs text-slate-500 mb-2">
-          At least one. This is the step the whole record exists for — a breakdown
-          closed with nothing recorded is one that will be reported again.
-        </p>
+        <p className="text-xs text-slate-500 mb-2">At least one.</p>
       )}
 
       <div className="space-y-3">

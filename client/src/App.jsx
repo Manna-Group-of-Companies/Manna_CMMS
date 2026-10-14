@@ -14,6 +14,7 @@ import ChecklistSheetPreview from "./pages/maintenance/ChecklistSheetPreview";
 import NoAccess from "./pages/auth/NoAccess";
 import Categories from "./pages/admin/Categories";
 import AssetManagement from "./pages/maintenance/AssetManagement";
+import Technicians from "./pages/maintenance/Technicians";
 import MaintenanceRequests from "./pages/maintenance/MaintenanceRequests";
 import PreventiveMaintenance from "./pages/maintenance/PreventiveMaintenance";
 import BreakdownReport from "./pages/admin/BreakdownReport";
@@ -143,6 +144,14 @@ function App() {
                 element={
                   <RequireView view="assets">
                     <AssetManagement />
+                  </RequireView>
+                }
+              />
+              <Route
+                path="technicians"
+                element={
+                  <RequireView view="technicians">
+                    <Technicians />
                   </RequireView>
                 }
               />

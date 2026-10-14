@@ -9,6 +9,7 @@ import {
   FolderTree,
   Gauge,
   Hammer,
+  HardHat,
   KeyRound,
   PackageOpen,
   ShoppingCart,
@@ -91,6 +92,14 @@ export const VIEWS = {
    * still confined to their own plant on both.
    */
   maintenanceRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR],
+  /**
+   * The maintenance team register - who may be named on a repair.
+   *
+   * The Maintenance Manager's alone. It decides whose name can appear in the
+   * history of every repair, which is a maintenance judgement; the plant that
+   * reports a breakdown has no business adding or retiring a fitter.
+   */
+  technicians: [MAINTENANCE_MANAGER],
   preventive: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR],
 
   /**
@@ -177,6 +186,7 @@ export const NAV = [
   },
   { view: "preventive", label: "Preventive Maintenance", path: "preventive", icon: CalendarCheck },
   { view: "assets", label: "Asset Management", path: "assets", icon: Factory },
+  { view: "technicians", label: "Maintenance Team", path: "technicians", icon: HardHat },
   { view: "breakdownReport", label: "Breakdown Report", path: "breakdown-report", icon: BarChart3 },
   { view: "scrap", label: "Scrap & Consumption", path: "scrap", icon: TrendingDown },
   { view: "redStockRoom", label: "Red Stock Room", path: "returns", icon: PackageOpen },

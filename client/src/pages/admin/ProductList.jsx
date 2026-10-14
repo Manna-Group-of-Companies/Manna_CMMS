@@ -7,7 +7,7 @@ import useStockRooms from "../../hooks/useStockRooms";
 import ProductFormModal from "./ProductFormModal";
 import CompanyBreakdown from "../../components/CompanyBreakdown";
 import CategoryEditModal from "../../components/CategoryEditModal";
-import SapSyncButton from "../../components/SapSyncButton";
+import { useSapSyncDone } from "../../hooks/useSapSync";
 import { statusTone } from "../../utils/productStatus";
 import { formatCurrency } from "../../utils/currency";
 import {
@@ -314,6 +314,10 @@ const ProductList = () => {
   // Paused while a modal is open so an edit form cannot be reset mid-typing.
   useAutoRefresh(() => fetchProducts({ silent: true }), { enabled: !activeModal });
 
+  // The sync is pressed in the top bar, which knows nothing of this list. A run
+  // that finishes leaves exactly the quantities it was pressed to replace.
+  useSapSyncDone(() => fetchProducts({ silent: true }));
+
 
 
   return (
@@ -411,7 +415,6 @@ const ProductList = () => {
         */}
         {canProposeItem && (
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <SapSyncButton onDone={() => fetchProducts({ silent: true })} />
             <button
               onClick={() => {
                 setSelectedProduct(null);

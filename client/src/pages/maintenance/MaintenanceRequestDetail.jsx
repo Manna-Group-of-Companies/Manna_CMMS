@@ -90,6 +90,7 @@ const MaintenanceRequestDetail = ({ id, onClose, onChanged }) => {
 
   const [record, setRecord] = useState(null);
   const [stages, setStages] = useState({});
+  // The maintenance team: who did the work, recorded against the finished job.
   const [people, setPeople] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -114,8 +115,12 @@ const MaintenanceRequestDetail = ({ id, onClose, onChanged }) => {
   useEffect(() => {
     API.get("/maintenance-requests/stages").then(({ data }) => setStages(data)).catch(() => {});
     API.get("/breakdowns/lookups")
-      .then(({ data }) => setPeople(data.people || []))
-      .catch(() => setPeople([]));
+      .then(({ data }) => {
+        setPeople(data.people || []);
+      })
+      .catch(() => {
+        setPeople([]);
+      });
   }, []);
 
   const stage = record?.nextAction ? stages[record.nextAction] : null;
@@ -330,8 +335,6 @@ const StageForm = ({ action, stage, record, people, onDone }) => {
     started_at: record.startedAt
       ? String(record.startedAt).replace(" ", "T").slice(0, 16)
       : localNow(),
-    assigned_to: record.assignedTo || "",
-    target_date: record.targetDate || "",
     plan_notes: record.planNotes || "",
     work_done: record.workDone || "",
     completed_at: record.completedAt
@@ -409,7 +412,7 @@ const StageForm = ({ action, stage, record, people, onDone }) => {
         </span>
         <div>
           <h3 className="section-title">{stage.title}</h3>
-          <p className="panel-sub">{stage.blurb}</p>
+          {stage.blurb && <p className="panel-sub">{stage.blurb}</p>}
         </div>
       </div>
 
@@ -440,34 +443,12 @@ const StageForm = ({ action, stage, record, people, onDone }) => {
                 </button>
               </div>
             </Field>
-            <Field label="Target date" hint="What you are telling the requester to expect.">
-              <input
-                type="date"
-                className="field"
-                value={form.target_date || ""}
-                onChange={set("target_date")}
-              />
-            </Field>
           </div>
-        )}
-
-        {has("assigned_to") && (
-          <Field label="Assigned to">
-            <select className="field" value={form.assigned_to} onChange={set("assigned_to")}>
-              <option value="">Nobody yet</option>
-              {people.map((p) => (
-                <option key={p.email} value={p.email}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </Field>
         )}
 
         {has("plan_notes") && (
           <Field
             label="How it will be done"
-            hint="Optional. Worth a line where the approach is not obvious, so nobody redesigns it halfway."
           >
             <textarea
               className="field field-area"
@@ -486,7 +467,6 @@ const StageForm = ({ action, stage, record, people, onDone }) => {
                 rows={3}
                 value={form.work_done}
                 onChange={set("work_done")}
-                placeholder="What was actually made or done, in the words the fitter would use."
               />
             </Field>
             <Field label="Completed at" required invalid={isMissing("completed_at")}>
@@ -615,7 +595,7 @@ const TurnDown = ({ record, stages, user, onDone }) => {
         <div className="card p-4 space-y-3">
           <div>
             <h3 className="section-title">{stage.title}</h3>
-            <p className="panel-sub">{stage.blurb}</p>
+            {stage.blurb && <p className="panel-sub">{stage.blurb}</p>}
           </div>
           {problem && <div className="note note-rose">{problem}</div>}
           <textarea
@@ -623,11 +603,6 @@ const TurnDown = ({ record, stages, user, onDone }) => {
             rows={2}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder={
-              action === "Reject"
-                ? "Why maintenance will not do it — or what would have to change first."
-                : "Why it is no longer needed."
-            }
           />
           <div className="flex justify-end gap-2">
             <button className="btn btn-sm btn-neutral" onClick={() => setOpen(false)}>
@@ -688,17 +663,13 @@ const Materials = ({ rows, onChange }) => {
       </div>
 
       {rows.length === 0 ? (
-        <p className="text-xs text-slate-500">
-          Nothing yet. Write them in plain words with the unit — the catalog is still being renamed
-          and recounted, so nothing here is checked against it.
-        </p>
+        <p className="text-xs text-slate-500">Nothing yet.</p>
       ) : (
         <div className="space-y-2">
           {rows.map((row, i) => (
             <div key={i} className="grid grid-cols-12 gap-2 items-start">
               <input
                 className="field field-sm col-span-6"
-                placeholder="What was used — 40x40x5 angle, 3.15 mm welding rod"
                 value={row.description}
                 onChange={(e) => set(i, "description", e.target.value)}
               />
@@ -786,28 +757,38 @@ const Crew = ({ rows, onChange, people, total, invalid }) => {
       </div>
 
       {rows.length === 0 ? (
-        <p className="text-xs text-slate-500">
-          Nobody named yet. Add everyone who worked on it and their hours — this is what the job
-          cost in labour, and it is the only place it is recorded.
-        </p>
+        <p className="text-xs text-slate-500">Nobody named yet.</p>
       ) : (
         <div className="space-y-2">
           {rows.map((row, i) => (
             <div key={i} className="grid grid-cols-12 gap-2 items-start">
-              <input
+              {/* Picked from the maintenance team register, not typed - see the
+                  same change on the breakdown's crew rows. A name already
+                  recorded whose owner has since left stays selectable, so an
+                  old record cannot be silently blanked. */}
+              <select
                 className="field field-sm col-span-5"
-                placeholder="Name"
-                list="cmms-request-people"
                 value={row.name}
                 onChange={(e) => {
-                  const typed = e.target.value;
-                  // Matching a real account links it, so the record can still be
-                  // traced to a user where one exists.
-                  const match = people.find((p) => p.name === typed);
-                  set(i, "name", typed);
-                  if (match) set(i, "user", match.email);
+                  const picked = e.target.value;
+                  const match = people.find((p) => p.name === picked);
+                  onChange(
+                    rows.map((r, n) =>
+                      n === i ? { ...r, name: picked, user: match?.email || "" } : r
+                    )
+                  );
                 }}
-              />
+              >
+                <option value="">Choose…</option>
+                {people.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
+                  </option>
+                ))}
+                {row.name && !people.some((p) => p.name === row.name) && (
+                  <option value={row.name}>{row.name} (no longer on the team)</option>
+                )}
+              </select>
               <select
                 className="field field-sm col-span-4"
                 value={row.role}
@@ -838,11 +819,6 @@ const Crew = ({ rows, onChange, people, total, invalid }) => {
               </button>
             </div>
           ))}
-          <datalist id="cmms-request-people">
-            {people.map((p) => (
-              <option key={p.email} value={p.name} />
-            ))}
-          </datalist>
         </div>
       )}
     </div>
@@ -875,9 +851,7 @@ const Report = ({ record }) => {
       {reached("In Progress") && record.state !== "Cancelled" && (
         <Block title="Taken on">
           <KV label="Accepted by" value={record.acceptedBy} />
-          <KV label="Assigned to" value={record.assignedTo} />
           <KV label="Work started" value={when(record.startedAt)} />
-          <KV label="Target date" value={record.targetDate ? day(record.targetDate) : ""} />
           <KV label="How it will be done" value={record.planNotes} wide />
         </Block>
       )}

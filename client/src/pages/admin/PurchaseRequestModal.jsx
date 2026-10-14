@@ -12,8 +12,15 @@ import { AlertCircle, ChevronDown, Loader2, Search, ShoppingCart, Trash2, X } fr
  * a Purchase Order in SAP, and that PO is what Goods receipt receives against.
  *
  * Every line must be an item of the one company that already has a SAP code,
- * so the company is fixed by the first item: by the starting product when
- * opened from a row, else picked here before items can be searched.
+ * so the company is fixed by the first item: by the starting products when
+ * opened with some, else picked here before items can be searched.
+ *
+ * Opened from Low Stock it arrives with the ticked shortfalls already on it,
+ * each carrying `suggestedQty` - the units that bring that shelf back to its
+ * minimum. A starting quantity, not a decision: every line is still typed over
+ * before it is sent, and buying exactly the shortfall only reaches the minimum
+ * again, which for a fast-moving item is the next shortage rather than the end
+ * of one.
  */
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -46,17 +53,24 @@ const lineFrom = (product) => ({
   quantity: product.quantity,
   minStock: product.minStock,
   unit: product.unit || "",
-  qty: "",
+  // Low Stock sends the shortfall through; everywhere else the quantity is the
+  // one thing nobody can guess.
+  qty: product.suggestedQty > 0 ? String(product.suggestedQty) : "",
   remarks: "",
 });
 
-const PurchaseRequestModal = ({ product = null, onClose, onSaved }) => {
+const PurchaseRequestModal = ({ product = null, products = null, onClose, onSaved }) => {
   const { showToast } = useNotifications();
-  const startCompany = product?.sapCategory?.company || "";
+  // One item or a basket of them: the same request either way.
+  const seed = useMemo(
+    () => (products?.length ? products : product ? [product] : []),
+    [products, product]
+  );
+  const startCompany = seed[0]?.sapCategory?.company || "";
   const [companies, setCompanies] = useState(null);
   const [company, setCompany] = useState(startCompany);
   const [lines, setLines] = useState(() =>
-    product && eligible(product, startCompany) ? [lineFrom(product)] : []
+    seed.filter((p) => eligible(p, startCompany)).map(lineFrom)
   );
   const [term, setTerm] = useState("");
   // The company's Engineering Stock items the request can take; null while loading.
@@ -67,18 +81,28 @@ const PurchaseRequestModal = ({ product = null, onClose, onSaved }) => {
   const [requiredBy, setRequiredBy] = useState(daysAhead(7));
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(
-    product && !eligible(product, startCompany)
-      ? "This item has no SAP code or SAP company yet, so it cannot be requested."
-      : ""
-  );
+  // Anything handed in that SAP does not know yet is dropped rather than
+  // carried as a line that cannot be sent - and said out loud, because a basket
+  // that quietly arrives one item short is worse than one that explains itself.
+  const [error, setError] = useState(() => {
+    const left = seed.filter((p) => !eligible(p, startCompany));
+    if (left.length === 0) return "";
+    if (left.length === seed.length) {
+      return seed.length === 1
+        ? "This item has no SAP code or SAP company yet, so it cannot be requested."
+        : "None of those items has a SAP code yet, so none can be requested.";
+    }
+    return `${left.length} of ${seed.length} left out - no SAP code yet: ${left
+      .map((p) => p.code)
+      .join(", ")}`;
+  });
 
-  // Opened from a row the company is the item's; opened bare, it is picked.
-  const companyFixed = Boolean(product);
+  // Opened with items the company is theirs; opened bare, it is picked.
+  const companyFixed = seed.length > 0;
   const companyName = useMemo(() => {
     const c = (companies || []).find((x) => x.abbr === company);
-    return c ? `${c.company} (${company})` : product?.homeStore || company;
-  }, [companies, company, product]);
+    return c ? `${c.company} (${company})` : seed[0]?.homeStore || company;
+  }, [companies, company, seed]);
 
   // The companies: the picker when opened bare, the full name otherwise.
   useEffect(() => {

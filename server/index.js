@@ -32,6 +32,7 @@ import companyRoutes from "./routes/companyRoutes.js";
 import erpRoutes from "./routes/erpRoutes.js";
 import sessionRoutes from "./routes/sessionRoutes.js";
 import breakdownRoutes from "./routes/breakdownRoutes.js";
+import technicianRoutes from "./routes/technicianRoutes.js";
 import namingRequestRoutes from "./routes/namingRequestRoutes.js";
 import goodsReceiptRoutes from "./routes/goodsReceiptRoutes.js";
 import purchaseRequestRoutes from "./routes/purchaseRequestRoutes.js";
@@ -124,6 +125,8 @@ app.use("/api/session", sessionRoutes);
 // Module 2: breakdowns and machines. Reads ERPNext directly, so these work
 // without a MongoDB behind them.
 app.use("/api/breakdowns", breakdownRoutes);
+// The maintenance team register, which is what "Repaired by" offers.
+app.use("/api/technicians", technicianRoutes);
 app.use("/api/naming-requests", namingRequestRoutes);
 // Engineering goods receipts (from a bill, against a SAP PO) and nil-value
 // stock additions; posted to SAP by the item master sync.

@@ -2,11 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import { Loader2, X, Boxes, Lock, RotateCcw, Hash } from "lucide-react";
-import ItemNameBuilder, {
-  NameComplianceNotice,
-  EMPTY_NAMING,
-  isNamingBlank,
-} from "../../components/ItemNameBuilder";
 import TaxonomySelect, {
   useSubCategoryOptions,
   useSubCategoryBOptions,
@@ -23,21 +18,24 @@ import { useFormDraft, describeWhen } from "../../hooks/useFormDraft";
  *   (company database)   SAP company
  *   ItemsGroupCode       Item group            (that company's engineering groups)
  *   U_SubTypeA / B       Sub-category A / B
- *   ItemName             Description           (built with the SOP naming builder)
+ *   ItemName             Description
  *   ForeignName          Foreign name
  *   Inventory/Purchasing/Sales UoM   Unit      (one unit, as SAP is used here)
- *   ChapterID            HSN code              (optional; from that company's SAP HSN list)
- *   U_TaxRate            Tax rate              (optional)
+ *   ChapterID            HSN code              (edit only; from that company's SAP HSN list)
+ *   U_TaxRate            Tax rate              (edit only)
  *   MinInventory         Minimum stock         (also the CMMS low-stock limit)
  *   -                    Brand                 (the CMMS's own)
  *   -                    Opening quantity      (add only: stock on the shelf with no bill)
  *
  * Since 9 Oct 2026 there is no approval: adding saves the item approved and
  * queues it for the SAP server, which creates it in SAP with the company's next
- * item code (and then in ERPNext) within about a minute. HSN and tax rate may be
- * left empty for an item with no bill yet - its first goods receipt fills them
- * in. An edit saves at once; the name, item group, sub-categories, HSN and tax
- * rate reach SAP, while the foreign name and minimum stock stay in the CMMS.
+ * item code (and then in ERPNext) within about a minute.
+ *
+ * Adding does not ask for HSN or tax rate (13 Oct 2026): they belong to a bill,
+ * and the item's first goods receipt is what fills them in. They stay on the
+ * edit form, which is where a wrong one gets corrected. An edit saves at once;
+ * the name, item group, sub-categories, HSN and tax rate reach SAP, while the
+ * foreign name and minimum stock stay in the CMMS.
  * The item code, company and unit are fixed once an item exists (SAP refuses a
  * new inventory unit after the first transaction).
  */
@@ -62,12 +60,8 @@ const NAME_MAX = 100;
 const SUB_MAX = 50;
 
 /** Only a form with something typed into it is worth keeping as a draft. */
-const isWorthKeeping = ({ form, naming } = {}) =>
-  Boolean(
-    form &&
-      (form.name || form.foreignName || form.brand || form.subCategory || form.hsnCode) ||
-      (naming && !isNamingBlank(naming))
-  );
+const isWorthKeeping = ({ form } = {}) =>
+  Boolean(form && (form.name || form.foreignName || form.brand || form.subCategory));
 
 const ProductFormModal = ({ product, onClose, onSaved }) => {
   const { showToast } = useNotifications();
@@ -79,8 +73,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
   const [loadError, setLoadError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [problem, setProblem] = useState("");
-  const [naming, setNaming] = useState(EMPTY_NAMING);
-  const [showBuilder, setShowBuilder] = useState(!isEdit);
 
   // The half-finished add form survives a close; an edit never restores a draft.
   const draft = useFormDraft("add-engineering-stock-sap", { enabled: !isEdit, isWorthKeeping });
@@ -121,7 +113,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       });
     } else if (savedDraft?.form) {
       setForm({ ...EMPTY, ...savedDraft.form });
-      setNaming(savedDraft.naming || EMPTY_NAMING);
       setRestoredFrom(savedDraft.savedAt || null);
     }
   }, [product, savedDraft]);
@@ -131,12 +122,12 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
     if (!isEdit && companies?.length === 1 && !form.company) setForm((f) => ({ ...f, company: companies[0].abbr }));
   }, [companies, isEdit, form.company]);
 
-  const latest = useRef({ form, naming });
-  latest.current = { form, naming };
+  const latest = useRef({ form });
+  latest.current = { form };
   const finished = useRef(false);
   useEffect(() => {
-    if (!isEdit) saveDraft({ form, naming });
-  }, [form, naming, isEdit, saveDraft]);
+    if (!isEdit) saveDraft({ form });
+  }, [form, isEdit, saveDraft]);
   useEffect(
     () => () => {
       if (!isEdit && !finished.current) saveDraftNow(latest.current);
@@ -148,7 +139,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
     clearDraft();
     setRestoredFrom(null);
     setForm(EMPTY);
-    setNaming(EMPTY_NAMING);
     setProblem("");
   };
 
@@ -176,7 +166,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
     setProblem("");
     if (!form.company) return setProblem("Choose the SAP company.");
     if (!form.itemGroup) return setProblem("Choose the item group.");
-    if (!form.name.trim()) return setProblem("Build the description with the SOP naming builder (or type it).");
+    if (!form.name.trim()) return setProblem("Type the description.");
     if (form.name.trim().length > NAME_MAX) return setProblem(`The description can be at most ${NAME_MAX} characters - SAP's limit.`);
     if (form.subCategoryB && !form.subCategory) return setProblem("Sub-category B needs a Sub-category A above it.");
     if (!form.unit) return setProblem("Choose the unit.");
@@ -188,8 +178,11 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       subCategory: form.subCategory,
       subCategoryB: form.subCategoryB,
       foreignName: form.foreignName,
-      hsnCode: form.hsnCode,
-      taxRate: form.taxRate,
+      // Blank on an add whatever the form holds: the fields are gone from that
+      // side, but a draft saved before they went still carries what was typed
+      // then, and it would reach SAP with nobody able to see or correct it.
+      hsnCode: isEdit ? form.hsnCode : "",
+      taxRate: isEdit ? form.taxRate : "",
       minStock: Number(form.minStock) || 0,
       brand: form.brand,
     };
@@ -201,7 +194,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
           ...payload,
           category: form.itemGroup,
           name: form.name.trim(),
-          ...(isNamingBlank(naming) ? {} : { naming }),
         });
         showToast("Saved. The name, categories, HSN and tax rate are sent to SAP by the item master sync.", "success");
       } else {
@@ -210,7 +202,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
           company: form.company,
           unit: form.unit,
           proposedName: form.name.trim(),
-          naming: isNamingBlank(naming) ? null : naming,
           openingQty,
         });
         finished.current = true;
@@ -227,7 +218,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
   };
 
   const label = "field-label";
-  const hint = "mt-1 text-[11px] text-slate-500";
   const locked = isEdit;
 
   return (
@@ -263,12 +253,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
           )}
 
           {isEdit && !notSap && <CategorySyncNote compact />}
-          {!isEdit && (
-            <p className="text-[13px] text-slate-600">
-              Saving sends it to the SAP server, which creates it in SAP with the next item code within a minute. It
-              appears in Engineering Stock once SAP has given it a code.
-            </p>
-          )}
 
           {loadError && <div className="note note-rose text-sm">{loadError}</div>}
           {!companies && !loadError && (
@@ -344,20 +328,13 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                 )}
               </div>
 
-              {/* --- description: the SOP name --- */}
+              {/* --- description --- */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <label className={label + " mb-0"} htmlFor="sap-name">Description * <span className="text-slate-400 font-normal">(SAP item description)</span></label>
-                  <button type="button" className="text-[12px] font-semibold text-brand-700 hover:underline cursor-pointer" onClick={() => setShowBuilder((s) => !s)}>
-                    {showBuilder ? "Hide the SOP naming builder" : "Build it with the SOP naming builder"}
-                  </button>
-                </div>
-                {showBuilder && (
-                  <ItemNameBuilder value={naming} onChange={setNaming} onApply={(name) => set("name", String(name || "").slice(0, NAME_MAX))} disabled={submitting} />
-                )}
-                <input id="sap-name" className="field" value={form.name} onChange={bind("name")} maxLength={NAME_MAX} placeholder="e.g. 50SQMM*10MM Cable Leg Ring Type CU" required />
-                <div className="flex justify-between gap-2">
-                  <NameComplianceNotice name={form.name} />
+                <label className={label} htmlFor="sap-name">Description *</label>
+                <input id="sap-name" className="field" value={form.name} onChange={bind("name")} maxLength={NAME_MAX} required />
+                {/* The count stays: it is the one thing here that is not a
+                    description but a limit, and SAP rejects the save over it. */}
+                <div className="flex justify-end">
                   <span className="text-[11px] text-slate-400 shrink-0">{form.name.length}/{NAME_MAX}</span>
                 </div>
               </div>
@@ -368,7 +345,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                   <label className={label} htmlFor="sap-foreign">
                     Foreign name{isEdit && <span className="text-slate-400 font-normal"> (CMMS only — not sent to SAP)</span>}
                   </label>
-                  <input id="sap-foreign" className="field" value={form.foreignName} onChange={bind("foreignName")} maxLength={NAME_MAX} placeholder="Optional - a second name, e.g. the supplier's" />
+                  <input id="sap-foreign" className="field" value={form.foreignName} onChange={bind("foreignName")} maxLength={NAME_MAX} />
                 </div>
                 <div>
                   <label className={label} htmlFor="sap-unit">Unit *</label>
@@ -383,53 +360,54 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                       ))}
                     </select>
                   )}
-                  {!locked && <p className={hint}>Inventory, purchasing and sales unit in SAP.</p>}
                 </div>
-                <div>
-                  <label className={label} htmlFor="sap-hsn">HSN code</label>
-                  <input
-                    id="sap-hsn"
-                    className="field mono"
-                    list="sap-hsn-list"
-                    value={form.hsnCode}
-                    onChange={(e) => set("hsnCode", e.target.value.replace(/[^\d.]/g, ""))}
-                    placeholder="e.g. 84819090"
-                    disabled={!company}
-                  />
-                  <datalist id="sap-hsn-list">
-                    {(company?.hsn || []).map((h) => (
-                      <option key={h} value={h} />
-                    ))}
-                  </datalist>
-                  <p className={hint}>Optional. From {company?.company || "the company"}'s HSN list in SAP.</p>
-                </div>
-                <div>
-                  <label className={label} htmlFor="sap-tax">Tax rate</label>
-                  <select id="sap-tax" className="field cursor-pointer" value={form.taxRate} onChange={bind("taxRate")} disabled={!company}>
-                    <option value="">None</option>
-                    {(company?.taxRates || []).map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                  <p className={hint}>Optional.</p>
-                </div>
-                <p className="sm:col-span-2 -mt-2 text-[12px] text-slate-500">
-                  Leave HSN code and tax rate empty when there is no bill yet — the first goods receipt fills these in from the bill.
-                </p>
+                {/*
+                  HSN and tax rate come off a bill, so adding an item no longer
+                  asks for them - the first goods receipt is what sets them.
+                  They stay on the edit form, which is where a wrong one is put
+                  right without waiting for another receipt.
+                */}
+                {isEdit && (
+                  <>
+                    <div>
+                      <label className={label} htmlFor="sap-hsn">HSN code</label>
+                      <input
+                        id="sap-hsn"
+                        className="field mono"
+                        list="sap-hsn-list"
+                        value={form.hsnCode}
+                        onChange={(e) => set("hsnCode", e.target.value.replace(/[^\d.]/g, ""))}
+                        disabled={!company}
+                      />
+                      <datalist id="sap-hsn-list">
+                        {(company?.hsn || []).map((h) => (
+                          <option key={h} value={h} />
+                        ))}
+                      </datalist>
+                    </div>
+                    <div>
+                      <label className={label} htmlFor="sap-tax">Tax rate</label>
+                      <select id="sap-tax" className="field cursor-pointer" value={form.taxRate} onChange={bind("taxRate")} disabled={!company}>
+                        <option value="">None</option>
+                        {(company?.taxRates || []).map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                )}
                 <div>
                   <label className={label} htmlFor="sap-min">
                     Minimum stock{isEdit && <span className="text-slate-400 font-normal"> (CMMS only — not sent to SAP)</span>}
                   </label>
                   <input id="sap-min" type="number" min="0" step="any" className="field" value={form.minStock} onChange={bind("minStock")} />
-                  <p className={hint}>{isEdit ? "The low-stock limit here." : "SAP's Minimum Inventory, and the low-stock limit here."}</p>
                 </div>
                 {!isEdit && (
                   <div>
-                    <label className={label} htmlFor="sap-opening">Opening quantity on the shelf (no bill)</label>
-                    <input id="sap-opening" type="number" min="0" step="any" className="field" value={form.openingQty} onChange={bind("openingQty")} placeholder="0" />
-                    <p className={hint}>Received at nil value once the item is in SAP.</p>
+                    <label className={label} htmlFor="sap-opening">Opening quantity</label>
+                    <input id="sap-opening" type="number" min="0" step="any" className="field" value={form.openingQty} onChange={bind("openingQty")} />
                   </div>
                 )}
                 <div className="sm:col-span-2">
