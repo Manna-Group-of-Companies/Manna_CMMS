@@ -112,13 +112,13 @@ function App() {
                   </RequireView>
                 }
               />
-              {/* Purchase requests sent to SAP, and where each stands. Reading
-                  follows Engineering Stock; raising them is the Maintenance
-                  Manager's (server-enforced). */}
+              {/* Purchase requests sent to SAP, and where each stands. Its own
+                  screen, so the Admin can follow the queue; raising them is
+                  the Maintenance Manager's (server-enforced). */}
               <Route
                 path="purchase-requests"
                 element={
-                  <RequireView view="engineeringStock">
+                  <RequireView view="purchaseRequests">
                     <PurchaseRequests />
                   </RequireView>
                 }
@@ -271,7 +271,7 @@ function App() {
               <Route
                 path="purchase-requests"
                 element={
-                  <RequireView view="engineeringStock">
+                  <RequireView view="purchaseRequests">
                     <PurchaseRequests />
                   </RequireView>
                 }

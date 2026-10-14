@@ -75,6 +75,17 @@ export const VIEWS = {
   lowStock: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, HIGHER_MANAGEMENT],
 
   /**
+   * Purchase requests sent to SAP, and where each stands.
+   *
+   * Its own screen since 14 Oct 2026; it was part of Engineering Stock, which
+   * this release shows to the Maintenance Manager alone, so the Admin could not
+   * follow what had been asked of purchase. Reading is the Admin's and
+   * maintenance's; raising one, and sending it again, stays the Maintenance
+   * Manager's - routes/purchaseRequestRoutes.js holds that line.
+   */
+  purchaseRequests: [MANAGER, MAINTENANCE_MANAGER],
+
+  /**
    * The item-naming queue.
    *
    * Raised by maintenance, agreed by operations. The plant heads were on this
@@ -174,7 +185,8 @@ export const VIEWS = {
  */
 // itemNaming released 25 Sep 2026 for the VP Operations, held back again 29 Sep (its approval step went on 10 Oct).
 // attendance released 12 Oct 2026: it is the whole of what a Maintenance Member has, so it ships with them.
-export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "attendance"]);
+// purchaseRequests released 14 Oct 2026, so the Admin can follow the purchase queue.
+export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "attendance", "purchaseRequests"]);
 
 
 /**

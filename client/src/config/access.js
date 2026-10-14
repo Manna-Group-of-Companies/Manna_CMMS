@@ -75,6 +75,14 @@ export const VIEWS = {
    */
   categories: [MAINTENANCE_MANAGER, VP_OPERATIONS, SUPERVISOR],
   lowStock: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, HIGHER_MANAGEMENT],
+
+  /**
+   * Purchase requests sent to SAP, and where each stands. Its own screen since
+   * 14 Oct 2026, so the Admin can follow the purchase queue; it was part of
+   * Engineering Stock, which this release keeps to the Maintenance Manager.
+   * Raising one stays the Maintenance Manager's.
+   */
+  purchaseRequests: [MANAGER, MAINTENANCE_MANAGER],
   // itemNaming (the "New Items" page, /requests) removed 10 Oct 2026: it was the VP Operations'
   // approval queue for new items, and since 9 Oct 2026 items go straight to SAP with no approval.
   // The server keeps its entry, which still guards the /naming-requests read API.
@@ -136,7 +144,8 @@ export const VIEWS = {
  */
 // itemNaming was released 25 Sep 2026 for the VP Operations to approve new items; held back again on
 // 29 Sep, and its approval step removed on 10 Oct 2026.
-export const RELEASED = new Set(["breakdowns", "maintenanceRequests"]);
+// purchaseRequests released 14 Oct 2026, so the Admin can follow the purchase queue.
+export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "purchaseRequests"]);
 
 
 /**
@@ -174,7 +183,7 @@ export const consoleFor = (role) => (role === SUPERVISOR ? "/supervisor" : "/adm
 export const NAV = [
   { view: "engineeringStock", label: "Engineering Stock", path: "products", icon: Boxes },
   { view: "engineeringStock", label: "Goods Receipts", path: "goods-receipts", icon: ClipboardCheck },
-  { view: "engineeringStock", label: "Purchase Requests", path: "purchase-requests", icon: ShoppingCart },
+  { view: "purchaseRequests", label: "Purchase Requests", path: "purchase-requests", icon: ShoppingCart },
   { view: "categories", label: "Categories", path: "categories", icon: FolderTree },
   { view: "lowStock", label: "Low Stock", path: "low-stock", icon: AlertTriangle },
   { view: "breakdowns", label: "Breakdowns", path: "breakdowns", icon: Wrench },

@@ -12,8 +12,8 @@ router.use(protect);
 // Manager's, as receiving and adding items are (9 Oct 2026).
 const WRITE = requireRole("Maintenance Manager");
 
-router.get("/", requireView("engineeringStock"), list);
-router.get("/:id", requireView("engineeringStock"), detail);
+router.get("/", requireView("purchaseRequests"), list);
+router.get("/:id", requireView("purchaseRequests"), detail);
 router.post("/", WRITE, raise);
 router.post("/:id/retry", WRITE, retry);
 
