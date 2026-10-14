@@ -51,13 +51,23 @@ export const REQUEST_STAGES = {
     from: "Requested",
     to: "In Progress",
     title: "Take the job on",
-    blurb: "When work began, who is doing it, and when it should be finished by.",
-    fields: ["started_at", "assigned_to", "target_date", "plan_notes"],
+    blurb: "",
+    /**
+     * No target date (14 Oct 2026).
+     *
+     * Maintenance work does not estimate well - a job is opened up before
+     * anyone knows what it needs - so the date was either guessed or left
+     * blank, and a guessed date on a queue is worse than none: it reads to the
+     * plant as a promise and to maintenance as a number nobody meant.
+     *
+     * The field stays on the DocType and every request already carrying one
+     * keeps it; it is simply not asked for any more.
+     */
+    fields: ["started_at", "assigned_to", "plan_notes"],
     required: ["started_at"],
     labels: {
       started_at: "Work started at",
       assigned_to: "Assigned to",
-      target_date: "Target date",
       plan_notes: "How it will be done",
     },
     stamp: (user) => ({ accepted_by: user?.email || "" }),
@@ -80,7 +90,7 @@ export const REQUEST_STAGES = {
     from: "In Progress",
     to: "Completed",
     title: "Mark it complete",
-    blurb: "What was done, when it finished, the materials used and who did it.",
+    blurb: "",
     fields: ["work_done", "completed_at", "materials_used", "worked_by"],
     required: ["work_done", "completed_at", "worked_by"],
     labels: {
@@ -95,11 +105,17 @@ export const REQUEST_STAGES = {
   /**
    * The job is signed off.
    *
-   * The plant manager's, and the Maintenance Manager's too (29 Sep 2026). It
-   * used to be the requester's alone. A plant manager may close any request on
-   * their own plant - the controller holds them to it - not only the ones they
-   * raised, so a request the Admin raised for their site is not stuck. The
-   * Admin keeps it as a fallback.
+   * The plant's (14 Oct 2026). It was the requester's alone until 29 Sep,
+   * then open to the Maintenance Manager as well for a fortnight - which let
+   * the person who did the work also sign it off as done, so a request could
+   * go from raised to closed without the plant that asked for it ever
+   * confirming. Closing is the plant's acceptance, and acceptance is worth
+   * nothing when the party being accepted can award it to themselves; the
+   * same rule the breakdown Close follows.
+   *
+   * A plant manager may close any request on their own plant - the controller
+   * holds them to it - not only the ones they raised, so a request the Admin
+   * raised for their site is not stuck. The Admin keeps it as a fallback.
    *
    * Nothing is required: forcing a remark to close would only produce "ok", and
    * an "ok" recorded as a remark is worse than a blank. The tick that says
@@ -112,11 +128,11 @@ export const REQUEST_STAGES = {
    * still in the ERPNext workflow, and nothing here offers it.
    */
   "Close Request": {
-    allowedRoles: ["Manager", "Maintenance Manager", "Production Manager"],
+    allowedRoles: ["Manager", "Production Manager"],
     from: "Completed",
     to: "Closed",
     title: "Close the request",
-    blurb: "Check the work is finished and sign the request off.",
+    blurb: "",
     fields: ["closing_remarks", "satisfied"],
     required: [],
     labels: { closing_remarks: "Closing remarks", satisfied: "Done to satisfaction" },
@@ -135,7 +151,7 @@ export const REQUEST_STAGES = {
     from: "Requested",
     to: "Cancelled",
     title: "Turn the request down",
-    blurb: "Say why. A request that vanishes without a reason stops people raising them.",
+    blurb: "",
     fields: ["cancel_reason"],
     required: ["cancel_reason"],
     labels: { cancel_reason: "Why not" },
@@ -149,7 +165,7 @@ export const REQUEST_STAGES = {
     from: "Requested",
     to: "Cancelled",
     title: "Withdraw the request",
-    blurb: "It is no longer needed, or it was raised twice.",
+    blurb: "",
     fields: ["cancel_reason"],
     required: ["cancel_reason"],
     labels: { cancel_reason: "Why" },

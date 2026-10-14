@@ -155,18 +155,15 @@ void main() {
     expect(find.text('Punch Out'), findsOneWidget);
   });
 
-  testWidgets('an approver gets the team queue on the same path, not a punch card', (tester) async {
+  testWidgets('a Maintenance Manager phone is Breakdowns and Requests, no Attendance',
+      (tester) async {
     await tester.pumpWidget(StockMasterApp(apiClient: buildClient(role: 'Maintenance Manager')));
     await tester.pumpAndSettle();
     await signIn(tester);
 
-    // Lands on Breakdowns; Attendance is a tab beside it.
-    expect(find.text('Attendance'), findsOneWidget);
-    await tester.tap(find.text('Attendance'));
-    await tester.pumpAndSettle();
-
+    // Attendance is decided on the web console since 13 Oct 2026.
+    expect(find.text('Requests'), findsOneWidget);
+    expect(find.text('Attendance'), findsNothing);
     expect(find.text('Punch In'), findsNothing);
-    expect(find.textContaining('Corrections'), findsWidgets);
-    expect(find.text('Team'), findsOneWidget);
   });
 }

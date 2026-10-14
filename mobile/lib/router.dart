@@ -52,11 +52,14 @@ const _requestRoles = {
 /// Attendance and leave, brought across from the field-sales app.
 ///
 /// A Maintenance Member - a fitter or electrician - punches in and out,
-/// looks at their month and applies for leave. The Maintenance Manager decides
-/// those requests and keeps the leave schemes, with the Admin as the usual
-/// fallback. Mirrors `VIEWS.attendance` on the server and the two role lists
-/// in `routes/attendanceRoutes.js`.
-const _attendanceRoles = {'Maintenance Member', 'Maintenance Manager', 'Manager'};
+/// looks at their month and applies for leave.
+///
+/// Since 13 Oct 2026 the managers' phones carry Breakdowns and Requests only:
+/// the Maintenance Manager and the Manager decide attendance on the web
+/// console, which still mirrors `VIEWS.attendance` and
+/// `routes/attendanceRoutes.js`. The approver list is kept for the day the
+/// team screen comes back to the phone.
+const _attendanceRoles = {'Maintenance Member'};
 const _attendanceApproverRoles = {'Maintenance Manager', 'Manager'};
 
 bool canSeeBreakdowns(String role) => _breakdownRoles.contains(role);
@@ -64,6 +67,12 @@ bool canSeeRequests(String role) => _requestRoles.contains(role);
 bool canSeeAttendance(String role) => _attendanceRoles.contains(role);
 bool canApproveAttendance(String role) => _attendanceApproverRoles.contains(role);
 bool isMaintenanceMember(String role) => role == 'Maintenance Member';
+
+/// The Maintenance Manager follows breakdowns and requests on the phone but
+/// moves none of them on from it: Start Repair, Machine Running, rejecting and
+/// the rest are recorded on the computer only. Their detail screens offer no
+/// step, no withdraw and no reject - only the record and what is due next.
+bool isViewOnly(String role) => role == 'Maintenance Manager';
 
 /// Whether this role has anything to do in the app at all.
 bool worksInMaintenance(String role) =>
@@ -82,9 +91,8 @@ final rootNavigatorKey = GlobalKey<NavigatorState>();
 /// Where a signed-in account lands: the first of the screens their role is
 /// on, or the no-access page when they are on none.
 ///
-/// A team member's whole app is Attendance, so that is where they land; the
-/// managers who also decide attendance keep landing on Breakdowns, which is
-/// the work they open the app for.
+/// A team member's whole app is Attendance, so that is where they land; every
+/// manager lands on Breakdowns, which is the work they open the app for.
 String homePathFor(String role) {
   if (isMaintenanceMember(role)) return attendanceHome;
   if (canSeeBreakdowns(role)) return breakdownsHome;

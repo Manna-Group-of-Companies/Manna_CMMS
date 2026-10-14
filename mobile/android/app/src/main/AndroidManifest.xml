@@ -11,10 +11,13 @@
          punch - see lib/core/location_fix.dart. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <!-- The Maintenance Manager is told on the phone when a plant reports a
+         breakdown or raises a request. Asked for at sign-in on Android 13+. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- usesCleartextTraffic: the dev/LAN API is served over plain http.
          Remove it once the API is reachable over https. -->
     <application
-        android:label="Engineering Stock Manager"
+        android:label="Manna CMMS"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">

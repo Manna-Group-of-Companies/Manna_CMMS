@@ -4,6 +4,18 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services") apply false
+}
+
+// Push notifications run through Firebase, which is configured by
+// `google-services.json` from the Firebase project (see
+// docs/push-notifications.md). The file is not in git, so a checkout without
+// it still builds: the app then starts without Firebase, logs that push is
+// off, and the Maintenance Manager's phone falls back to polling.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+} else {
+    logger.warn("google-services.json is missing - this build has no push notifications (polling only).")
 }
 
 // Release signing, read from `android/key.properties` (git-ignored):
@@ -34,6 +46,9 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // flutter_local_notifications - the breakdown and request alerts -
+        // needs java.time on every Android version the app installs on.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -80,6 +95,7 @@ android {
 dependencies {
     // FileProvider, used to hand the downloaded APK to the package installer.
     implementation("androidx.core:core-ktx:1.13.1")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 kotlin {

@@ -6,8 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api_client.dart';
 import '../models/models.dart';
 
-const _kTokenKey = 'token';
-const _kUserKey = 'user';
+/// Where the session is kept. Public because the background check for new
+/// breakdowns runs in its own isolate and signs its requests with the same
+/// token - see core/incoming_background.dart.
+const kTokenPrefsKey = 'token';
+const kUserPrefsKey = 'user';
 
 /// Shown when an account carries the retired `Admin` role.
 ///
@@ -38,6 +41,12 @@ class AuthProvider extends ChangeNotifier {
 
   AppUser? _user;
   bool _loading = true;
+  bool _loggingOut = false;
+
+  /// Runs before a sign-out clears the session, while requests can still be
+  /// signed - the phone withdraws its push registration here. A failure is
+  /// logged and the sign-out goes ahead regardless.
+  Future<void> Function()? beforeLogout;
 
   AppUser? get user => _user;
   bool get loading => _loading;
@@ -45,8 +54,8 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
-    final storedToken = prefs.getString(_kTokenKey);
-    final storedUser = prefs.getString(_kUserKey);
+    final storedToken = prefs.getString(kTokenPrefsKey);
+    final storedUser = prefs.getString(kUserPrefsKey);
 
     if (storedToken != null && storedUser != null) {
       _api.token = storedToken;
@@ -62,7 +71,7 @@ class AuthProvider extends ChangeNotifier {
         final fresh = AppUser.fromJson(data as Map<String, dynamic>);
         if (fresh.isAdmin) throw ApiException(kAdminNotSupported);
         _user = fresh;
-        await prefs.setString(_kUserKey, jsonEncode(_user!.toJson()));
+        await prefs.setString(kUserPrefsKey, jsonEncode(_user!.toJson()));
       } on ApiException catch (error) {
         // A token is only invalid if the server said so. When the request
         // never landed the session is kept, otherwise an unreachable API
@@ -101,9 +110,9 @@ class AuthProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     if (token != null) {
       _api.token = token;
-      await prefs.setString(_kTokenKey, token);
+      await prefs.setString(kTokenPrefsKey, token);
     }
-    await prefs.setString(_kUserKey, jsonEncode(user.toJson()));
+    await prefs.setString(kUserPrefsKey, jsonEncode(user.toJson()));
 
     _user = user;
     _loading = false;
@@ -112,15 +121,26 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    await _clear();
-    notifyListeners();
+    if (_loggingOut) return;
+    _loggingOut = true;
+    try {
+      try {
+        await beforeLogout?.call();
+      } catch (error) {
+        debugPrint('Before sign-out: $error');
+      }
+      await _clear();
+      notifyListeners();
+    } finally {
+      _loggingOut = false;
+    }
   }
 
   Future<void> _clear() async {
     _user = null;
     _api.token = null;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kTokenKey);
-    await prefs.remove(_kUserKey);
+    await prefs.remove(kTokenPrefsKey);
+    await prefs.remove(kUserPrefsKey);
   }
 }

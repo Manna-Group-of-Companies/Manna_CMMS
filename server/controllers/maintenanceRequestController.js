@@ -1,6 +1,7 @@
 import * as requests from "../repository/maintenanceRequests.js";
 import { scopeFor, withinScope } from "../repository/plantScope.js";
 import { describeRequestStages } from "../integrations/erpnext/maintenanceRequestStages.js";
+import { pushLater, requestMessage } from "../integrations/push.js";
 
 /**
  * Maintenance requests, for the web dashboard.
@@ -140,6 +141,8 @@ export const raise = async (req, res) => {
       requestedBy: req.user.email,
     });
     res.status(201).json(created);
+    // The Maintenance Manager's phone rings now, not at its next poll.
+    pushLater(requestMessage(created), `Request ${created.id}`);
   } catch (error) {
     if (!error.status) return res.status(400).json({ message: error.message });
     fail(res, error, "Could not raise the request");

@@ -17,3 +17,6 @@ exports/
 .env.backup*
 .env.bak*
 .env.*.local
+
+# Service-account keys the server reads (Firebase push). Never committed.
+secrets/

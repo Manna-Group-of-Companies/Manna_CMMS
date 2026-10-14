@@ -6,6 +6,7 @@ import '../../core/formatters.dart';
 import '../../core/palette.dart';
 import '../../data/maintenance_repository.dart';
 import '../../models/maintenance.dart';
+import '../../router.dart';
 import '../../state/auth_provider.dart';
 import '../../widgets/common.dart';
 import 'stage_form.dart';
@@ -81,16 +82,17 @@ class _BreakdownDetailScreenState extends State<BreakdownDetailScreen> {
   Widget build(BuildContext context) {
     final role = context.watch<AuthProvider>().user?.role;
     final record = _record;
+    final viewOnly = isViewOnly(role ?? '');
 
     // The step the record is on, and whether this person may take it.
     final next = record == null || record.nextAction.isEmpty ? null : _stages[record.nextAction];
-    final mayTakeNext = next != null && next.allows(role);
+    final mayTakeNext = !viewOnly && next != null && next.allows(role);
 
     // Withdrawing a report that should not have been raised. Only while it is
     // still Reported: once maintenance has started there is something real to
     // account for, and it is closed rather than made to disappear.
     final cancel = _stages['Cancel'];
-    final mayCancel =
+    final mayCancel = !viewOnly &&
         record != null && cancel != null && record.state == cancel.from && cancel.allows(role);
 
     return PopScope(
@@ -138,7 +140,9 @@ class _BreakdownDetailScreenState extends State<BreakdownDetailScreen> {
                         // stops and reads as though nothing is due.
                         AppCard(
                           child: Text(
-                            'Waiting on maintenance to ${next.title.toLowerCase()}.',
+                            viewOnly
+                                ? 'Next: ${next.title}. Recorded on the computer.'
+                                : 'Waiting on maintenance to ${next.title.toLowerCase()}.',
                             style: const TextStyle(color: AppColors.textSecondary),
                           ),
                         ),

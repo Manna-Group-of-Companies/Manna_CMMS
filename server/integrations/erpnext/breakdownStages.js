@@ -101,7 +101,12 @@ export const STAGES = {
     from: "Under Repair",
     to: "Repaired",
     title: "Machine running again",
-    blurb: "What was done, when it was handed back, what it took, why it failed and what changes now.",
+    blurb: "",
+    /**
+     * "Has this happened before" is off the form (13 Oct 2026), to come back
+     * later. The fields stay on the DocType and every breakdown already
+     * carrying them is untouched - they are simply not asked here for now.
+     */
     fields: [
       "actions_performed",
       "completed_at",
@@ -110,15 +115,11 @@ export const STAGES = {
       "spares_required",
       "root_cause",
       "prevention_actions",
-      "repeat_failure",
-      "repeat_of",
     ],
     required: ["actions_performed", "completed_at", "failure_mode", "root_cause", "prevention_actions"],
     labels: {
       root_cause: "Root cause",
       prevention_actions: "Prevention actions",
-      repeat_failure: "This has happened before",
-      repeat_of: "The earlier breakdown",
       actions_performed: "What was done",
       /**
        * The hand-over, not the last turn of the spanner.
@@ -139,11 +140,17 @@ export const STAGES = {
   /**
    * The plant accepts the machine back.
    *
-   * Open to the plant manager and to maintenance (29 Sep 2026; it was the
-   * Admin's alone). The plant reports a breakdown and closes it; everything in
-   * between is maintenance's. Nothing is collected - the repair and its
-   * evaluation are already on the record, and the plant is not asked to write
-   * either.
+   * The plant's alone (13 Oct 2026). It was open to maintenance too, which let
+   * the same person who carried out the repair also sign it off as accepted -
+   * so a breakdown could go from reported to closed without the plant that
+   * raised it ever confirming the machine was actually back. Closing is the
+   * plant's acceptance, and acceptance is worth nothing when the party being
+   * accepted can award it to themselves.
+   *
+   * The plant reports a breakdown and closes it; everything in between,
+   * including the root cause, is maintenance's. Nothing is collected here - the
+   * repair and its evaluation are already on the record, and the plant is not
+   * asked to write either.
    *
    * The root cause and prevention actions are still required, checked against
    * the record rather than asked for, so nothing reaches Closed without them.
@@ -156,7 +163,7 @@ export const STAGES = {
    * reads the record, so that is where the guard lives.
    */
   Close: {
-    allowedRoles: ["Manager", "Maintenance Manager", "Production Manager"],
+    allowedRoles: ["Manager", "Production Manager"],
     from: "Repaired",
     to: "Closed",
     title: "Close the breakdown",
@@ -179,22 +186,30 @@ export const STAGES = {
    * it. Maintenance records the cause and closes it in one step, as before.
    * Offered only for such a record - see `nextActionFor`. It is the same
    * ERPNext transition as Close, so the workflow needs nothing new.
+   *
+   * The Admin's alone (14 Oct 2026). Maintenance held it for a day as the one
+   * exception to the rule above, since someone had to supply the cause these
+   * records never got; the business then asked for no close of any kind in
+   * maintenance's hands, and the last record in this position was deleted on
+   * 13 Oct. No new one can enter it - "Machine Running" refuses to save
+   * without a cause - so this is kept for a record put here by hand in
+   * ERPNext, and it is the Admin who untangles that.
    */
   "Close with Root Cause": {
-    allowedRoles: ["Manager", "Maintenance Manager"],
+    allowedRoles: ["Manager"],
     erpAction: "Close",
     catchUp: true,
     from: "Repaired",
     to: "Closed",
     title: "Record the root cause and close",
-    blurb: "Why it failed, whether it has happened before, and what changes now.",
-    fields: ["root_cause", "prevention_actions", "repeat_failure", "repeat_of"],
+    blurb: "",
+    // "Has this happened before" is off both forms for now - see the note on
+    // "Machine Running".
+    fields: ["root_cause", "prevention_actions"],
     required: ["root_cause", "prevention_actions"],
     labels: {
       root_cause: "Root cause",
       prevention_actions: "Prevention actions",
-      repeat_failure: "This has happened before",
-      repeat_of: "The earlier breakdown",
     },
     stamp: () => ({ closed_at: now() }),
   },

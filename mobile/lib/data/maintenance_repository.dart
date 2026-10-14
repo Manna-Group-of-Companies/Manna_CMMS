@@ -16,8 +16,11 @@ class MaintenanceRepository {
 
   final ApiClient _api;
 
+  /// `/breakdowns` answers with a bare list; `/maintenance-requests` with
+  /// `{rows, summary}`. Both are read here, so a screen never sees the
+  /// difference.
   List<T> _list<T>(dynamic data, T Function(Map<String, dynamic>) from) =>
-      (data as List? ?? [])
+      ((data is Map ? data['rows'] : data) as List? ?? [])
           .whereType<Map<String, dynamic>>()
           .map(from)
           .toList(growable: false);

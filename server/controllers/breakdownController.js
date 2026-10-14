@@ -2,6 +2,7 @@ import * as maintenance from "../repository/maintenance.js";
 import { describeStages } from "../integrations/erpnext/breakdownStages.js";
 import { buildReport } from "../repository/breakdownMetrics.js";
 import { scopeFor, withinScope } from "../repository/plantScope.js";
+import { breakdownMessage, pushLater } from "../integrations/push.js";
 
 /**
  * Breakdowns, for the web dashboard.
@@ -125,6 +126,8 @@ export const report = async (req, res) => {
       reportedBy: req.user.email,
     });
     res.status(201).json(created);
+    // The Maintenance Manager's phone rings now, not at its next poll.
+    pushLater(breakdownMessage(created), `Breakdown ${created.id}`);
   } catch (error) {
     if (!error.status) return res.status(400).json({ message: error.message });
     fail(res, error, "Could not report the breakdown");

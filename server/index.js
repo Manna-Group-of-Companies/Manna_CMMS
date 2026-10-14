@@ -41,6 +41,7 @@ import maintenanceRequestRoutes from "./routes/maintenanceRequestRoutes.js";
 import preventiveRoutes from "./routes/preventiveRoutes.js";
 import taxonomyRoutes from "./routes/taxonomyRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
+import deviceRoutes from "./routes/deviceRoutes.js";
 
 dotenv.config();
 
@@ -141,6 +142,8 @@ app.use("/api/taxonomy", taxonomyRoutes);
 // The maintenance team's punches, corrections and leave, brought across from
 // the field-sales app. Reads ERPNext directly, like the rest of Module 2.
 app.use("/api/attendance", attendanceRoutes);
+// Phones registered for push notifications.
+app.use("/api/devices", deviceRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {

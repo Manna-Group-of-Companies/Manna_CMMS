@@ -26,8 +26,8 @@ void main() {
       'Maintenance Member': false,
     };
     const expectAttendance = {
-      'Manager': true,
-      'Maintenance Manager': true,
+      'Manager': false,
+      'Maintenance Manager': false,
       'Higher Management': false,
       'Production Manager': false,
       'Supervisor': false,
@@ -55,15 +55,21 @@ void main() {
         reason: 'a member asks; they do not decide their own request');
   });
 
-  test('the Maintenance Manager and the Admin decide attendance, and nobody else', () {
+  test('the managers phones are Breakdowns and Requests only', () {
     for (final role in ['Maintenance Manager', 'Manager']) {
-      expect(canApproveAttendance(role), isTrue, reason: role);
+      expect(canSeeAttendance(role), isFalse, reason: role);
       expect(isMaintenanceMember(role), isFalse, reason: role);
-      // They open the app for breakdowns; attendance is a tab, not home.
       expect(homePathFor(role), breakdownsHome, reason: role);
     }
     for (final role in ['Supervisor', 'Production Manager', 'Higher Management', 'VP Operations']) {
       expect(canApproveAttendance(role), isFalse, reason: role);
+    }
+  });
+
+  test('the Maintenance Manager only looks on the phone; the steps are done on the computer', () {
+    expect(isViewOnly('Maintenance Manager'), isTrue);
+    for (final role in ['Manager', 'Production Manager', 'Supervisor', 'Higher Management']) {
+      expect(isViewOnly(role), isFalse, reason: role);
     }
   });
 }

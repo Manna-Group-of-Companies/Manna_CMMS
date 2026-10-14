@@ -50,3 +50,6 @@ app.*.map.json
 /android/key.properties
 *.jks
 *.keystore
+
+# Firebase config for push notifications - see docs/push-notifications.md.
+/android/app/google-services.json

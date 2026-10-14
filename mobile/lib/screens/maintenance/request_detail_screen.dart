@@ -6,6 +6,7 @@ import '../../core/formatters.dart';
 import '../../core/palette.dart';
 import '../../data/maintenance_repository.dart';
 import '../../models/maintenance.dart';
+import '../../router.dart';
 import '../../state/auth_provider.dart';
 import '../../widgets/common.dart';
 import 'stage_form.dart';
@@ -81,9 +82,10 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
     final user = context.watch<AuthProvider>().user;
     final role = user?.role;
     final record = _record;
+    final viewOnly = isViewOnly(role ?? '');
 
     final next = record == null || record.nextAction.isEmpty ? null : _stages[record.nextAction];
-    final mayTakeNext = next != null && next.allows(role);
+    final mayTakeNext = !viewOnly && next != null && next.allows(role);
 
     // Withdraw is the requester's own; anyone else with the right role rejects.
     // `mine` already decides which of the two it is, so the role is the only
@@ -92,7 +94,8 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
     final mine = record != null && user != null && user.email == record.requestedBy;
     final endAction = mine ? 'Withdraw' : 'Reject';
     final end = _stages[endAction];
-    final mayEnd = record != null &&
+    final mayEnd = !viewOnly &&
+        record != null &&
         end != null &&
         record.state == end.from &&
         end.allows(role);
@@ -135,7 +138,9 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
                       else if (next != null)
                         AppCard(
                           child: Text(
-                            'Waiting on maintenance to ${next.title.toLowerCase()}.',
+                            viewOnly
+                                ? 'Next: ${next.title}. Recorded on the computer.'
+                                : 'Waiting on maintenance to ${next.title.toLowerCase()}.',
                             style: const TextStyle(color: AppColors.textSecondary),
                           ),
                         ),
