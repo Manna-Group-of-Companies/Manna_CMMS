@@ -50,6 +50,17 @@ export const storesForPlants = (plants) =>
     .map((store) => store.label);
 
 /**
+ * The SAP companies behind a set of plants - each store's `abbr`, which is
+ * what a purchase request or goods receipt is filed under. A plant with no
+ * store has no company to buy for, and contributes nothing.
+ */
+export const companiesForPlants = (plants) =>
+  (plants || [])
+    .map((plant) => resolveStore(plant))
+    .filter(Boolean)
+    .map((store) => store.abbr);
+
+/**
  * What one signed-in person is confined to.
  *
  * The single place a controller should ask.
@@ -64,12 +75,26 @@ export const storesForPlants = (plants) =>
  */
 export const scopeFor = async (user) => {
   if (!isPlantScoped(user?.role)) {
-    return { scoped: false, plants: null, stores: null };
+    return { scoped: false, plants: null, stores: null, companies: null };
   }
 
   const plants = await plantsFor(user.email);
-  return { scoped: true, plants, stores: storesForPlants(plants) };
+  return {
+    scoped: true,
+    plants,
+    stores: storesForPlants(plants),
+    // Added 14 Oct 2026, when the plant heads were given the store screens:
+    // their purchase requests and goods receipts are their own company's.
+    companies: companiesForPlants(plants),
+  };
 };
 
 /** True when a scope permits this plant. An unscoped one permits every plant. */
 export const withinScope = (scope, plant) => !scope?.scoped || scope.plants.includes(plant);
+
+/**
+ * True when a scope permits this SAP company (a store's abbr, as the records
+ * carry it). An unscoped one permits every company.
+ */
+export const withinCompany = (scope, abbr) =>
+  !scope?.scoped || scope.companies.includes(String(abbr || "").trim().toUpperCase());

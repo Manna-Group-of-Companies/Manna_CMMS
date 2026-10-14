@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ClipboardCheck, Loader2, Package, Plus, RefreshCw, Send } from "lucide-react";
 
 import API from "../../services/api";
-import { useAuth, MAINTENANCE_MANAGER } from "../../context/AuthContext";
+import { useAuth, MAINTENANCE_MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import { formatCurrency } from "../../utils/currency";
@@ -56,7 +56,8 @@ const GoodsReceipts = () => {
   const { user } = useAuth();
   const { showToast } = useNotifications();
   // Mirrors the server: only the Maintenance Manager receives stock or re-sends it.
-  const canReceive = user?.role === MAINTENANCE_MANAGER;
+  // Maintenance, and since 14 Oct 2026 the plant heads - mirrors the server's guard.
+  const canReceive = user?.role === MAINTENANCE_MANAGER || user?.role === PRODUCTION_MANAGER;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);

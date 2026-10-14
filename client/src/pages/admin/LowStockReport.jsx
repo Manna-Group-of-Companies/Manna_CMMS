@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import API from "../../services/api";
-import { useAuth, MAINTENANCE_MANAGER } from "../../context/AuthContext";
+import { useAuth, MAINTENANCE_MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import useStockRooms from "../../hooks/useStockRooms";
@@ -136,7 +136,8 @@ const LowStockReport = () => {
   const { user } = useAuth();
   const { showToast } = useNotifications();
   // Mirrors the server's guard on POST /purchase-requests.
-  const canRequest = user?.role === MAINTENANCE_MANAGER;
+  // Maintenance, and since 14 Oct 2026 the plant heads - mirrors the server's guard.
+  const canRequest = user?.role === MAINTENANCE_MANAGER || user?.role === PRODUCTION_MANAGER;
 
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);

@@ -107,7 +107,7 @@ function App() {
               <Route
                 path="goods-receipts"
                 element={
-                  <RequireView view="engineeringStock">
+                  <RequireView view="goodsReceipts">
                     <GoodsReceipts />
                   </RequireView>
                 }
@@ -263,7 +263,7 @@ function App() {
               <Route
                 path="goods-receipts"
                 element={
-                  <RequireView view="engineeringStock">
+                  <RequireView view="goodsReceipts">
                     <GoodsReceipts />
                   </RequireView>
                 }

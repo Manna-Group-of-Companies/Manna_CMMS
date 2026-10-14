@@ -58,8 +58,25 @@ export const ROLES = [
  * screens off the store floor was not part of it.
  */
 export const VIEWS = {
-  /** The catalog. Everybody, but a plant head sees only their own store. */
-  engineeringStock: ROLES,
+  /**
+   * The catalog. A plant head sees only their own store.
+   *
+   * Was every role; narrowed on 14 Oct 2026 to the three who run stock day to
+   * day, so that releasing the screen gives it to the plant heads without also
+   * putting it in front of the board, operations and the store supervisor,
+   * none of whom asked for it. The others go back on here when the store
+   * console is released to them.
+   */
+  engineeringStock: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER],
+
+  /**
+   * Goods receipts against SAP purchase orders, and nil-value stock additions.
+   *
+   * Its own screen since 14 Oct 2026, for the same people as the catalog. A
+   * plant head receives their own deliveries and adds their own stock, which
+   * is why they are on the write side too - routes/goodsReceiptRoutes.js.
+   */
+  goodsReceipts: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER],
 
   /**
    * The category tree, which re-points items when it is edited.
@@ -81,8 +98,8 @@ export const VIEWS = {
    * this release shows to the Maintenance Manager alone, so the plant heads
    * and the Admin could not follow what had been asked of purchase. Reading is
    * theirs and maintenance's - not narrowed by plant, since every store posts
-   * against the one SAP company; raising one, and sending it again, stays the
-   * Maintenance Manager's - routes/purchaseRequestRoutes.js holds that line.
+   * against the one SAP company. Raising one is maintenance's and the plant
+   * heads' (14 Oct 2026); the Admin reads - routes/purchaseRequestRoutes.js.
    */
   purchaseRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER],
 
@@ -187,7 +204,15 @@ export const VIEWS = {
 // itemNaming released 25 Sep 2026 for the VP Operations, held back again 29 Sep (its approval step went on 10 Oct).
 // attendance released 12 Oct 2026: it is the whole of what a Maintenance Member has, so it ships with them.
 // purchaseRequests released 14 Oct 2026, so the Admin can follow the purchase queue.
-export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "attendance", "purchaseRequests"]);
+// engineeringStock and goodsReceipts released 14 Oct 2026: the plant heads run their own store.
+export const RELEASED = new Set([
+  "breakdowns",
+  "maintenanceRequests",
+  "attendance",
+  "purchaseRequests",
+  "engineeringStock",
+  "goodsReceipts",
+]);
 
 
 /**

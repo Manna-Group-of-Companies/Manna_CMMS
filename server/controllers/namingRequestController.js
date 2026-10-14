@@ -1,4 +1,5 @@
 import * as requests from "../repository/namingRequests.js";
+import { scopeFor, withinCompany } from "../repository/plantScope.js";
 
 /**
  * Item naming requests, for the web dashboard.
@@ -69,6 +70,9 @@ export const detail = async (req, res) => {
  */
 export const raise = async (req, res) => {
   try {
+    if (!withinCompany(await scopeFor(req.user), req.body?.company)) {
+      return res.status(403).json({ message: "That SAP company is not yours to add items for." });
+    }
     const created = await requests.raiseRequest({
       ...req.body,
       // From the session, never the body: who proposed a name is not something
@@ -117,9 +121,14 @@ export const decide = async (req, res) => {
  *          code), units, HSN codes, tax rates - published from SAP by the sync
  * @route   GET /api/naming-requests/options
  */
-export const options = async (_req, res) => {
+export const options = async (req, res) => {
   try {
-    res.json(await requests.requestOptions());
+    // Every company picker in the console - new item, goods receipt,
+    // purchase request - is built from this, so a plant head's pickers offer
+    // their own company and no other.
+    const { companies } = await scopeFor(req.user);
+    const all = await requests.requestOptions();
+    res.json(companies ? all.filter((o) => companies.includes(o.abbr)) : all);
   } catch (error) {
     fail(res, error, "Could not load the SAP options");
   }

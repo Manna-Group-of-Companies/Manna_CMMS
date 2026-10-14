@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import API from "../services/api";
-import { useAuth, MAINTENANCE_MANAGER } from "../context/AuthContext";
+import { useAuth, MAINTENANCE_MANAGER, MANAGER, PRODUCTION_MANAGER } from "../context/AuthContext";
 import { useNotifications } from "../context/NotificationContext";
 import { announceSapSyncDone } from "../hooks/useSapSync";
 import { LastSyncLine } from "./SapLastSync";
@@ -97,7 +97,7 @@ const SapSyncButton = () => {
       {/* The bar is 64px and the title already owns the left of it, so the time
           waits for a screen wide enough to carry both. */}
       <LastSyncLine status={status} className="hidden md:block text-right leading-tight" />
-      {user?.role === MAINTENANCE_MANAGER && (
+      {[MAINTENANCE_MANAGER, PRODUCTION_MANAGER, MANAGER].includes(user?.role) && (
         <button
           onClick={ask}
           disabled={asking || busy}

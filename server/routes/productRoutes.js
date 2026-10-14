@@ -62,7 +62,8 @@ router.get("/subcategories", getSubCategories);
 router.get("/subcategories-b", getSubCategoriesB);
 router.get("/category-sync", getCategorySync);
 // The "Sync with SAP" button (9 Oct 2026): one flagged run both ways.
-router.post("/category-sync", requireRole("Maintenance Manager"), requestCategorySync);
+// One run carries everything waiting; any manager may ask for it (14 Oct 2026).
+router.post("/category-sync", requireRole("Maintenance Manager", "Production Manager", "Manager"), requestCategorySync);
 router.get("/units", getUnits);
 
 // The intake checks. All three are named routes and must stay above "/:id",

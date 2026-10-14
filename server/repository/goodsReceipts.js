@@ -119,10 +119,17 @@ const toReceipt = (row, lines = []) => ({
 });
 
 /** Receipts, newest first, each with its lines. */
-export const listReceipts = async ({ status = "", kind = "", limit = 100 } = {}) => {
+const forbidden = (message) => Object.assign(new Error(message), { status: 403 });
+
+export const listReceipts = async ({ status = "", kind = "", limit = 100, onlyCompanies = null } = {}) => {
   const filters = [];
   if (status) filters.push([DOCTYPE, "status", "=", status]);
   if (kind) filters.push([DOCTYPE, "kind", "=", kind]);
+  // A plant head sees their own company's receipts and no other. An empty
+  // list means none, not all - see scopeFor.
+  if (Array.isArray(onlyCompanies)) {
+    filters.push([DOCTYPE, "company", "in", onlyCompanies.length ? onlyCompanies : ["__none__"]]);
+  }
   const rows = await listDocs(DOCTYPE, { fields: FIELDS, filters: filters.length ? filters : undefined, orderBy: "creation desc", limit });
   if (!rows.length) return [];
 
@@ -270,8 +277,11 @@ const followBill = async (product, hsn, tax) => {
  *
  * @param body { company, poEntry, billNo, billDate, remarks, lines: [{ poLine, qty, hsnCode, taxRate }] }
  */
-export const createGoodsReceipt = async (body = {}, user) => {
+export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null } = {}) => {
   const company = tidy(body.company).toUpperCase();
+  if (Array.isArray(onlyCompanies) && !onlyCompanies.includes(company)) {
+    throw forbidden("That SAP company is not yours to receive for.");
+  }
   const options = (await itemMasterOptions())[company];
   if (!options) throw badRequest("Choose the SAP company the stock was bought for.");
   const label = options.company || company;
@@ -363,7 +373,7 @@ export const createGoodsReceipt = async (body = {}, user) => {
  *
  * @param body { itemCode, qty, remarks }
  */
-export const createStockAddition = async (body = {}, user) => {
+export const createStockAddition = async (body = {}, user, { onlyCompanies = null } = {}) => {
   const code = tidy(body.itemCode);
   const product = (await catalogProducts()).find((p) => p.code === code);
   if (!product) throw notFound("Engineering Stock not found");
@@ -373,6 +383,9 @@ export const createStockAddition = async (body = {}, user) => {
   const qty = Number(body.qty);
   if (!Number.isFinite(qty) || qty <= 0) throw badRequest("The quantity must be more than zero.");
   const company = product.sapCategory.company;
+  if (Array.isArray(onlyCompanies) && !onlyCompanies.includes(company)) {
+    throw forbidden(`${product.name || product.code} is ${company}'s stock, not your company's.`);
+  }
   const options = (await itemMasterOptions())[company];
   if (!options) throw badRequest(`No SAP options are published for ${company} yet.`);
 

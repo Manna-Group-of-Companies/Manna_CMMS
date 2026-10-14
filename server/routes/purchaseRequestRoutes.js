@@ -10,7 +10,8 @@ router.use(protect);
 
 // Reading follows the Engineering Stock screen; raising is the Maintenance
 // Manager's, as receiving and adding items are (9 Oct 2026).
-const WRITE = requireRole("Maintenance Manager");
+// Maintenance, and since 14 Oct 2026 the plant heads.
+const WRITE = requireRole("Maintenance Manager", "Production Manager");
 
 router.get("/", requireView("purchaseRequests"), list);
 router.get("/:id", requireView("purchaseRequests"), detail);

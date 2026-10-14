@@ -13,9 +13,12 @@ describe("the release", () => {
     assert.ok(!maySee("Supervisor", "purchaseRequests"));
   });
 
-  it("keeps the rest of the engineering store with the Maintenance Manager alone", () => {
-    assert.deepEqual(rolesFor("engineeringStock"), [MAINTENANCE_MANAGER]);
-    assert.ok(!maySee(MANAGER, "engineeringStock"), "the Admin is on the matrix but the screen is unreleased");
+  it("gives the catalog and goods receipts to the Admin, maintenance and the plant heads", () => {
+    for (const view of ["engineeringStock", "goodsReceipts"]) {
+      assert.deepEqual(rolesFor(view), [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER], view);
+      assert.ok(!maySee("Supervisor", view), `${view} is not the store supervisor's yet`);
+      assert.ok(!maySee("Higher Management", view), `${view} is not the board's`);
+    }
   });
 
   it("still gives every manager breakdowns and requests", () => {

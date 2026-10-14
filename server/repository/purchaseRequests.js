@@ -70,9 +70,20 @@ const toRequest = (row, lines = []) => ({
 });
 
 /** Requests, newest first, each with its lines. */
-export const listRequests = async ({ status = "", limit = 100 } = {}) => {
-  const filters = status ? [[DOCTYPE, "status", "=", status]] : undefined;
-  const rows = await listDocs(DOCTYPE, { fields: FIELDS, filters, orderBy: "creation desc", limit });
+export const listRequests = async ({ status = "", limit = 100, onlyCompanies = null } = {}) => {
+  const filters = [];
+  if (status) filters.push([DOCTYPE, "status", "=", status]);
+  // A plant head sees their own company's requests and no other. An empty
+  // list means none, not all - see scopeFor.
+  if (Array.isArray(onlyCompanies)) {
+    filters.push([DOCTYPE, "company", "in", onlyCompanies.length ? onlyCompanies : ["__none__"]]);
+  }
+  const rows = await listDocs(DOCTYPE, {
+    fields: FIELDS,
+    filters: filters.length ? filters : undefined,
+    orderBy: "creation desc",
+    limit,
+  });
   if (!rows.length) return [];
   const byParent = new Map();
   for (let i = 0; i < rows.length; i += 100) {

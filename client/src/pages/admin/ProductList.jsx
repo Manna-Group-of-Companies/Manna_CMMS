@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
-import { useAuth, MANAGER, MAINTENANCE_MANAGER } from "../../context/AuthContext";
+import { useAuth, MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import useStockRooms from "../../hooks/useStockRooms";
@@ -180,8 +180,11 @@ const ProductList = () => {
   // Mirrors the server guards. Offering a button the server will refuse is
   // worse than not offering it.
   // Creating and editing items is the Maintenance Manager's alone (25 Sep 2026).
-  const canProposeItem = user?.role === MAINTENANCE_MANAGER;
-  const canEditCategory = canProposeItem;
+  // Maintenance, and since 14 Oct 2026 the plant heads - mirrors the server's guard.
+  const canProposeItem = user?.role === MAINTENANCE_MANAGER || user?.role === PRODUCTION_MANAGER;
+  // Editing an item and moving it between categories stay the Maintenance
+  // Manager's (14 Oct 2026): the plant heads add, they do not alter.
+  const canEditCategory = user?.role === MAINTENANCE_MANAGER;
   // DELETE /products/:id is the Manager's.
   const canDelete = user?.role === MANAGER;
   const [products, setProducts] = useState([]);

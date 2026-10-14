@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2, Plus, RefreshCw, Send, ShoppingCart, Truck } from "lucide-react";
 
 import API from "../../services/api";
-import { useAuth, MAINTENANCE_MANAGER } from "../../context/AuthContext";
+import { useAuth, MAINTENANCE_MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import { useSapSyncDone } from "../../hooks/useSapSync";
@@ -48,7 +48,8 @@ const PurchaseRequests = () => {
   const { user } = useAuth();
   const { showToast } = useNotifications();
   // Mirrors the server: only the Maintenance Manager raises a request or re-sends it.
-  const canRaise = user?.role === MAINTENANCE_MANAGER;
+  // Maintenance, and since 14 Oct 2026 the plant heads - mirrors the server's guard.
+  const canRaise = user?.role === MAINTENANCE_MANAGER || user?.role === PRODUCTION_MANAGER;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);

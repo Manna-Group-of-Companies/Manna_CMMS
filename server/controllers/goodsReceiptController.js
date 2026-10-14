@@ -1,4 +1,5 @@
 import * as receipts from "../repository/goodsReceipts.js";
+import { scopeFor, withinCompany } from "../repository/plantScope.js";
 
 /**
  * Goods receipts (from a bill, against a SAP PO) and nil-value stock
@@ -20,6 +21,8 @@ export const list = async (req, res) => {
         status: req.query.status || "",
         kind: req.query.kind || "",
         limit: Math.min(Number(req.query.limit) || 100, 300),
+        // A plant head's own company only; everyone else sees the lot.
+        onlyCompanies: (await scopeFor(req.user)).companies,
       })
     );
   } catch (error) {
@@ -31,7 +34,11 @@ export const list = async (req, res) => {
 export const detail = async (req, res) => {
   try {
     const found = await receipts.getReceipt(req.params.id);
-    if (!found) return res.status(404).json({ message: "Receipt not found" });
+    // Another company's receipt is missing rather than forbidden - the same
+    // answer an unknown id gets.
+    if (!found || !withinCompany(await scopeFor(req.user), found.company)) {
+      return res.status(404).json({ message: "Receipt not found" });
+    }
     res.json(found);
   } catch (error) {
     fail(res, error, "Could not load the receipt");
@@ -41,7 +48,11 @@ export const detail = async (req, res) => {
 /** @route GET /api/goods-receipts/open-po?company=MRPPL */
 export const openPo = async (req, res) => {
   try {
-    res.json(await receipts.openPurchaseOrders(req.query.company || ""));
+    const company = req.query.company || "";
+    if (!withinCompany(await scopeFor(req.user), company)) {
+      return res.status(403).json({ message: "That SAP company is not yours to receive for." });
+    }
+    res.json(await receipts.openPurchaseOrders(company));
   } catch (error) {
     fail(res, error, "Could not load the open purchase orders");
   }
@@ -59,7 +70,8 @@ export const refreshPo = async (req, res) => {
 /** @route POST /api/goods-receipts */
 export const createGoodsReceipt = async (req, res) => {
   try {
-    res.status(201).json(await receipts.createGoodsReceipt(req.body, req.user));
+    const { companies } = await scopeFor(req.user);
+    res.status(201).json(await receipts.createGoodsReceipt(req.body, req.user, { onlyCompanies: companies }));
   } catch (error) {
     fail(res, error, "Could not save the goods receipt");
   }
@@ -68,7 +80,8 @@ export const createGoodsReceipt = async (req, res) => {
 /** @route POST /api/goods-receipts/stock-addition */
 export const createStockAddition = async (req, res) => {
   try {
-    res.status(201).json(await receipts.createStockAddition(req.body, req.user));
+    const { companies } = await scopeFor(req.user);
+    res.status(201).json(await receipts.createStockAddition(req.body, req.user, { onlyCompanies: companies }));
   } catch (error) {
     fail(res, error, "Could not save the stock addition");
   }
@@ -77,6 +90,10 @@ export const createStockAddition = async (req, res) => {
 /** @route POST /api/goods-receipts/:id/retry */
 export const retry = async (req, res) => {
   try {
+    const found = await receipts.getReceipt(req.params.id);
+    if (!found || !withinCompany(await scopeFor(req.user), found.company)) {
+      return res.status(404).json({ message: "Receipt not found" });
+    }
     res.json(await receipts.retryReceipt(req.params.id, req.user));
   } catch (error) {
     fail(res, error, "Could not send the receipt again");

@@ -28,12 +28,13 @@ router.use(protect);
  */
 router.get("/", requireView("itemNaming"), list);
 // The SAP lists the form offers. Above /:id, or "options" is read as a request id.
-router.get("/options", requireRole("Maintenance Manager"), options);
+// The plant heads propose items too since 14 Oct 2026, from Engineering Stock.
+router.get("/options", requireRole("Maintenance Manager", "Production Manager"), options);
 router.get("/:id", requireView("itemNaming"), detail);
 
 // Creating an item is the Maintenance Manager's alone (decided 25 Sep 2026):
 // they fill in the SAP fields and send it for approval.
-router.post("/", requireRole("Maintenance Manager"), raise);
+router.post("/", requireRole("Maintenance Manager", "Production Manager"), raise);
 router.put("/:id", requireRole("Maintenance Manager"), update);
 router.post("/:id/retry", requireRole("Maintenance Manager"), retry);
 

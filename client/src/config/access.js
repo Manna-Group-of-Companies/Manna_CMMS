@@ -64,7 +64,14 @@ export const ROLES = [
  * twice.
  */
 export const VIEWS = {
-  engineeringStock: ROLES,
+  /**
+   * The catalog. Narrowed on 14 Oct 2026 from every role to the three who run
+   * stock day to day, so releasing it reaches the plant heads and nobody else.
+   */
+  engineeringStock: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER],
+
+  /** Goods receipts and stock additions. Its own screen since 14 Oct 2026. */
+  goodsReceipts: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER],
   /**
    * The category tree, which is created and deleted from this screen.
    *
@@ -145,7 +152,14 @@ export const VIEWS = {
 // itemNaming was released 25 Sep 2026 for the VP Operations to approve new items; held back again on
 // 29 Sep, and its approval step removed on 10 Oct 2026.
 // purchaseRequests released 14 Oct 2026, so the Admin can follow the purchase queue.
-export const RELEASED = new Set(["breakdowns", "maintenanceRequests", "purchaseRequests"]);
+// engineeringStock and goodsReceipts released 14 Oct 2026: the plant heads run their own store.
+export const RELEASED = new Set([
+  "breakdowns",
+  "maintenanceRequests",
+  "purchaseRequests",
+  "engineeringStock",
+  "goodsReceipts",
+]);
 
 
 /**
@@ -182,7 +196,7 @@ export const consoleFor = (role) => (role === SUPERVISOR ? "/supervisor" : "/adm
  */
 export const NAV = [
   { view: "engineeringStock", label: "Engineering Stock", path: "products", icon: Boxes },
-  { view: "engineeringStock", label: "Goods Receipts", path: "goods-receipts", icon: ClipboardCheck },
+  { view: "goodsReceipts", label: "Goods Receipts", path: "goods-receipts", icon: ClipboardCheck },
   { view: "purchaseRequests", label: "Purchase Requests", path: "purchase-requests", icon: ShoppingCart },
   { view: "categories", label: "Categories", path: "categories", icon: FolderTree },
   { view: "lowStock", label: "Low Stock", path: "low-stock", icon: AlertTriangle },
