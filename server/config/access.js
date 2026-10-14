@@ -78,12 +78,13 @@ export const VIEWS = {
    * Purchase requests sent to SAP, and where each stands.
    *
    * Its own screen since 14 Oct 2026; it was part of Engineering Stock, which
-   * this release shows to the Maintenance Manager alone, so the Admin could not
-   * follow what had been asked of purchase. Reading is the Admin's and
-   * maintenance's; raising one, and sending it again, stays the Maintenance
-   * Manager's - routes/purchaseRequestRoutes.js holds that line.
+   * this release shows to the Maintenance Manager alone, so the plant heads
+   * and the Admin could not follow what had been asked of purchase. Reading is
+   * theirs and maintenance's - not narrowed by plant, since every store posts
+   * against the one SAP company; raising one, and sending it again, stays the
+   * Maintenance Manager's - routes/purchaseRequestRoutes.js holds that line.
    */
-  purchaseRequests: [MANAGER, MAINTENANCE_MANAGER],
+  purchaseRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER],
 
   /**
    * The item-naming queue.

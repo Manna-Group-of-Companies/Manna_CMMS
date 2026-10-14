@@ -8,9 +8,9 @@ import { describe, it } from "node:test";
 import { MAINTENANCE_MANAGER, MANAGER, PRODUCTION_MANAGER, maySee, rolesFor } from "../config/access.js";
 
 describe("the release", () => {
-  it("shows purchase requests to the Admin and maintenance, and to nobody else", () => {
-    assert.deepEqual(rolesFor("purchaseRequests"), [MANAGER, MAINTENANCE_MANAGER]);
-    assert.ok(!maySee(PRODUCTION_MANAGER, "purchaseRequests"));
+  it("shows purchase requests to the Admin, maintenance and the plant heads", () => {
+    assert.deepEqual(rolesFor("purchaseRequests"), [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER]);
+    assert.ok(!maySee("Supervisor", "purchaseRequests"));
   });
 
   it("keeps the rest of the engineering store with the Maintenance Manager alone", () => {

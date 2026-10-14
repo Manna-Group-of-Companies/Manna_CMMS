@@ -78,11 +78,11 @@ export const VIEWS = {
 
   /**
    * Purchase requests sent to SAP, and where each stands. Its own screen since
-   * 14 Oct 2026, so the Admin can follow the purchase queue; it was part of
-   * Engineering Stock, which this release keeps to the Maintenance Manager.
-   * Raising one stays the Maintenance Manager's.
+   * 14 Oct 2026, so the plant heads and the Admin can follow the purchase
+   * queue; it was part of Engineering Stock, which this release keeps to the
+   * Maintenance Manager. Raising one stays the Maintenance Manager's.
    */
-  purchaseRequests: [MANAGER, MAINTENANCE_MANAGER],
+  purchaseRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER],
   // itemNaming (the "New Items" page, /requests) removed 10 Oct 2026: it was the VP Operations'
   // approval queue for new items, and since 9 Oct 2026 items go straight to SAP with no approval.
   // The server keeps its entry, which still guards the /naming-requests read API.
