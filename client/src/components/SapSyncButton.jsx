@@ -56,7 +56,7 @@ const SapSyncButton = () => {
       if (wasBusy.current) {
         wasBusy.current = false;
         const failed = status?.status === "Failed";
-        showToast(status?.lastResult || (failed ? "The SAP sync failed." : "SAP sync finished."), failed ? "error" : "success");
+        showToast(failed ? "SAP sync failed" : "SAP synced", failed ? "error" : "success");
         announceSapSyncDone();
       }
       return undefined;
