@@ -87,7 +87,7 @@ const hoursBetween = (from, to) => {
 };
 
 const toSummary = (row) => {
-  const stoppedFor = hoursBetween(row.stopped_at, row.completed_at || new Date().toISOString());
+  const stoppedFor = hoursBetween(row.stopped_at, row.completed_at || erpNow());
   const outputPerHour = Number(row.output_per_hour || 0);
 
   return {
