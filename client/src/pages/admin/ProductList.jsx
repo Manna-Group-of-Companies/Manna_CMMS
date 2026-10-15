@@ -43,7 +43,7 @@ const ProductFlags = ({ product }) => {
         <span className="badge badge-amber badge-soft text-[10px]">Name not SOI1/SOP1</span>
       )}
       {sapPending && (
-        <span className="badge badge-indigo badge-soft text-[10px]">Pending SAP</span>
+        <span className="badge badge-indigo badge-soft text-[10px]">SAP stock sync on queue</span>
       )}
       {sapCode && (
         <span className="badge badge-emerald badge-soft text-[10px]">SAP {product.sap.code}</span>

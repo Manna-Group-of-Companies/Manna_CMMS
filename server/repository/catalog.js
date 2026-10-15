@@ -419,6 +419,62 @@ export const listCatalog = async ({
 };
 
 /**
+ * Naming requests queued for SAP that have not yet become ERPNext Items.
+ *
+ * Shaped like catalog products so the list can show them alongside real items
+ * with a visible "SAP sync on queue" indicator. Once the SAP server creates
+ * the Item, the request disappears from this set and the real product takes
+ * over — no client change needed.
+ */
+export const pendingItems = async () => {
+  const rows = await listDocs("CMMS Item Naming Request", {
+    fields: [
+      "name", "proposed_name", "sap_company", "sap_item_group",
+      "sap_sub_type_a", "sap_sub_type_b", "foreign_name", "sap_uom",
+      "hsn_code", "tax_rate", "brand", "min_stock", "opening_qty",
+      "description", "modified",
+    ],
+    filters: [
+      ["CMMS Item Naming Request", "workflow_state", "=", "Approved"],
+      ["CMMS Item Naming Request", "sap_create_status", "=", "Queued"],
+    ],
+    limit: 100,
+  });
+
+  return rows.map((r) => {
+    const homeStore = storeForCompany(r.sap_company)?.label || "";
+    return {
+      _id: `pending:${r.name}`,
+      code: r.name,
+      name: r.proposed_name || r.name,
+      category: tidy(r.sap_item_group),
+      subCategory: tidy(r.sap_sub_type_a),
+      subCategoryB: tidy(r.sap_sub_type_b),
+      sapCategory: null,
+      foreignName: r.foreign_name || "",
+      hsnCode: r.hsn_code || "",
+      taxRate: r.tax_rate || "",
+      brand: r.brand || "",
+      unit: r.sap_uom || "",
+      unitCost: 0,
+      minStock: Number(r.min_stock || 0),
+      quantity: Number(r.opening_qty || 0),
+      redStock: 0,
+      rooms: [],
+      storeRoom: homeStore,
+      homeStore,
+      rackNumber: "",
+      description: r.description || "",
+      image: "",
+      sap: { code: "", status: "Pending" },
+      disabled: false,
+      updatedAt: r.modified,
+      sapSyncPending: true,
+    };
+  });
+};
+
+/**
  * One product by its item code.
  *
  * `onlyRooms` confines it exactly as it does the list: an item the caller's

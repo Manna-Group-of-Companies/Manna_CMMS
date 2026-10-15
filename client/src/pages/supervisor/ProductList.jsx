@@ -542,6 +542,11 @@ const ProductList = () => {
                         <div>
                           <div className="font-bold text-slate-900">{product.name}</div>
                           <div className="text-[10px] font-mono text-brand-700">{product.code}</div>
+                          {product.sapSyncPending && (
+                            <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 border border-indigo-200 text-indigo-600">
+                              SAP stock sync on queue
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="py-4 px-6">
@@ -611,6 +616,9 @@ const ProductList = () => {
                         </div>
                       </td>
                       <td className="py-4 px-6 text-right">
+                        {product.sapSyncPending ? (
+                          <span className="text-[10px] text-slate-400 italic">awaiting SAP</span>
+                        ) : (
                         <div className="flex items-center justify-end gap-1.5">
                           {/* Details */}
                           <button
@@ -647,6 +655,7 @@ const ProductList = () => {
                           </button>
                           )}
                         </div>
+                        )}
                       </td>
                     </tr>
                   );

@@ -205,7 +205,7 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                                 if (p.nameCompliant == false)
                                   SoftChip('Name not SOI1/SOP1', color: AppColors.warning),
                                 if (p.sap.isPending)
-                                  SoftChip('Pending SAP', color: AppColors.accent),
+                                  SoftChip('SAP stock sync on queue', color: AppColors.accent),
                                 if (p.sap.isCreated && p.sap.code.isNotEmpty)
                                   SoftChip('SAP ${p.sap.code}', color: AppColors.success),
                               ],

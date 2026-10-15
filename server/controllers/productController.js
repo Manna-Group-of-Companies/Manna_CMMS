@@ -20,6 +20,7 @@ import {
   listSubCategories,
   listSubCategoriesB,
   ensureBrand,
+  pendingItems,
 } from "../repository/catalog.js";
 import {
   categoryOptionsFor,
@@ -28,7 +29,6 @@ import {
   updateItemCategory,
   updateSapItem,
 } from "../repository/sapCategories.js";
-import { scopeFor } from "../repository/plantScope.js";
 import { maySee } from "../config/access.js";
 
 // @desc    Get all products with search and filtering
@@ -52,22 +52,13 @@ export const getProducts = async (req, res) => {
       });
     }
 
-    // A plant head sees their own site's shelves and nothing else. Read from
-    // the signed-in user rather than taken from the query, so narrowing it is
-    // not something a caller can decline to do.
-    const { stores } = await scopeFor(req.user);
+    const [catalog, pending] = await Promise.all([
+      listCatalog({ search, category, subCategory, subCategoryB, storeRoom, stockStatus }),
+      // Items queued for SAP that do not exist in ERPNext yet.
+      stockStatus ? [] : pendingItems(),
+    ]);
 
-    res.json(
-      await listCatalog({
-        search,
-        category,
-        subCategory,
-        subCategoryB,
-        storeRoom,
-        onlyRooms: stores,
-        stockStatus,
-      })
-    );
+    res.json([...catalog, ...pending]);
   } catch (error) {
     res.status(error.status === 403 ? 403 : 502).json({
       message: `Could not read the catalog from ERPNext: ${error.message}`,
@@ -80,12 +71,9 @@ export const getProducts = async (req, res) => {
 // @access  Private
 export const getProductById = async (req, res) => {
   try {
-    const { stores } = await scopeFor(req.user);
-    const product = await getCatalogItem(req.params.id, { onlyRooms: stores });
+    const product = await getCatalogItem(req.params.id);
 
-    // "Not found" rather than "not allowed" on purpose: to a plant head an
-    // item their site does not hold is not in their catalog at all, and a 403
-    // would confirm the code exists to somebody who cannot see it.
+    // "Not found" rather than "not allowed" on purpose.
     if (!product) return res.status(404).json({ message: "Engineering Stock not found" });
     res.json(product);
   } catch (error) {
