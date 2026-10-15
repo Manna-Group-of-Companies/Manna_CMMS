@@ -531,8 +531,8 @@ try {
                     $patch = [ordered]@{}
                     foreach ($k in $want.Keys) {
                         $a = $cur.$k; $b = $want[$k]
-                        $same = if ($b -is [int] -or $b -is [double]) { [double]("0$a") -eq [double]$b -or ("$a" -eq "$b") } else { (Norm $a) -ceq $b }
-                        if ($k -eq 'ChapterID' -and [int]$b -eq -1 -and ([int]("0$a") -le 0)) { $same = $true }
+                        $same = if ($b -is [int] -or $b -is [double]) { $da = if ("$a" -match '^\s*$') { 0 } else { [double]$a }; $da -eq [double]$b -or ("$a" -eq "$b") } else { (Norm $a) -ceq $b }
+                        if ($k -eq 'ChapterID' -and [int]$b -eq -1 -and ($(if ("$a" -match '^\s*$') { 0 } else { [int]$a }) -le 0)) { $same = $true }
                         if (-not $same) { $patch[$k] = $b; $entry.changes[$k] = @{ from = "$a"; to = "$b" } }
                     }
                     if ($patch.Count -eq 0) { $entry.action = 'already in SAP' }
@@ -551,7 +551,7 @@ try {
                         $pr = Invoke-Sl -Method PATCH -Url (Key-Url $code) -Body ($body | ConvertTo-Json -Compress -Depth 5) -Jar $jar
                         if ($pr.Http -ne '204' -and $pr.Http -ne '200') { Sl-Fail $pr 'PATCH' }
                         $v = (Invoke-Sl -Method GET -Url ((Key-Url $code) + '?$select=' + (($patch.Keys) -join ',')) -Jar $jar).Body | ConvertFrom-Json
-                        foreach ($k in $patch.Keys) { if ("$($v.$k)" -ne "$($patch[$k])" -and [double]("0$($v.$k)") -ne [double]("0$($patch[$k])")) { throw "SAP accepted the PATCH but reads back $k = '$($v.$k)'" } }
+                        foreach ($k in $patch.Keys) { $vk = "$($v.$k)"; $pk = "$($patch[$k])"; if ($vk -ne $pk -and ([double](if ($vk.Trim()) { $vk } else { '0' })) -ne ([double](if ("$pk".Trim()) { "$pk" } else { '0' }))) { throw "SAP accepted the PATCH but reads back $k = '$vk'" } }
                         $entry.action = 'patched'; $result.changed++
                     }
                     if (-not $DryRun) {
@@ -785,6 +785,7 @@ try {
                                 $ln
                             })
                         }
+                        if ($opt.PSObject.Properties['pr_series'] -and [int]$opt.pr_series) { $payload['Series'] = [int]$opt.pr_series }
                         if ($DryRun) { $entry.action = 'would post PurchaseRequests'; $entry.payload = $payload }
                         else {
                             $pr = Invoke-Sl -Method POST -Url "$slBase/PurchaseRequests" -Body ($payload | ConvertTo-Json -Compress -Depth 6) -Jar $jar
