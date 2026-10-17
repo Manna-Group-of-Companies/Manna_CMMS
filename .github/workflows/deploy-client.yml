@@ -1,0 +1,85 @@
+# Build the CMMS web client and deploy it to Cloudflare Pages on the Manna
+# Group account, as https://manna-cmms.pages.dev. See docs/deploy-client.md.
+#
+# This is a Direct Upload rather than Cloudflare's Git integration because the
+# repository is already connected to Pages on another Cloudflare account
+# (`mannagroupcmms`), and Cloudflare lets a repository feed only one account.
+#
+# Only the client is deployed here. The API (server/) is an Express app with
+# MongoDB, background workers and in-memory sessions; it stays on Render.
+#
+# Needs one secret, CLOUDFLARE_API_TOKEN, with Account → Cloudflare Pages →
+# Edit on the Manna Group account.
+#
+# Deliberately no wrangler.toml in client/: the repository also feeds a
+# Git-connected Worker (`mannarpplcmms`) on a third account, whose
+# `wrangler deploy` would pick a Pages config up and fail. Everything this
+# deploy needs is on the command line below.
+
+name: Client → Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'client/**'
+      - '.github/workflows/deploy-client.yml'
+  workflow_dispatch:
+
+# A slower run finishing after a newer one would put the older bundle live.
+concurrency:
+  group: deploy-client
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PROJECT: manna-cmms
+  # Not a secret: an account ID grants nothing without a token.
+  CLOUDFLARE_ACCOUNT_ID: 900d34958d506287c81b92109e648c35
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: client
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Vite 8 needs Node 20.19+ or 22.12+.
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - run: npm ci
+
+      # Production mode, so .env.production points the bundle at the Render API.
+      - run: npm run build
+
+      # First run only: Direct Upload projects must exist before a deploy.
+      # Fails harmlessly with "already exists" on every run after that; a
+      # genuine auth problem still surfaces in the deploy step below.
+      - name: Create the Pages project if missing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4 pages project create "$PROJECT" --production-branch=main || true
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not set. See docs/deploy-client.md."
+            exit 1
+          fi
+          # --branch=main makes this the production deployment; anything else
+          # would land as a preview on a hashed subdomain.
+          npx --yes wrangler@4 pages deploy dist --project-name="$PROJECT" --branch=main \
+            --commit-hash="${{ github.sha }}" --commit-message="$(git log -1 --pretty=%s)"
