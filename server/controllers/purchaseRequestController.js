@@ -54,6 +54,33 @@ export const raise = async (req, res) => {
   }
 };
 
+/** @route GET /api/purchase-requests/vendors?company=HRI - the SAP suppliers, for the PO form */
+export const vendors = async (req, res) => {
+  try {
+    res.json(await requests.vendorsFor(req.query.company));
+  } catch (error) {
+    fail(res, error, "Could not load the vendors");
+  }
+};
+
+/** @route POST /api/purchase-requests/:id/order - the purchase manager makes the PO */
+export const order = async (req, res) => {
+  try {
+    res.json(await requests.orderRequest(req.params.id, req.body, req.user));
+  } catch (error) {
+    fail(res, error, "Could not save the purchase order");
+  }
+};
+
+/** @route POST /api/purchase-requests/:id/order/retry */
+export const retryOrder = async (req, res) => {
+  try {
+    res.json(await requests.retryOrder(req.params.id, req.user));
+  } catch (error) {
+    fail(res, error, "Could not send the purchase order again");
+  }
+};
+
 /** @route POST /api/purchase-requests/:id/retry */
 export const retry = async (req, res) => {
   try {

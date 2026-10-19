@@ -71,6 +71,15 @@ const ROLE_MAP = [
    */
   ["Higher Management", "Higher Management"],
   ["VP Operations", "VP Operations"],
+  /**
+   * The purchase manager (20 Oct 2026; Shantu). Turns the engineering purchase
+   * requests into SAP purchase orders and buys the low value requests.
+   *
+   * A role of its own rather than ERPNext's "Purchase Manager", which other
+   * people on the site hold for buying in the desk and who are not meant to
+   * get this screen with it.
+   */
+  ["Store Purchase Manager", "Purchase Manager"],
   ["Store Supervisor", "Supervisor"],
   /**
    * The production managers, one per company.
@@ -252,7 +261,7 @@ export const describe = async (email, { as } = {}) => {
     throw new ErpError(
       "That account holds no CMMS role in ERPNext. Ask an administrator to give it " +
         "Store Manager, Store Maintenance Manager, Store Supervisor, Plant Manager, " +
-        "Higher Management, VP Operations or Store Maintenance Member.",
+        "Higher Management, VP Operations, Store Purchase Manager or Store Maintenance Member.",
       { status: 403 }
     );
   }

@@ -26,6 +26,8 @@
     "erp:sync-breakdown-extras": "node scripts/syncBreakdownExtras.js",
     "erp:sync-breakdown-extras:dry": "node scripts/syncBreakdownExtras.js --dry-run",
     "erp:sync-maintenance-all": "npm run erp:sync-breakdown-extras && npm run erp:sync-requests && npm run erp:sync-preventive",
+    "erp:sync-purchasing": "node scripts/syncPurchasing.js",
+    "erp:sync-purchasing:dry": "node scripts/syncPurchasing.js --dry-run",
     "erp:sync-attended": "node scripts/syncAttended.js",
     "erp:sync-attended:dry": "node scripts/syncAttended.js --dry-run",
     "erp:sync-attendance": "node scripts/syncAttendance.js",
