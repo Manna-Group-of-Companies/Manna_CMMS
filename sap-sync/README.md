@@ -30,6 +30,7 @@ Read `C:\Users\eldhose\sap-tools\BRIEFING.md` before changing anything here.
 | `config.example.json`, `poller.config.example.json` | Templates. |
 | `snapshots/2026-09-24/` | The SAP reads everything above was built from. |
 | `apply-mrppl-cleanup.js`, `verify-mrppl-cleanup.js`, `cancel-mrppl-po.js` | 10 Oct: the Manna Rubber physical-count clean-up, applied through the Service Layer (see below). Done 10 Oct 2026. |
+| `Verify-SapSync.ps1` | **Read-only** check that purchase requests, the POs raised from them, the open PO lines the receipt form offers and the goods receipts agree between ERPNext and SAP (see "Checking the sync" below). Writes nothing. |
 | `pull-mrppl-from-sap.js` | 11 Oct: PASS E (fetch from SAP) for Manna Rubber only, as a script that needs no `config.json` (SAP read from `sap-treads-stock-sync\config.json`, ERPNext via `erp.js`). Dry run by default, `--apply` writes ERPNext only, backs it up first and compares both sides after. Run 11 Oct 2026 (see below). |
 
 ## Company mapping (set by the user, 24 Sep 2026)
@@ -121,6 +122,28 @@ maintenance office converts it to a **PO** in SAP (Copy To → Purchase Order); 
 lines with `BaseType 1470000113` and marks the CMMS request **Ordered** with the PO number, and that PO is
 in the goods receipt form. Statuses: Queued → In SAP → Ordered (or Closed if SAP closed it with no PO) /
 Failed. Found 9 Oct: Manna Rubber had never used SAP Purchase Requests - every PO was entered directly.
+
+## Checking the sync (19 Oct 2026)
+
+`Verify-SapSync.ps1` reads both sides and reports, per company, one row per check (OK / DIFF / MISSING / INFO):
+
+- **Purchase requests**: DocNum, `Reference2`, required-by date and each line's item and quantity; the POs SAP
+  raised from the request (lines with `BaseType 1470000113`) against its `po_numbers` and status. Failed or
+  Queued requests are checked for a SAP document with their stamp anyway, and SAP requests stamped
+  `PR<yy>-<n>` that no CMMS request points at are listed.
+- **Open PO lines**: the `open_po_lines` snapshot against SAP's open POs now (open quantity, price, lines missing
+  from the snapshot). A difference here usually only means the snapshot is older than the last SAP change.
+- **Goods receipts**: the GRPO's DocNum, stamp, vendor, bill no., bill date, cancelled flag and each line's PO
+  link, item, quantity and price; then the ERPNext Material Receipt's status, quantities, rates and store.
+  Stock additions only with `-IncludeStockAdditions`.
+
+```powershell
+powershell -File C:\Users\eldhose\sap-engineering-sync\Verify-SapSync.ps1              # all companies
+powershell -File C:\Users\eldhose\sap-engineering-sync\Verify-SapSync.ps1 -Company HRI
+```
+
+It uses `config.json` for the logins, refuses any SAP call other than GET, Login and Logout, and writes its
+report to `logs\verify-sap-sync-<date>.csv` / `.json`. Exit code 1 when anything is DIFF or MISSING.
 
 ## New item groups (9 Oct 2026)
 
