@@ -29,6 +29,7 @@ import { useNotifications } from "../../context/NotificationContext";
 /** Colour carries urgency: the untouched ones should catch the eye first. */
 const STATE_STYLE = {
   Reported: "badge-rose",
+  Attended: "badge-orange",
   "Under Repair": "badge-amber",
   Repaired: "badge-emerald",
   Closed: "badge-slate",
@@ -51,7 +52,8 @@ const PRIORITY_STYLE = {
  * maintenance record.
  */
 const NEXT_LABEL = {
-  Reported: "Start repair",
+  Reported: "Attend",
+  Attended: "Start repair",
   "Under Repair": "Machine running",
   Repaired: "Close",
 };
@@ -147,11 +149,11 @@ const Breakdowns = () => {
      * and Under Repair are the only states where the machine is actually
      * stopped.
      */
-    const down = rows.filter((r) => ["Reported", "Under Repair"].includes(r.state));
+    const down = rows.filter((r) => ["Reported", "Attended", "Under Repair"].includes(r.state));
 
     return {
       open: open.length,
-      notStarted: rows.filter((r) => r.state === "Reported").length,
+      notStarted: rows.filter((r) => ["Reported", "Attended"].includes(r.state)).length,
       downtime: down.reduce((sum, r) => sum + (r.stoppedForHours || 0), 0),
     };
   }, [rows]);

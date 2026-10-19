@@ -39,10 +39,17 @@ class WorkStage {
     required this.required,
     required this.allowedRoles,
     required this.labels,
+    this.fromStates = const [],
   });
 
   final String action;
   final String from;
+
+  /// Every state the step may be taken from: `from`, and any others the server
+  /// allows (a report can be cancelled once maintenance has attended to it, too).
+  final List<String> fromStates;
+
+  bool startsFrom(String state) => state == from || fromStates.contains(state);
   final String to;
   final String title;
   final String blurb;
@@ -63,6 +70,7 @@ class WorkStage {
   factory WorkStage.fromJson(String action, Map<String, dynamic> json) => WorkStage(
         action: action,
         from: asString(json['from']),
+        fromStates: _asStrings(json['fromStates']),
         to: asString(json['to']),
         title: asString(json['title']),
         blurb: asString(json['blurb']),
@@ -131,7 +139,13 @@ class Breakdown {
     required this.actionsPerformed,
     required this.rootCause,
     required this.repeatFailure,
+    this.attendedBy = '',
+    this.attendedAt,
   });
+
+  /// Who in maintenance marked it seen, and when (20 Oct 2026). Empty before.
+  final String attendedBy;
+  final DateTime? attendedAt;
 
   final String id;
   final String machine;
@@ -161,7 +175,7 @@ class Breakdown {
   /// root cause is written up, but the machine is running again the moment it
   /// reaches Repaired. Counting those as down reports hours against a machine
   /// that is back in production.
-  bool get isDown => state == 'Reported' || state == 'Under Repair';
+  bool get isDown => state == 'Reported' || state == 'Attended' || state == 'Under Repair';
 
   bool get isOpen => state != 'Closed' && state != 'Cancelled';
 
@@ -183,6 +197,8 @@ class Breakdown {
         actionsPerformed: asString(json['actionsPerformed']),
         rootCause: asString(json['rootCause']),
         repeatFailure: _asBool(json['repeatFailure']),
+        attendedBy: asString(json['attendedBy']),
+        attendedAt: parseDate(json['attendedAt']),
       );
 }
 
@@ -205,7 +221,13 @@ class MaintenanceRequest {
     required this.ageDays,
     required this.nextAction,
     required this.workDone,
+    this.attendedBy = '',
+    this.attendedAt,
   });
+
+  /// Who in maintenance marked it seen, and when (20 Oct 2026). Empty before.
+  final String attendedBy;
+  final DateTime? attendedAt;
 
   final String id;
   final String title;
@@ -246,5 +268,7 @@ class MaintenanceRequest {
         ageDays: asInt(json['ageDays']),
         nextAction: asString(json['nextAction']),
         workDone: asString(json['workDone']),
+        attendedBy: asString(json['attendedBy']),
+        attendedAt: parseDate(json['attendedAt']),
       );
 }

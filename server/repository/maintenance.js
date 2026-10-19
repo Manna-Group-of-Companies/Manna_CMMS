@@ -8,7 +8,7 @@ import {
   listDocs,
   updateDoc,
 } from "../integrations/erpnext/client.js";
-import { STAGES, mayTake, missingFor, nextActionFor } from "../integrations/erpnext/breakdownStages.js";
+import { STAGES, fromStatesOf, mayTake, missingFor, nextActionFor } from "../integrations/erpnext/breakdownStages.js";
 import { listTechnicians } from "./technicians.js";
 import { plantsFor } from "./plantScope.js";
 import {
@@ -70,7 +70,8 @@ const BREAKDOWN_FIELDS = [
 
 /** What each stage is waiting for, in the words the screen shows. */
 const WAITING_ON = {
-  Reported: "Maintenance to start work",
+  Reported: "Maintenance to attend to it",
+  Attended: "Maintenance to start work",
   "Under Repair": "Machine to run again",
   Repaired: "Maintenance to record the root cause and close it",
   Closed: "",
@@ -211,6 +212,8 @@ export const getBreakdown = async (id) => {
     estimatedRepairHours: Number(doc.estimated_repair_hours || 0),
     plannedAt: doc.planned_at || null,
     repairStartedAt: doc.repair_started_at || null,
+    attendedBy: doc.attended_by || "",
+    attendedAt: doc.attended_at || null,
     files: await listAttachments("CMMS Breakdown", id),
     logSheetVerified: Boolean(doc.log_sheet_verified),
     logSheetVerifiedBy: doc.log_sheet_verified_by || "",
@@ -391,9 +394,9 @@ export const saveAndAdvance = async (id, action, fields = {}, user = {}) => {
   }
 
   const doc = await getDoc("CMMS Breakdown", id);
-  if (doc.workflow_state !== stage.from) {
+  if (!fromStatesOf(stage).includes(doc.workflow_state)) {
     throw new Error(
-      `This breakdown is ${doc.workflow_state}. "${action}" only applies to one that is ${stage.from}.`
+      `This breakdown is ${doc.workflow_state}. "${action}" only applies to one that is ${fromStatesOf(stage).join(" or ")}.`
     );
   }
 

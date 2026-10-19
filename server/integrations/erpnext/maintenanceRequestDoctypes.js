@@ -165,9 +165,13 @@ const REQUEST = doc({
     select(
       "workflow_state",
       "Status",
-      ["Requested", "In Progress", "Completed", "Closed", "Cancelled"],
+      ["Requested", "Attended", "In Progress", "Completed", "Closed", "Cancelled"],
       { default: "Requested", read_only: 1, in_list_view: 1 }
     ),
+
+    // --- stage 1b: seen by maintenance (20 Oct 2026; live via scripts/syncAttended.js) ---
+    link("attended_by", "Attended By", "User", { read_only: 1 }),
+    f("attended_at", "Attended At", "Datetime", { read_only: 1 }),
 
     // --- stage 2: accepted and started, by maintenance ---
     link("assigned_to", "Assigned To", "User"),

@@ -75,3 +75,30 @@ describe("maintenance request steps", () => {
     assert.ok(!mayTakeRequestStep("Reject", plantManager, request));
   });
 });
+
+// "Attended" (20 Oct 2026): maintenance marks a report seen before any work.
+describe("attending to a report", () => {
+  it("only maintenance attends, and work starts from Attended", () => {
+    assert.ok(mayTake("Attend", MM));
+    assert.ok(!mayTake("Attend", PLANT));
+    assert.equal(STAGES.Attend.from, "Reported");
+    assert.equal(STAGES["Start Repair"].from, "Attended");
+    assert.ok(mayTakeRequestStep("Attend", { role: MM }, {}));
+    assert.ok(!mayTakeRequestStep("Attend", { role: PLANT }, {}));
+    assert.equal(REQUEST_STAGES["Start Work"].from, "Attended");
+  });
+
+  it("an attended report can still be cancelled, rejected or withdrawn", () => {
+    assert.deepEqual(describeStages().Cancel.fromStates, ["Reported", "Attended"]);
+    for (const action of ["Reject", "Withdraw"]) {
+      assert.deepEqual(describeRequestStages()[action].fromStates, ["Requested", "Attended"]);
+    }
+  });
+
+  it("attending stamps who and when", () => {
+    const stamped = STAGES.Attend.stamp({ email: "mm@x" });
+    assert.equal(stamped.attended_by, "mm@x");
+    assert.ok(stamped.attended_at);
+    assert.equal(REQUEST_STAGES.Attend.stamp({ email: "mm@x" }).attended_by, "mm@x");
+  });
+});
