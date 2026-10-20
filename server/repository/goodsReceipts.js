@@ -1,5 +1,6 @@
 import {
   createDoc,
+  deleteDoc,
   getDoc,
   listChildRows,
   listDocs,
@@ -8,7 +9,8 @@ import {
 import { erpNow, erpToday } from "../integrations/erpnext/time.js";
 import { storeForCompany } from "../integrations/erpnext/stores.js";
 import { catalogProducts, forgetCatalog } from "./catalog.js";
-import { CONTROL, itemMasterOptions, pickFrom, pickHsn, raiseSapFlag } from "./sapCategories.js";
+import { CONTROL, hsnDigits, hsnProblem, itemMasterOptions, pickFrom, pickHsn, raiseSapFlag } from "./sapCategories.js";
+import { dropQueuedRequests, raiseHsnRequests, requestsForReceipts } from "./hsnRequests.js";
 
 /**
  * Stock coming into the engineering store, decided 9 Oct 2026. Two kinds,
@@ -21,7 +23,10 @@ import { CONTROL, itemMasterOptions, pickFrom, pickHsn, raiseSapFlag } from "./s
  *                     code come from the PO. The sync posts a GRPO in SAP (so
  *                     accounts make the A/P invoice from it, as before) and the
  *                     same quantity into the company's ERPNext store at the PO
- *                     price.
+ *                     price. A bill's HSN code SAP does not have yet, on an
+ *                     item with none, is asked for with the receipt (20 Oct
+ *                     2026, see hsnRequests.js); the sync holds the receipt
+ *                     until SAP has it.
  *   Stock Addition  - stock on the shelf with no bill: no value, no HSN. The
  *                     sync posts a SAP Goods Receipt at price 0 and an ERPNext
  *                     receipt at zero value.
@@ -90,7 +95,7 @@ const toLine = (row) => ({
   warehouse: row.warehouse || "",
 });
 
-const toReceipt = (row, lines = []) => ({
+const toReceipt = (row, lines = [], hsnRequests = []) => ({
   id: row.name,
   kind: row.kind,
   company: row.company,
@@ -114,6 +119,7 @@ const toReceipt = (row, lines = []) => ({
   postedAt: row.posted_at || null,
   error: row.error || "",
   lines: lines.map(toLine),
+  hsnRequests,
   total: lines.reduce((sum, l) => sum + Number(l.qty || 0) * Number(l.rate || 0), 0),
   updatedAt: row.modified,
 });
@@ -148,7 +154,8 @@ export const listReceipts = async ({ status = "", kind = "", limit = 100, onlyCo
       byParent.get(l.parent).push(l);
     }
   }
-  return rows.map((r) => toReceipt(r, byParent.get(r.name) || []));
+  const requests = await requestsForReceipts(rows.filter((r) => r.kind === "Goods Receipt").map((r) => r.name));
+  return rows.map((r) => toReceipt(r, byParent.get(r.name) || [], requests.get(r.name) || []));
 };
 
 export const getReceipt = async (id) => {
@@ -156,7 +163,9 @@ export const getReceipt = async (id) => {
     if (error?.status === 404) return null;
     throw error;
   });
-  return doc ? toReceipt(doc, doc.lines || []) : null;
+  if (!doc) return null;
+  const requests = doc.kind === "Goods Receipt" ? await requestsForReceipts([doc.name]) : new Map();
+  return toReceipt(doc, doc.lines || [], requests.get(doc.name) || []);
 };
 
 /* ------------------------------------------------------------- open purchase orders */
@@ -304,6 +313,8 @@ export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null
   const seen = new Set();
   const lines = [];
   const billChanges = [];
+  // HSN codes SAP does not have yet: digits -> the item of the first line carrying it.
+  const newCodes = new Map();
   for (const w of wanted) {
     const line = po.lines.find((l) => String(l.line) === String(w.poLine));
     if (!line) throw badRequest(`Line ${w.poLine} is not an open engineering line of PO ${po.number}.`);
@@ -319,12 +330,20 @@ export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null
           ").",
       );
     }
-    const hsn = pickHsn(options.hsn, w.hsnCode, label);
+    const product = products.get(line.itemCode);
+    const hsn = hsnDigits(w.hsnCode);
     if (!hsn) throw badRequest(`The HSN code for ${line.name} is required - it is on the bill.`);
+    if (!(options.hsn || []).includes(hsn)) {
+      // A new code is asked for only for an item that has none yet; an item
+      // that has one keeps to SAP's list, as before.
+      if (product?.hsnCode) pickHsn(options.hsn, hsn, label);
+      const problem = hsnProblem(hsn);
+      if (problem) throw badRequest(`${line.name}: HSN ${hsn} - ${problem}.`);
+      if (!newCodes.has(hsn)) newCodes.set(hsn, line.itemCode);
+    }
     const tax = pickFrom(options.tax_rates, w.taxRate, "tax rate", label);
     if (!tax) throw badRequest(`The tax rate for ${line.name} is required - it is on the bill.`);
 
-    const product = products.get(line.itemCode);
     billChanges.push([product, hsn, tax]);
     lines.push({
       doctype: LINE,
@@ -342,12 +361,6 @@ export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null
     });
   }
 
-  // The bill's HSN and tax rate onto the items first, so the same SAP run
-  // patches the item master before it posts the GRPO that reads them.
-  let followed = 0;
-  for (const [product, hsn, tax] of billChanges) if (await followBill(product, hsn, tax)) followed += 1;
-  if (followed) forgetCatalog();
-
   const created = await createDoc(DOCTYPE, {
     doctype: DOCTYPE,
     kind: "Goods Receipt",
@@ -364,8 +377,41 @@ export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null
     remarks: tidy(body.remarks).slice(0, 500),
     lines,
   });
+
+  // Its new HSN codes with it: a receipt that would wait for a code nobody
+  // asked for is taken back rather than left behind.
+  try {
+    await raiseHsnRequests({ company, receipt: created.name, codes: newCodes, user });
+  } catch (error) {
+    await deleteDoc(DOCTYPE, created.name).catch(() => {});
+    console.error("HSN request not saved:", error.message);
+    throw Object.assign(new Error("The new HSN code could not be recorded, so the receipt was not saved. Try again."), {
+      status: 400,
+    });
+  }
+
+  // The bill's HSN and tax rate onto the items, so the same SAP run patches
+  // the item master before it posts the GRPO that reads them; the flag last,
+  // once everything it is meant to pick up is written.
+  let followed = 0;
+  for (const [product, hsn, tax] of billChanges) if (await followBill(product, hsn, tax)) followed += 1;
+  if (followed) forgetCatalog();
+
   await raiseSapFlag(user?.email);
   return getReceipt(created.name);
+};
+
+/**
+ * Takes back a goods receipt that has not posted yet - entered against the
+ * wrong PO, say - with the HSN codes it asked for that are still waiting.
+ */
+export const deleteReceipt = async (id) => {
+  const doc = await getDoc(DOCTYPE, id).catch(() => null);
+  if (!doc) throw notFound("Receipt not found");
+  if (doc.status !== "Queued") throw badRequest(`This receipt is ${doc.status}; only one still waiting to post can be deleted.`);
+  const dropped = doc.kind === "Goods Receipt" ? await dropQueuedRequests(id) : 0;
+  await deleteDoc(DOCTYPE, id);
+  return { deleted: id, hsnRequestsDeleted: dropped };
 };
 
 /**

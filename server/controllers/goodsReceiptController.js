@@ -1,4 +1,5 @@
 import * as receipts from "../repository/goodsReceipts.js";
+import * as hsn from "../repository/hsnRequests.js";
 import { scopeFor, withinCompany } from "../repository/plantScope.js";
 
 /**
@@ -97,5 +98,44 @@ export const retry = async (req, res) => {
     res.json(await receipts.retryReceipt(req.params.id, req.user));
   } catch (error) {
     fail(res, error, "Could not send the receipt again");
+  }
+};
+
+/** @route DELETE /api/goods-receipts/:id - one still waiting to post, with its waiting HSN requests */
+export const remove = async (req, res) => {
+  try {
+    const found = await receipts.getReceipt(req.params.id);
+    if (!found || !withinCompany(await scopeFor(req.user), found.company)) {
+      return res.status(404).json({ message: "Receipt not found" });
+    }
+    res.json(await receipts.deleteReceipt(req.params.id));
+  } catch (error) {
+    fail(res, error, "Could not delete the receipt");
+  }
+};
+
+/** A failed HSN request, if it is in this reader's companies. */
+const inScopeHsn = async (req) => {
+  const company = await hsn.hsnRequestCompany(req.params.id);
+  return Boolean(company) && withinCompany(await scopeFor(req.user), company);
+};
+
+/** @route POST /api/goods-receipts/hsn-requests/:id/retry - a failed new HSN code, sent again */
+export const resendHsn = async (req, res) => {
+  try {
+    if (!(await inScopeHsn(req))) return res.status(404).json({ message: "HSN request not found" });
+    res.json(await hsn.resendHsnRequest(req.params.id, req.user));
+  } catch (error) {
+    fail(res, error, "Could not send the HSN code again");
+  }
+};
+
+/** @route PUT /api/goods-receipts/hsn-requests/:id - { hsnCode }: a failed new HSN code, corrected */
+export const correctHsn = async (req, res) => {
+  try {
+    if (!(await inScopeHsn(req))) return res.status(404).json({ message: "HSN request not found" });
+    res.json(await hsn.correctHsnRequest(req.params.id, req.body?.hsnCode, req.user));
+  } catch (error) {
+    fail(res, error, "Could not correct the HSN code");
   }
 };

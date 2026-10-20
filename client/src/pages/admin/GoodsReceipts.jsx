@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ClipboardCheck, Loader2, Package, Plus, RefreshCw, Send } from "lucide-react";
+import { AlertTriangle, ClipboardCheck, Hourglass, Loader2, Package, Pencil, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
 
 import API from "../../services/api";
 import { useAuth, MAINTENANCE_MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import { formatCurrency } from "../../utils/currency";
+import { hsnDigits, hsnProblem } from "../../utils/hsn";
 import GoodsReceiptModal from "./GoodsReceiptModal";
 
 /**
@@ -58,6 +59,8 @@ const GoodsReceipts = () => {
   // Mirrors the server: only the Maintenance Manager receives stock or re-sends it.
   // Maintenance, and since 14 Oct 2026 the plant heads - mirrors the server's guard.
   const canReceive = user?.role === MAINTENANCE_MANAGER || user?.role === PRODUCTION_MANAGER;
+  // A failed HSN code, and taking a receipt back, are maintenance's alone - as on the server.
+  const isMaintenance = user?.role === MAINTENANCE_MANAGER;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -104,6 +107,42 @@ const GoodsReceipts = () => {
     } finally {
       setBusy("");
     }
+  };
+
+  /** One step on a receipt or its HSN request; the list reloads after. */
+  const act = async (key, call, done) => {
+    setBusy(key);
+    try {
+      await call();
+      showToast(done, "success");
+      load(true);
+    } catch (err) {
+      showToast(err.response?.data?.message || "That step was refused", "error");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const removeReceipt = (r) => {
+    const waiting = (r.hsnRequests || []).filter((h) => h.status === "Queued").length;
+    const also = waiting ? ` and its ${waiting} waiting HSN request${waiting === 1 ? "" : "s"}` : "";
+    if (!window.confirm(`Delete ${r.id}${also}? It has not been posted to SAP.`)) return;
+    act(r.id, () => API.delete(`/goods-receipts/${r.id}`), `${r.id} deleted`);
+  };
+
+  const resendHsn = (h) =>
+    act(h.id, () => API.post(`/goods-receipts/hsn-requests/${h.id}/retry`), `HSN ${h.hsnCode} sent to SAP again`);
+
+  const correctHsn = (h) => {
+    const typed = window.prompt(`Correct HSN ${h.hsnCode} (${h.id}) to:`, h.hsnCode);
+    if (typed === null) return;
+    const digits = hsnDigits(typed);
+    const problem = digits ? hsnProblem(digits) : "enter the HSN code from the bill";
+    if (problem) {
+      showToast(`${digits || typed}: ${problem}.`, "error");
+      return;
+    }
+    act(h.id, () => API.put(`/goods-receipts/hsn-requests/${h.id}`, { hsnCode: digits }), `HSN corrected to ${digits} and sent again`);
   };
 
   const shown = useMemo(
@@ -190,8 +229,12 @@ const GoodsReceipts = () => {
               key={r.id}
               receipt={r}
               canRetry={canReceive}
-              busy={busy === r.id}
+              canFix={isMaintenance}
+              busy={busy}
               onRetry={() => retry(r.id)}
+              onDelete={() => removeReceipt(r)}
+              onResendHsn={resendHsn}
+              onCorrectHsn={correctHsn}
             />
           ))}
         </div>
@@ -213,7 +256,10 @@ const KV = ({ label, value }) => (
   </div>
 );
 
-const ReceiptCard = ({ receipt: r, canRetry, busy, onRetry }) => {
+const HSN_STYLE = { Queued: "badge-amber", Created: "badge-emerald", Failed: "badge-rose" };
+
+const ReceiptCard = ({ receipt: r, canRetry, canFix, busy, onRetry, onDelete, onResendHsn, onCorrectHsn }) => {
+  const hsnRequests = r.hsnRequests || [];
   const isGr = r.kind === "Goods Receipt";
   const sapDoc = r.sapDocNumber
     ? `${isGr ? "GRPO" : "Goods Receipt"} ${r.sapDocNumber}${
@@ -289,17 +335,64 @@ const ReceiptCard = ({ receipt: r, canRetry, busy, onRetry }) => {
             </p>
           </div>
 
+          {/* New HSN codes this receipt asked SAP for. */}
+          {hsnRequests.length > 0 && (
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">New HSN codes for SAP</p>
+              <ul className="mt-1 space-y-1.5">
+                {hsnRequests.map((h) => (
+                  <li key={h.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+                    <span className="mono font-semibold text-slate-800">{h.hsnCode}</span>
+                    <span className="mono text-[11px] text-slate-500">{h.id}</span>
+                    <span className={`badge badge-soft ${HSN_STYLE[h.status] || "badge-slate"}`}>{h.status}</span>
+                    {h.status === "Created" && h.sapChapterId && (
+                      <span className="text-[12px] text-slate-600">SAP chapter ID {h.sapChapterId}</span>
+                    )}
+                    {h.status === "Failed" && h.error && <span className="text-[12px] text-rose-700">{h.error}</span>}
+                    {canFix && h.status === "Failed" && (
+                      <span className="ml-auto flex gap-1.5">
+                        <button className="btn btn-sm btn-neutral" disabled={busy === h.id} onClick={() => onCorrectHsn(h)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                          Correct code
+                        </button>
+                        <button className="btn btn-sm btn-primary" disabled={busy === h.id} onClick={() => onResendHsn(h)}>
+                          <Send className="h-3.5 w-3.5" />
+                          {busy === h.id ? "…" : "Send again"}
+                        </button>
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* The sync holds a receipt that waits on a new HSN code, and says so. */}
+          {r.status === "Queued" && r.error && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-800">
+              <Hourglass className="mt-px h-3.5 w-3.5 shrink-0" />
+              <span>{r.error}</span>
+            </p>
+          )}
           {r.status === "Failed" && r.error && (
             <p className="mt-2 text-xs text-rose-700">SAP said: {r.error}</p>
           )}
         </div>
 
-        {canRetry && r.status === "Failed" && (
+        {((canRetry && r.status === "Failed") || (canFix && r.status === "Queued")) && (
           <div className="flex shrink-0 gap-2">
-            <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetry}>
-              <Send className="h-4 w-4" />
-              {busy ? "…" : "Send again"}
-            </button>
+            {canRetry && r.status === "Failed" && (
+              <button className="btn btn-sm btn-primary" disabled={busy === r.id} onClick={onRetry}>
+                <Send className="h-4 w-4" />
+                {busy === r.id ? "…" : "Send again"}
+              </button>
+            )}
+            {canFix && r.status === "Queued" && (
+              <button className="btn btn-sm btn-neutral" disabled={busy === r.id} onClick={onDelete} title="Delete this receipt">
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            )}
           </div>
         )}
       </div>

@@ -4,6 +4,7 @@ import { useNotifications } from "../../context/NotificationContext";
 import { describeWhen } from "../../hooks/useFormDraft";
 import { formatCurrency } from "../../utils/currency";
 import { AlertCircle, Loader2, RefreshCw, Truck, X } from "lucide-react";
+import { hsnDigits, hsnProblem } from "../../utils/hsn";
 
 /**
  * Goods receipt: stock in from a supplier's bill, against an open SAP purchase
@@ -192,7 +193,8 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
       if (Number(e.qty) > Number(l.receivableQty)) {
         return `${l.name}: only ${l.receivableQty} ${l.unit || ""} is still open on this PO.`;
       }
-      if (!String(e.hsnCode || "").trim()) return `${l.name}: enter the HSN code from the bill.`;
+      const hsn = hsnCheck(l, e);
+      if (hsn.error) return `${l.name}: ${hsn.error}`;
       if (!e.taxRate) return `${l.name}: pick the tax rate from the bill.`;
     }
     return "";
@@ -214,7 +216,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
         lines: entered.map((l) => ({
           poLine: l.line,
           qty: Number(entries[l.line].qty),
-          hsnCode: String(entries[l.line].hsnCode).trim(),
+          hsnCode: hsnDigits(entries[l.line].hsnCode),
           taxRate: entries[l.line].taxRate,
         })),
       });
@@ -229,6 +231,21 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
     } finally {
       setSaving(false);
     }
+  };
+
+  /**
+   * One line's HSN, as the server will take it: required, the shape of a real
+   * code, and either in SAP's list or - for an item that has no HSN yet - new,
+   * which the save asks SAP to add.
+   */
+  const hsnCheck = (l, e) => {
+    const digits = hsnDigits(e.hsnCode);
+    if (!digits) return { error: "enter the HSN code from the bill." };
+    const problem = hsnProblem(digits);
+    if (problem) return { error: `${problem}.` };
+    if ((companyOptions?.hsn || []).includes(digits)) return { digits };
+    if (l.hsnCode) return { error: `HSN ${digits} is not in SAP's list - pick one from the list.` };
+    return { digits, isNew: true };
   };
 
   const pos = snapshot?.pos || [];
@@ -363,6 +380,8 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                       {po.lines.map((l) => {
                         const e = entries[l.line] || { qty: "", hsnCode: "", taxRate: "" };
                         const closed = Number(l.receivableQty) <= 0;
+                        // Said as it is typed, but only once there is something to say.
+                        const hsnShown = String(e.hsnCode || "").trim() ? hsnCheck(l, e) : {};
                         const rates =
                           e.taxRate && !taxRates.includes(e.taxRate) ? [e.taxRate, ...taxRates] : taxRates;
                         return (
@@ -417,9 +436,23 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                                 value={e.hsnCode}
                                 onChange={(ev) => setEntry(l.line, "hsnCode", ev.target.value)}
                                 disabled={closed}
-                                className="field field-sm w-32 mono disabled:opacity-60"
+                                inputMode="numeric"
+                                className={`field field-sm w-32 mono disabled:opacity-60 ${
+                                  hsnShown.error ? "border-rose-400" : ""
+                                }`}
                                 aria-label={`HSN code of ${l.name}`}
+                                aria-invalid={Boolean(hsnShown.error)}
                               />
+                              {hsnShown.error && (
+                                <div className="mt-0.5 max-w-[10rem] text-[11px] leading-tight text-rose-700">
+                                  {hsnShown.error}
+                                </div>
+                              )}
+                              {!hsnShown.error && hsnShown.isNew && (
+                                <div className="mt-0.5 max-w-[10rem] text-[11px] leading-tight text-amber-700">
+                                  New HSN - will be added to SAP
+                                </div>
+                              )}
                             </td>
                             <td>
                               <select
