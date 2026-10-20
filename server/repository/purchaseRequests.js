@@ -33,6 +33,11 @@ import { itemMasterOptions, raiseSapFlag } from "./sapCategories.js";
  * it does for a PO made in SAP.
  *
  *   order: (none) -> Queued -> Posted (SAP PO no.), or Failed (SAP's reason)
+ *          Posted -> Cancelled, when the PO is cancelled in SAP
+ *
+ * A request whose every PO was cancelled in SAP ends (20 Oct 2026): the sync
+ * closes it, says so in `error`, and closes its SAP purchase request. It is
+ * not ordered again; a new need is a new request.
  */
 
 const DOCTYPE = "CMMS Purchase Request";
