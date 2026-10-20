@@ -155,7 +155,7 @@ class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
     final filtered = _company.isNotEmpty || _approval.isNotEmpty || _purchase.isNotEmpty;
 
     return AppShell(
-      title: 'Purchase Request Sheet',
+      title: 'Miscellaneous Requests',
       actions: [
         IconButton(
           tooltip: _asSheet ? 'Show as cards' : 'Show as the sheet',
@@ -266,7 +266,7 @@ class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
               )
             else if (_error.isNotEmpty)
               EmptyState(
-                title: 'Could not load the sheet',
+                title: 'Could not load the requests',
                 message: _error,
                 icon: Icons.error_outline,
                 iconColor: AppColors.danger,
@@ -765,7 +765,7 @@ class _NewPurchaseRequestSheetState extends State<NewPurchaseRequestSheet> {
             Text('New purchase request', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 4),
             const Text(
-              'A new row on the Purchase Request Sheet. Not sent to SAP.',
+              'A new miscellaneous request.',
               style: TextStyle(fontSize: 12, color: AppColors.textMuted),
             ),
             const SizedBox(height: 16),

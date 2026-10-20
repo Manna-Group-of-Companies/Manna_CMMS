@@ -35,7 +35,7 @@ List<NavLink> _tabsFor(AuthProvider auth) {
     if (canSeeRequests(role))
       const NavLink('Requests', requestsHome, Icons.assignment_outlined),
     if (canSeeLowValuePurchases(role))
-      const NavLink('Purchases', lowValueHome, Icons.shopping_cart_outlined),
+      const NavLink('Miscellaneous', lowValueHome, Icons.shopping_cart_outlined),
     if (canSeeAttendance(role))
       const NavLink('Attendance', attendanceHome, Icons.how_to_reg_outlined),
   ];

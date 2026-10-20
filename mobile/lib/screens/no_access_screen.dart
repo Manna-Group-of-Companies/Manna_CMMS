@@ -57,7 +57,7 @@ class NoAccessScreen extends StatelessWidget {
                     const SizedBox(height: 10),
                     Text(
                       'You are signed in and your password is correct. This app covers '
-                      'breakdowns, maintenance requests, attendance and low value purchases, '
+                      'breakdowns, maintenance requests, attendance and miscellaneous requests, '
                       'and the ${user?.role ?? 'account'} role is not on any of them yet.',
                       textAlign: TextAlign.center,
                       style: const TextStyle(fontSize: 13, color: AppColors.textBody, height: 1.4),

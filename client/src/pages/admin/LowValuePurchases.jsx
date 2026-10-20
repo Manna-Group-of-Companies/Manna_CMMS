@@ -909,7 +909,7 @@ const NewRequest = ({ options, defaultName, onClose, onDone }) => {
               <Plus className="h-[18px] w-[18px] shrink-0 text-brand-700" />
               New purchase / repair request
             </h3>
-            <p className="modal-sub">Adds a row to the Purchase Request Sheet.</p>
+            <p className="modal-sub">Adds a miscellaneous request.</p>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
             <X className="h-5 w-5" />
@@ -1004,7 +1004,7 @@ const PrintSheet = ({ rows }) =>
         className="border border-slate-400 py-1 text-center text-sm font-bold"
         style={{ fontFamily: "Arial, Helvetica, sans-serif" }}
       >
-        Purchase Request Sheet
+        Miscellaneous Requests
       </div>
       <table
         className="w-full table-fixed border-collapse text-[7.5px] leading-tight text-black"

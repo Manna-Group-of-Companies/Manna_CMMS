@@ -150,7 +150,7 @@ class _LowValuePurchaseDetailScreenState extends State<LowValuePurchaseDetailScr
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Purchase request'),
+          title: const Text('Miscellaneous request'),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => Navigator.of(context).pop(_changed),
