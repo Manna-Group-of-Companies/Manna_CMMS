@@ -14,15 +14,33 @@
  *
  * The rule is simple and worth stating once: a timestamp going to ERPNext must
  * be wall-clock time in the ERPNext timezone, never UTC.
+ *
+ * And it is the ERPNext timezone, named here - not this process's own. The
+ * first fix shifted by `getTimezoneOffset()`, which is right only on a machine
+ * whose clock is set to India; on Render it is 0, so every record the deployed
+ * server stamped from 14 Oct 2026 was UTC again, 5:30 early (PR-2026-00323's
+ * PO, saved 17:49, read 12:19), while a copy run on an office PC was right.
  */
+const ERP_TIME_ZONE = process.env.ERPNEXT_TIME_ZONE || "Asia/Kolkata";
 
-/** Local wall-clock time as `YYYY-MM-DD HH:MM:SS`. */
+const wallClock = new Intl.DateTimeFormat("en-CA", {
+  timeZone: ERP_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+/** ERPNext wall-clock time as `YYYY-MM-DD HH:MM:SS`, whatever this machine's timezone. */
 export const erpNow = (date = new Date()) => {
-  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return shifted.toISOString().slice(0, 19).replace("T", " ");
+  const p = Object.fromEntries(wallClock.formatToParts(date).map(({ type, value }) => [type, value]));
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
 };
 
-/** Local wall-clock date as `YYYY-MM-DD`. */
+/** ERPNext wall-clock date as `YYYY-MM-DD`. */
 export const erpToday = (date = new Date()) => erpNow(date).slice(0, 10);
 
 /** ERPNext's separate date and time-of-day fields, from one moment. */
