@@ -85,6 +85,12 @@ echo.
 echo   Opening two windows. Close both to stop.
 echo.
 
+REM This office's network inspects HTTPS with its own certificate, which Node
+REM does not trust unless told to use the Windows store - without it the API
+REM cannot reach ERPNext and every sign-in fails with "Could not reach ERPNext"
+REM (20 Oct 2026). Both windows inherit it.
+set "NODE_OPTIONS=--use-system-ca"
+
 REM start /D sets the working directory. Quoting a "cd /d ..." inside the
 REM command string instead nests quotes, which cmd parses wrongly and the
 REM window dies on open with no message.
