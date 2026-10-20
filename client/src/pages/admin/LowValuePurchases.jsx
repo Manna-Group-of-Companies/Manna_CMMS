@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
+  CheckCircle2,
   ChevronDown,
+  Clock,
+  FileSpreadsheet,
+  Filter,
+  Flame,
+  Truck,
   Image as ImageIcon,
   Loader2,
   Paperclip,
@@ -90,6 +96,42 @@ const CHIP = {
   // Type of Request
   "Purchase Request": "bg-indigo-50 text-indigo-800",
   "Repair Request": "bg-violet-50 text-violet-800",
+};
+
+const OPEN = (r) => !r.done && !["Rejected"].includes(r.approvalStatus);
+
+/** The tiles above the sheet, and what each narrows it to. */
+const QUICK = {
+  waiting: {
+    label: "Awaiting approval",
+    icon: Clock,
+    tone: "bg-amber-100 text-amber-700",
+    test: (r) => ["Pending", "Pending MD Approval", "On Hold"].includes(r.approvalStatus),
+  },
+  buying: {
+    label: "Approved, not received",
+    icon: Truck,
+    tone: "bg-blue-100 text-blue-700",
+    test: (r) => ["Approved", "Limited Quantity Approved"].includes(r.approvalStatus) && !r.done,
+  },
+  emergency: {
+    label: "Emergency, open",
+    icon: Flame,
+    tone: "bg-rose-100 text-rose-700",
+    test: (r) => r.priority === "Emergency" && OPEN(r),
+  },
+  done: {
+    label: "Received / delivered",
+    icon: CheckCircle2,
+    tone: "bg-emerald-100 text-emerald-700",
+    test: (r) => r.done,
+  },
+  rejected: {
+    label: "Rejected",
+    icon: X,
+    tone: "bg-slate-200 text-slate-600",
+    test: (r) => r.approvalStatus === "Rejected",
+  },
 };
 
 const EMPTY_OPTIONS = {
@@ -185,6 +227,10 @@ const LowValuePurchases = () => {
   const [filters, setFilters] = useState({ company: "", type: "", approval: "", purchase: "" });
   const [openOnly, setOpenOnly] = useState(false);
   const [search, setSearch] = useState("");
+  // A tile pressed above the sheet; narrows what is already loaded.
+  const [quick, setQuick] = useState("");
+  // The filters fold away on a phone, where they would take the whole screen.
+  const [showFilters, setShowFilters] = useState(false);
   const [editing, setEditing] = useState(null); // { id, key }
   const [imagesFor, setImagesFor] = useState(null); // a row
   const [raising, setRaising] = useState(false);
@@ -216,11 +262,22 @@ const LowValuePurchases = () => {
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      [r.description, r.purpose, r.remarks, r.raisedByName].some((v) => String(v || "").toLowerCase().includes(q))
+    const test = QUICK[quick]?.test;
+    return rows.filter(
+      (r) =>
+        (!test || test(r)) &&
+        (!q ||
+          [r.description, r.purpose, r.remarks, r.raisedByName, r.company].some((v) =>
+            String(v || "").toLowerCase().includes(q)
+          ))
     );
-  }, [rows, search]);
+  }, [rows, search, quick]);
+
+  const tally = useMemo(
+    () => Object.fromEntries(Object.entries(QUICK).map(([k, q]) => [k, rows.filter(q.test).length])),
+    [rows]
+  );
+  const activeFilters = Object.values(filters).filter(Boolean).length + (openOnly ? 1 : 0);
 
   const doneStatuses = options?.doneStatuses || EMPTY_OPTIONS.doneStatuses;
 
@@ -255,65 +312,117 @@ const LowValuePurchases = () => {
 
   return (
     <div className="space-y-4">
+      {/* What needs attention, at a glance. Each tile also narrows the sheet. */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {Object.entries(QUICK).map(([key, q]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setQuick((k) => (k === key ? "" : key))}
+            className={`card flex cursor-pointer items-center gap-3 p-3 text-left transition hover:-translate-y-px hover:shadow-md ${
+              quick === key ? "ring-2 ring-brand-500" : ""
+            }`}
+            aria-pressed={quick === key}
+          >
+            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${q.tone}`}>
+              <q.icon className="h-[18px] w-[18px]" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-xl font-bold leading-6 text-slate-900">{tally[key] ?? 0}</span>
+              <span className="block truncate text-[12px] text-slate-500">{q.label}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+
       <div className="card overflow-hidden">
         {/* The sheet's own title band. */}
         <div
-          className="border-b border-slate-300 px-4 py-2 text-center text-lg font-bold text-slate-900"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-yellow-300 px-4 py-2.5"
           style={{ backgroundColor: "#FFFF00", fontFamily: "Arial, Helvetica, sans-serif" }}
         >
-          Purchase Request Sheet
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-3">
-          <div className="relative w-full sm:w-64">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search description, purpose, remarks…"
-              className="field field-sm field-search"
-              aria-label="Search the sheet"
-            />
-          </div>
-          <FilterSelect label="All companies" value={filters.company} onChange={setFilter("company")} items={opts.companies} />
-          <FilterSelect label="All types" value={filters.type} onChange={setFilter("type")} items={opts.types} />
-          <FilterSelect
-            label="Any approval"
-            value={filters.approval}
-            onChange={setFilter("approval")}
-            items={opts.approvalStatuses}
-          />
-          <FilterSelect
-            label="Any purchase status"
-            value={filters.purchase}
-            onChange={setFilter("purchase")}
-            items={opts.purchaseStatuses}
-          />
-          <label className="flex cursor-pointer items-center gap-1.5 text-[13px] text-slate-700">
-            <input
-              type="checkbox"
-              checked={openOnly}
-              onChange={(e) => setOpenOnly(e.target.checked)}
-              className="h-4 w-4 accent-brand-600"
-            />
-            Open only
-          </label>
-          <span className="text-xs text-slate-500">
+          <FileSpreadsheet className="h-5 w-5 shrink-0 text-slate-800" />
+          <h2 className="text-base font-bold text-slate-900 sm:text-lg">Purchase Request Sheet</h2>
+          <span className="text-[12px] text-slate-700">Every company · kept in ERPNext · not sent to SAP</span>
+          <span className="ml-auto rounded-full bg-white/70 px-2 py-0.5 text-[12px] font-semibold text-slate-800">
             {shown.length} {shown.length === 1 ? "row" : "rows"}
           </span>
-          <div className="ml-auto flex gap-2">
-            <button className="btn btn-sm btn-neutral" onClick={load} disabled={loading} aria-label="Refresh">
-              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </div>
+
+        <div className="space-y-2 border-b border-slate-200 bg-slate-50/60 p-3">
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1 sm:max-w-sm">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search item, purpose, company, remarks…"
+                className="field field-sm field-search"
+                aria-label="Search the sheet"
+              />
+            </div>
+            <button
+              type="button"
+              className={`btn btn-sm btn-neutral md:hidden ${showFilters ? "ring-2 ring-brand-500" : ""}`}
+              onClick={() => setShowFilters((v) => !v)}
+              aria-expanded={showFilters}
+            >
+              <Filter className="h-4 w-4" />
+              {activeFilters ? <span className="font-bold">{activeFilters}</span> : null}
             </button>
-            <button className="btn btn-sm btn-neutral" onClick={() => window.print()} disabled={!shown.length}>
-              <Printer className="h-4 w-4" />
-              Print
-            </button>
-            <button className="btn btn-sm btn-primary" onClick={() => setRaising(true)} disabled={!options}>
-              <Plus className="h-4 w-4" />
-              New request
-            </button>
+            <div className="ml-auto flex shrink-0 gap-2">
+              <button className="btn btn-sm btn-neutral" onClick={load} disabled={loading} aria-label="Refresh">
+                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              </button>
+              <button
+                className="btn btn-sm btn-neutral hidden sm:inline-flex"
+                onClick={() => window.print()}
+                disabled={!shown.length}
+              >
+                <Printer className="h-4 w-4" />
+                Print
+              </button>
+              <button className="btn btn-sm btn-primary" onClick={() => setRaising(true)} disabled={!options}>
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">New request</span>
+                <span className="sm:hidden">New</span>
+              </button>
+            </div>
+          </div>
+
+          <div className={`${showFilters ? "grid" : "hidden"} grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center`}>
+            <FilterSelect label="All companies" value={filters.company} onChange={setFilter("company")} items={opts.companies} />
+            <FilterSelect label="All types" value={filters.type} onChange={setFilter("type")} items={opts.types} />
+            <FilterSelect label="Any approval" value={filters.approval} onChange={setFilter("approval")} items={opts.approvalStatuses} />
+            <FilterSelect
+              label="Any purchase status"
+              value={filters.purchase}
+              onChange={setFilter("purchase")}
+              items={opts.purchaseStatuses}
+            />
+            <label className="flex cursor-pointer items-center gap-1.5 text-[13px] text-slate-700">
+              <input
+                type="checkbox"
+                checked={openOnly}
+                onChange={(e) => setOpenOnly(e.target.checked)}
+                className="h-4 w-4 accent-brand-600"
+              />
+              Open only
+            </label>
+            {(activeFilters > 0 || quick) && (
+              <button
+                type="button"
+                className="text-[13px] font-medium text-brand-700 hover:underline md:ml-1"
+                onClick={() => {
+                  setFilters({ company: "", type: "", approval: "", purchase: "" });
+                  setOpenOnly(false);
+                  setQuick("");
+                }}
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         </div>
 
@@ -324,9 +433,25 @@ const LowValuePurchases = () => {
           </div>
         )}
 
-        {/* Scrolls both ways inside itself, so the header row and the Date
-            column can stay put and the page never scrolls sideways on a phone. */}
-        <div className="max-h-[calc(100vh-15rem)] min-h-[16rem] overflow-auto">
+        {/* Phones: one card per row, edited in place like the sheet's cells. */}
+        <div className="divide-y divide-slate-200 md:hidden">
+          {shown.map((row) => (
+            <RowCard
+              key={row.id}
+              row={row}
+              options={opts}
+              editing={editing?.id === row.id ? editing.key : null}
+              onEdit={(key) => setEditing({ id: row.id, key })}
+              onCancel={() => setEditing(null)}
+              onSave={(key, value) => saveCell(row, key, value)}
+              onImages={() => setImagesFor(row)}
+            />
+          ))}
+        </div>
+
+        {/* Wider screens: the sheet. It scrolls both ways inside itself, so the
+            header row and the Date column stay put. */}
+        <div className="hidden max-h-[calc(100vh-19rem)] min-h-[16rem] overflow-auto md:block">
           <table
             className="table-fixed border-separate border-spacing-0 text-[13px] text-slate-900"
             style={{ width: SHEET_WIDTH, fontFamily: "Arial, Helvetica, sans-serif" }}
@@ -341,8 +466,8 @@ const LowValuePurchases = () => {
                 {COLUMNS.map((c, i) => (
                   <th
                     key={c.key}
-                    className={`sticky top-0 border-b border-r border-slate-300 bg-slate-100 px-2 py-1.5 text-left align-bottom text-[12px] font-bold leading-tight ${
-                      i === 0 ? "left-0 z-30" : "z-20"
+                    className={`sticky top-0 border-b-2 border-r border-b-slate-300 border-r-slate-200 bg-slate-100 px-2 py-2 text-left align-bottom text-[11px] font-bold uppercase leading-tight tracking-wide text-slate-600 ${
+                      i === 0 ? "left-0 z-30 shadow-[1px_0_0_#cbd5e1]" : "z-20"
                     }`}
                   >
                     {c.header}
@@ -351,10 +476,11 @@ const LowValuePurchases = () => {
               </tr>
             </thead>
             <tbody>
-              {shown.map((row) => (
+              {shown.map((row, index) => (
                 <SheetRow
                   key={row.id}
                   row={row}
+                  striped={index % 2 === 1}
                   options={opts}
                   editing={editing?.id === row.id ? editing.key : null}
                   onEdit={(key) => setEditing({ id: row.id, key })}
@@ -365,21 +491,22 @@ const LowValuePurchases = () => {
               ))}
             </tbody>
           </table>
-
-          {!loading && !shown.length && !error && (
-            <div className="px-6 py-14 text-center">
-              <p className="empty-title">Nothing on the sheet</p>
-              <p className="empty-sub">
-                {rows.length ? "No row matches the search." : "No request matches these filters yet."}
-              </p>
-            </div>
-          )}
-          {loading && !rows.length && (
-            <div className="flex justify-center py-12 text-slate-400">
-              <Loader2 className="h-6 w-6 animate-spin" />
-            </div>
-          )}
         </div>
+
+        {!loading && !shown.length && !error && (
+          <div className="px-6 py-14 text-center">
+            <FileSpreadsheet className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+            <p className="empty-title">Nothing on the sheet</p>
+            <p className="empty-sub">
+              {rows.length ? "No row matches the search or filters." : "No request matches these filters yet."}
+            </p>
+          </div>
+        )}
+        {loading && !rows.length && (
+          <div className="flex justify-center py-12 text-slate-400">
+            <Loader2 className="h-6 w-6 animate-spin" />
+          </div>
+        )}
       </div>
 
       <PrintSheet rows={shown} />
@@ -409,7 +536,12 @@ const LowValuePurchases = () => {
 };
 
 const FilterSelect = ({ label, value, onChange, items }) => (
-  <select value={value} onChange={onChange} className="field field-sm w-auto max-w-[12rem] cursor-pointer" aria-label={label}>
+  <select
+    value={value}
+    onChange={onChange}
+    className={`field field-sm w-full cursor-pointer md:w-auto md:max-w-[12rem] ${value ? "border-brand-400 bg-brand-50" : ""}`}
+    aria-label={label}
+  >
     <option value="">{label}</option>
     {items.map((v) => (
       <option key={v} value={v}>
@@ -419,18 +551,21 @@ const FilterSelect = ({ label, value, onChange, items }) => (
   </select>
 );
 
-const SheetRow = ({ row, options, editing, onEdit, onCancel, onSave, onImages }) => {
+const SheetRow = ({ row, striped, options, editing, onEdit, onCancel, onSave, onImages }) => {
   const editable = row.editable || [];
-  // Sticky cells need a solid ground, or the row scrolls through them.
-  const ground = row.done ? DONE_GREEN : "#fff";
+  const urgent = row.priority === "Emergency" && OPEN(row);
+  // The cells take the row's ground (bg-inherit), so the sticky Date cell is
+  // solid and the hover tint covers the whole row.
+  const ground = row.done ? "bg-[#B7E1CD]" : striped ? "bg-slate-50" : "bg-white";
 
   return (
-    <tr style={{ backgroundColor: ground }}>
+    <tr className={`${ground} transition-colors hover:bg-blue-50 ${row.done ? "hover:bg-[#a6d8c0]" : ""}`}>
       {COLUMNS.map((col, i) => (
         <td
           key={col.key}
-          className={`border-b border-r border-slate-200 p-0 align-top ${i === 0 ? "sticky left-0 z-10" : ""}`}
-          style={i === 0 ? { backgroundColor: ground } : undefined}
+          className={`border-b border-r border-slate-200 bg-inherit p-0 align-top ${
+            i === 0 ? `sticky left-0 z-10 shadow-[1px_0_0_#cbd5e1] ${urgent ? "border-l-4 border-l-rose-500" : ""}` : ""
+          }`}
         >
           {col.kind === "images" ? (
             <button
@@ -457,6 +592,86 @@ const SheetRow = ({ row, options, editing, onEdit, onCancel, onSave, onImages })
         </td>
       ))}
     </tr>
+  );
+};
+
+const COL = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
+
+/**
+ * One row on a phone. The same cells as the sheet - so a tap edits a cell the
+ * same way - laid out top to bottom instead of across.
+ */
+const RowCard = ({ row, options, editing, onEdit, onCancel, onSave, onImages }) => {
+  const [open, setOpen] = useState(false);
+  const editable = row.editable || [];
+  const urgent = row.priority === "Emergency" && OPEN(row);
+  const cell = (key) => (
+    <Cell
+      row={row}
+      col={COL[key]}
+      items={COL[key].from ? options[COL[key].from] : null}
+      canEdit={editable.includes(key)}
+      isEditing={editing === key}
+      onEdit={() => onEdit(key)}
+      onCancel={onCancel}
+      onSave={(value) => onSave(key, value)}
+    />
+  );
+  const labelled = (key, label = COL[key].header) => (
+    <div className="min-w-0">
+      <div className="px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      {cell(key)}
+    </div>
+  );
+
+  return (
+    <div
+      className={`px-2 py-3 ${urgent ? "border-l-4 border-l-rose-500" : ""}`}
+      style={row.done ? { backgroundColor: DONE_GREEN } : undefined}
+    >
+      <div className="flex flex-wrap items-center gap-1.5 px-2 text-[12px] text-slate-600">
+        <span className="font-semibold text-slate-800">{dmy(row.date)}</span>
+        <span>·</span>
+        <span className="truncate">{row.company}</span>
+        <span className="ml-auto flex gap-1">
+          <Chip value={row.type} />
+          <Chip value={row.priority} />
+        </span>
+      </div>
+      <div className="mt-1 text-[14px] font-semibold text-slate-900">{cell("description")}</div>
+      <div className="px-2 text-[12px] text-slate-500">Raised by {row.raisedByName || "—"}</div>
+
+      <div className="mt-2 grid grid-cols-2 gap-x-1 gap-y-1">
+        {labelled("approvalStatus", "Approval")}
+        {labelled("purchaseStatus", "Purchase / repair")}
+        {labelled("expectedOn", "Expected")}
+        {labelled("receivedOn", "Received")}
+      </div>
+
+      <div className="mt-1 flex items-center gap-2 px-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1 text-[12px] font-medium text-brand-700"
+          aria-expanded={open}
+        >
+          <ChevronDown className={`h-3.5 w-3.5 transition ${open ? "rotate-180" : ""}`} />
+          {open ? "Less" : "Purpose, links, remarks"}
+        </button>
+        <button type="button" onClick={onImages} className="ml-auto flex items-center gap-1 text-[12px] text-slate-600">
+          <Paperclip className="h-3.5 w-3.5" />
+          {row.files ? `${row.files} image${row.files === 1 ? "" : "s"}` : editable.length ? "Add image" : "No images"}
+        </button>
+      </div>
+      {open && (
+        <div className="mt-1 space-y-1">
+          {labelled("purpose", "Purpose")}
+          {labelled("links", "Links / brands / vendor")}
+          {labelled("remarks")}
+          {labelled("raisedByName", "Raised by")}
+        </div>
+      )}
+    </div>
   );
 };
 
