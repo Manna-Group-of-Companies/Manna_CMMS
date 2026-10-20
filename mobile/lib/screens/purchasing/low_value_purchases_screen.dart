@@ -36,6 +36,9 @@ class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
 
   List<PurchaseRequest> _rows = const [];
   PurchaseSheetOptions _options = PurchaseSheetOptions.fallback;
+  // The built-in lists stand in for the filters, but the form waits for the
+  // server's: it decides which companies this person may ask for.
+  bool _optionsReady = false;
 
   /// Open (not yet Received or Delivered) is where the work is, so it is
   /// where the screen starts.
@@ -86,7 +89,12 @@ class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
   Future<void> _loadOptions() async {
     try {
       final options = await _repo.options();
-      if (mounted) setState(() => _options = options);
+      if (mounted) {
+        setState(() {
+          _options = options;
+          _optionsReady = true;
+        });
+      }
     } on ApiException catch (e) {
       debugPrint('Purchase sheet options: ${e.message}');
     }
@@ -103,6 +111,12 @@ class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
   }
 
   Future<void> _add() async {
+    if (!_optionsReady) await _loadOptions();
+    if (!mounted) return;
+    if (!_optionsReady) {
+      Toast.error('Could not reach the server. Try again in a moment.');
+      return;
+    }
     final made = await showModalBottomSheet<PurchaseRequest>(
       context: context,
       isScrollControlled: true,
@@ -200,13 +214,16 @@ class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
                       if (_openOnly) _refilter(() => _openOnly = false);
                     },
                   ),
-                  const SizedBox(width: 12),
-                  _FilterChip(
-                    label: _company.isEmpty ? 'Company' : _company,
-                    active: _company.isNotEmpty,
-                    dropdown: true,
-                    onTap: () => _pick('Company', _options.companies, _company, (v) => _company = v),
-                  ),
+                  // A plant head has one company; there is nothing to choose.
+                  if (_options.companies.length > 1) ...[
+                    const SizedBox(width: 12),
+                    _FilterChip(
+                      label: _company.isEmpty ? 'Company' : _company,
+                      active: _company.isNotEmpty,
+                      dropdown: true,
+                      onTap: () => _pick('Company', _options.companies, _company, (v) => _company = v),
+                    ),
+                  ],
                   const SizedBox(width: 6),
                   _FilterChip(
                     label: _approval.isEmpty ? 'Approval' : _approval,
@@ -632,7 +649,8 @@ class _NewPurchaseRequestSheetState extends State<NewPurchaseRequestSheet> {
 
   DateTime _date = DateTime.now();
   late String _type = widget.options.types.first;
-  String _company = '';
+  // Filled in when there is only one to choose - a plant head's own company.
+  late String _company = widget.options.companies.length == 1 ? widget.options.companies.first : '';
   late String _priority =
       widget.options.priorities.contains('High') ? 'High' : widget.options.priorities.first;
 

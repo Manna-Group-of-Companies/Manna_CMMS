@@ -123,10 +123,19 @@ void main() {
     });
 
     test('a list left out falls back to the built-in one', () {
-      final options = PurchaseSheetOptions.fromJson(const {'companies': []});
+      final options = PurchaseSheetOptions.fromJson(const {'types': []});
 
+      expect(options.types, PurchaseSheetOptions.fallback.types);
       expect(options.companies, PurchaseSheetOptions.fallback.companies);
       expect(options.doneStatuses, ['Received', 'Delivered']);
+    });
+
+    test('the companies are taken as sent, so a plant head sees only theirs', () {
+      expect(
+        PurchaseSheetOptions.fromJson(const {'companies': ['Hi-tech Pretreads']}).companies,
+        ['Hi-tech Pretreads'],
+      );
+      expect(PurchaseSheetOptions.fromJson(const {'companies': []}).companies, isEmpty);
     });
   });
 }

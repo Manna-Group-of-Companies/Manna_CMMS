@@ -318,7 +318,9 @@ class PurchaseSheetOptions {
     const f = PurchaseSheetOptions.fallback;
     return PurchaseSheetOptions(
       types: or('types', f.types),
-      companies: or('companies', f.companies),
+      // Taken as the server gives it, even empty: a plant head is sent only
+      // their own company, and the built-in list would offer them every one.
+      companies: json.containsKey('companies') ? _asStrings(json['companies']) : f.companies,
       priorities: or('priorities', f.priorities),
       approvalStatuses: or('approvalStatuses', f.approvalStatuses),
       purchaseStatuses: or('purchaseStatuses', f.purchaseStatuses),
