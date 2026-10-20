@@ -217,6 +217,17 @@ export const retryRequest = async (id, user) => {
   return getRequest(id);
 };
 
+/**
+ * Every SAP company the sync publishes, named as a request's card names it -
+ * for the list's company filter, which offers them whether or not any has a
+ * request yet.
+ */
+export const companyOptions = async () =>
+  Object.entries(await itemMasterOptions()).map(([abbr, o]) => ({
+    abbr,
+    company: storeForCompany(abbr)?.label || o.company || abbr,
+  }));
+
 /** The SAP suppliers and purchase tax codes the sync publishes for a company. */
 export const vendorsFor = async (company) => {
   const abbr = tidy(company).toUpperCase();
