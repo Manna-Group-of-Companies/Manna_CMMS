@@ -2,10 +2,7 @@ import dotenv from "dotenv";
 
 import { createDoc, docExists, getDoc, listDocs, updateDoc } from "../integrations/erpnext/client.js";
 import { erpDisabledReason, erpHasCredentials } from "../integrations/erpnext/config.js";
-import {
-  LOW_VALUE_DEFINITION,
-  LOW_VALUE_LINE_DEFINITION,
-} from "../integrations/erpnext/lowValuePurchaseDoctype.js";
+import { LOW_VALUE_DEFINITION } from "../integrations/erpnext/lowValuePurchaseDoctype.js";
 
 dotenv.config();
 
@@ -19,7 +16,8 @@ dotenv.config();
  *   - the "Store Purchase Manager" role, given to the purchase manager
  *     (Shantu by default). No desk access: it is a CMMS role, and a desk role
  *     would turn an employee's account into a System User;
- *   - the CMMS Low Value Purchase doctypes (lowValuePurchaseDoctype.js);
+ *   - the Purchase Request Sheet doctype, CMMS Purchase Sheet Entry
+ *     (lowValuePurchaseDoctype.js);
  *   - the PO fields on CMMS Purchase Request and its lines, which the PO form
  *     writes and sap-sync posts as a SAP Purchase Order. Custom Fields, so the
  *     doctype itself (sap-sync/setup-purchase-request.js) is not rewritten.
@@ -82,9 +80,8 @@ const syncRole = async () => {
 };
 
 const syncDoctypes = async () => {
-  log("\n=== low value purchase requests ===");
-  // The line first: the request's table field points at it.
-  for (const definition of [LOW_VALUE_LINE_DEFINITION, LOW_VALUE_DEFINITION]) {
+  log("\n=== the purchase request sheet ===");
+  for (const definition of [LOW_VALUE_DEFINITION]) {
     if (await docExists("DocType", definition.name)) {
       log(`  = ${definition.name} - present`);
       continue;

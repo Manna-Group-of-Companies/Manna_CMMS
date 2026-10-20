@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,17 +10,17 @@ import '../../core/toast.dart';
 import '../../data/purchasing_repository.dart';
 import '../../models/purchasing.dart';
 import '../../widgets/common.dart';
+import 'low_value_purchases_screen.dart' show ChoiceSheet;
 import 'low_value_widgets.dart';
 
-/// One low value purchase request, laid out the way the paper sheet reads:
-/// who asked and for what, the items with their estimate and what was paid,
-/// the totals, then the purchase, the receipt or why it was closed.
+/// One row of the Purchase Request Sheet, read down instead of across: every
+/// column as a label beside its value, in the sheet's order, with the images
+/// where the sheet has its "Image samples" column.
 ///
-/// The buttons at the foot are exactly the record's `may`. The server works
-/// that out per person - the buyer orders and rejects, whoever asked withdraws,
-/// the people who would see it arrive receive it - so nothing here looks at the
-/// role. Unlike breakdowns, the Maintenance Manager is not view-only here:
-/// raising and receiving a small buy is theirs to do from the phone.
+/// A column this person may change - exactly the row's `editable`, which the
+/// server works out per person and per row - shows a pencil and opens a sheet
+/// to change it; the change is saved on its own with a `PUT` of that one
+/// column. Nothing here looks at the role.
 class LowValuePurchaseDetailScreen extends StatefulWidget {
   const LowValuePurchaseDetailScreen({super.key, required this.id});
 
@@ -31,8 +33,10 @@ class LowValuePurchaseDetailScreen extends StatefulWidget {
 class _LowValuePurchaseDetailScreenState extends State<LowValuePurchaseDetailScreen> {
   late final PurchasingRepository _repo = PurchasingRepository(context.read<ApiClient>());
 
-  LowValuePurchase? _record;
+  PurchaseRequest? _row;
+  PurchaseSheetOptions _options = PurchaseSheetOptions.fallback;
   bool _loading = true;
+  bool _busy = false;
   bool _changed = false;
   String _error = '';
 
@@ -40,14 +44,15 @@ class _LowValuePurchaseDetailScreenState extends State<LowValuePurchaseDetailScr
   void initState() {
     super.initState();
     _load();
+    _loadOptions();
   }
 
   Future<void> _load() async {
     try {
-      final record = await _repo.lowValuePurchase(widget.id);
+      final row = await _repo.request(widget.id);
       if (!mounted) return;
       setState(() {
-        _record = record;
+        _row = row;
         _error = '';
       });
     } on ApiException catch (e) {
@@ -57,25 +62,86 @@ class _LowValuePurchaseDetailScreenState extends State<LowValuePurchaseDetailScr
     }
   }
 
-  /// Opens a step's sheet; the sheet saves and hands back the updated record.
-  Future<void> _step(Widget sheet, String done) async {
-    final updated = await showModalBottomSheet<LowValuePurchase>(
+  /// Quietly: the built-in lists stand in until it answers.
+  Future<void> _loadOptions() async {
+    try {
+      final options = await _repo.options();
+      if (mounted) setState(() => _options = options);
+    } on ApiException catch (e) {
+      debugPrint('Purchase sheet options: ${e.message}');
+    }
+  }
+
+  Future<void> _edit(PurchaseRequest row, SheetColumn column) async {
+    final updated = await showModalBottomSheet<PurchaseRequest>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => sheet,
+      builder: (_) => _EditColumnSheet(repo: _repo, row: row, column: column, options: _options),
     );
     if (updated == null || !mounted) return;
     setState(() {
-      _record = updated;
+      // The PUT answers with the row but not its images; keep the ones shown.
+      _row = updated.images.isEmpty ? updated.withImages(row.images) : updated;
       _changed = true;
     });
-    Toast.success(done);
+    Toast.success('${column.label} saved');
+  }
+
+  Future<void> _addImage(PurchaseRequest row) async {
+    final source = await askPhotoSource(context);
+    if (source == null) return;
+    try {
+      final photo = await pickPhoto(source);
+      if (photo == null || !mounted) return;
+      setState(() => _busy = true);
+      await _repo.attachImage(
+        row.id,
+        fileName: photo.name,
+        contentType: photo.contentType,
+        dataBase64: base64Encode(photo.bytes),
+      );
+      _changed = true;
+      Toast.success('Image added');
+      await _load();
+    } on PhotoProblem catch (e) {
+      Toast.show(e.message, ToastType.error);
+    } on ApiException catch (e) {
+      Toast.show(e.message, ToastType.error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _removeImage(PurchaseRequest row, PurchaseImage image) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Remove this image?'),
+        content: Text(image.fileName),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialog).pop(false), child: const Text('Keep')),
+          FilledButton(onPressed: () => Navigator.of(dialog).pop(true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await _repo.removeImage(row.id, image.id);
+      _changed = true;
+      Toast.success('Image removed');
+      await _load();
+    } on ApiException catch (e) {
+      Toast.show(e.message, ToastType.error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final record = _record;
+    final row = _row;
 
     return PopScope(
       canPop: false,
@@ -84,15 +150,21 @@ class _LowValuePurchaseDetailScreenState extends State<LowValuePurchaseDetailScr
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(record?.id ?? 'Low value purchase'),
+          title: const Text('Purchase request'),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => Navigator.of(context).pop(_changed),
           ),
+          bottom: _busy
+              ? const PreferredSize(
+                  preferredSize: Size.fromHeight(2),
+                  child: LinearProgressIndicator(minHeight: 2),
+                )
+              : null,
         ),
         body: _loading
             ? const LoadingView(message: 'Loading…')
-            : _error.isNotEmpty
+            : _error.isNotEmpty && row == null
                 ? EmptyState(
                     title: 'Could not load it',
                     message: _error,
@@ -104,476 +176,324 @@ class _LowValuePurchaseDetailScreenState extends State<LowValuePurchaseDetailScr
                     child: ListView(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                       children: [
-                        _Header(record: record!),
+                        _Summary(row: row!),
                         const SizedBox(height: 12),
-                        _Items(record: record),
-                        if (record.order != null) ...[
-                          const SizedBox(height: 12),
-                          _OrderSection(order: record.order!),
-                        ],
-                        if (record.received != null) ...[
-                          const SizedBox(height: 12),
-                          _ReceivedSection(received: record.received!),
-                        ],
-                        if (record.closed != null) ...[
-                          const SizedBox(height: 12),
-                          _ClosedSection(status: record.status, closed: record.closed!),
-                        ],
+                        AppCard(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          color: row.done ? sheetDoneFill : null,
+                          borderColor: row.done ? sheetDoneGreen : null,
+                          child: Column(
+                            children: [
+                              for (final (i, column) in sheetColumns.indexed) ...[
+                                if (i > 0) const Divider(height: 1, color: AppColors.border),
+                                if (column.key == imageSamplesColumn)
+                                  _ImagesRow(
+                                    row: row,
+                                    busy: _busy,
+                                    onAdd: () => _addImage(row),
+                                    onRemove: (image) => _removeImage(row, image),
+                                  )
+                                else
+                                  _ColumnRow(
+                                    row: row,
+                                    column: column,
+                                    onEdit: row.canEdit(column.key) && !_busy ? () => _edit(row, column) : null,
+                                  ),
+                              ],
+                            ],
+                          ),
+                        ),
                         const SizedBox(height: 12),
-                        ..._actions(record),
+                        _Trail(row: row),
                       ],
                     ),
                   ),
       ),
     );
   }
-
-  List<Widget> _actions(LowValuePurchase record) {
-    final may = record.may;
-    if (!may.any) {
-      return [
-        if (record.waitingOn.isNotEmpty)
-          AppCard(
-            child: Text(
-              'Waiting on: ${record.waitingOn}.',
-              style: const TextStyle(color: AppColors.textSecondary),
-            ),
-          ),
-      ];
-    }
-
-    return [
-      if (may.order) ...[
-        FilledButton.icon(
-          icon: const Icon(Icons.shopping_cart_checkout, size: 18),
-          label: const Text('Record the purchase'),
-          onPressed: () => _step(
-            _OrderSheet(repo: _repo, record: record),
-            'Purchase recorded for ${record.id}',
-          ),
-        ),
-        const SizedBox(height: 10),
-      ],
-      if (may.receive) ...[
-        FilledButton.icon(
-          icon: const Icon(Icons.inventory_2_outlined, size: 18),
-          label: const Text('Mark received'),
-          onPressed: () => _step(
-            _ReceiveSheet(repo: _repo, record: record),
-            '${record.id} received',
-          ),
-        ),
-        const SizedBox(height: 10),
-      ],
-      if (may.reject) ...[
-        OutlinedButton.icon(
-          icon: const Icon(Icons.block_outlined, size: 18),
-          label: const Text('Reject'),
-          onPressed: () => _step(
-            _CloseSheet(repo: _repo, record: record, step: _Close.reject),
-            '${record.id} rejected',
-          ),
-        ),
-        const SizedBox(height: 10),
-      ],
-      if (may.withdraw)
-        OutlinedButton.icon(
-          icon: const Icon(Icons.undo, size: 18),
-          label: const Text('Withdraw'),
-          onPressed: () => _step(
-            _CloseSheet(repo: _repo, record: record, step: _Close.withdraw),
-            '${record.id} withdrawn',
-          ),
-        ),
-    ];
-  }
 }
 
-class _Header extends StatelessWidget {
-  const _Header({required this.record});
+/// The three chips the list leads with, so the state reads before the detail.
+class _Summary extends StatelessWidget {
+  const _Summary({required this.row});
 
-  final LowValuePurchase record;
+  final PurchaseRequest row;
 
   @override
-  Widget build(BuildContext context) => AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(child: MonoText(record.id, fontSize: 13)),
-                if (record.isUrgent) ...[
-                  const AppBadge('urgent', color: AppColors.danger),
-                  const SizedBox(width: 6),
-                ],
-                LowValueStatusBadge(record.status),
-              ],
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              MonoText(row.id),
+              const Spacer(),
+              if (row.done)
+                const AppBadge('done', color: AppColors.success, icon: Icons.check),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              if (row.priority.isNotEmpty) SheetChip.priority(row.priority),
+              SheetChip.approval(row.approvalStatus),
+              SheetChip.purchase(row.purchaseStatus),
+            ],
+          ),
+          if (row.editable.isEmpty) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'You can read this row but not change it.',
+              style: TextStyle(fontSize: 12, color: AppColors.textMuted),
             ),
-            const SizedBox(height: 10),
-            Text(record.purpose, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 10),
-            LvLine('Plant', record.plant),
-            if (record.department.isNotEmpty) LvLine('Department', record.department),
-            LvLine('Urgency', record.urgency),
-            LvLine('Needed by', formatDate(record.requiredBy)),
-            LvLine('Raised by', record.raisedBy),
-            LvLine('Raised', formatDateTime(record.raisedAt)),
-            if (record.waitingOn.isNotEmpty) LvLine('Waiting on', record.waitingOn),
           ],
-        ),
+        ],
       );
 }
 
-/// The item table, as cards - six columns do not fit a phone.
-class _Items extends StatelessWidget {
-  const _Items({required this.record});
+/// One column: its heading, its value, and a pencil when it may be changed.
+class _ColumnRow extends StatelessWidget {
+  const _ColumnRow({required this.row, required this.column, required this.onEdit});
 
-  final LowValuePurchase record;
+  final PurchaseRequest row;
+  final SheetColumn column;
 
-  @override
-  Widget build(BuildContext context) {
-    final lines = record.lines;
-
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          PanelHeader(
-            icon: Icons.list_alt_outlined,
-            title: 'Items',
-            iconColor: AppColors.primaryDeep,
-            subtitle: lines.length == 1 ? '1 item' : '${lines.length} items',
-          ),
-          const SizedBox(height: 10),
-          for (var i = 0; i < lines.length; i++) ...[
-            if (i > 0) const Divider(height: 20),
-            _ItemRow(line: lines[i], number: i + 1),
-          ],
-          const Divider(height: 24),
-          LvTotalRow(
-            label: 'Estimated total',
-            amount: record.estTotal,
-            strong: !record.hasActual,
-          ),
-          if (record.hasActual) ...[
-            const SizedBox(height: 6),
-            LvTotalRow(label: 'Purchased total', amount: record.total, strong: true),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ItemRow extends StatelessWidget {
-  const _ItemRow({required this.line, required this.number});
-
-  final LowValueLine line;
-  final int number;
+  /// Null when this person may not change it.
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
-    final qty = '${formatQty(line.qty)} ${line.unit}'.trim();
-    const muted = TextStyle(fontSize: 12, color: AppColors.textSecondary);
+    final text = row.textOf(column.key);
+    final color = SheetColors.of(column.key, text);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+    return InkWell(
+      onTap: onEdit,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SizedBox(
-              width: 22,
-              child: Text('$number.', style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
-            ),
-            Expanded(
+              width: 120,
               child: Text(
-                line.description,
-                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                column.label,
+                style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
               ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: text.isEmpty
+                  ? const Text('—', style: TextStyle(fontSize: 13, color: AppColors.textFaint))
+                  : color != null
+                      ? Align(alignment: Alignment.centerLeft, child: SheetChip(text, color: color))
+                      : SelectableText(
+                          text,
+                          style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
+                          // A tap on the text should still open the editor.
+                          onTap: onEdit,
+                        ),
+            ),
+            SizedBox(
+              width: 28,
+              child: onEdit == null
+                  ? null
+                  : const Icon(Icons.edit_outlined, size: 16, color: AppColors.primaryDeep),
             ),
           ],
         ),
-        Padding(
-          padding: const EdgeInsets.only(left: 22, top: 2),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (line.specification.isNotEmpty) Text(line.specification, style: muted),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      line.estRate > 0
-                          ? '$qty × ${formatCurrency(line.estRate)} est.'
-                          : '$qty · no estimate',
-                      style: muted,
-                    ),
-                  ),
-                  Text(formatCurrency(line.estAmount), style: muted),
-                ],
-              ),
-              if (line.isPriced) ...[
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '$qty × ${formatCurrency(line.rate)} paid',
-                        style: const TextStyle(fontSize: 12, color: AppColors.textBody),
-                      ),
-                    ),
-                    Text(
-                      formatCurrency(line.amount),
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textStrong,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              if (line.remarks.isNotEmpty) ...[
-                const SizedBox(height: 2),
-                Text(line.remarks, style: muted),
-              ],
-            ],
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
 
-class _OrderSection extends StatelessWidget {
-  const _OrderSection({required this.order});
+/// The "Image samples" column: what is attached, and adding or removing one
+/// for anyone who may change the row.
+///
+/// The files are private in ERPNext, so their links do not open without an
+/// ERPNext session - the same as the breakdown photos - and are listed by name
+/// rather than shown. A public one with a full address is shown.
+class _ImagesRow extends StatelessWidget {
+  const _ImagesRow({required this.row, required this.busy, required this.onAdd, required this.onRemove});
 
-  final LowValueOrder order;
+  final PurchaseRequest row;
+  final bool busy;
+  final VoidCallback onAdd;
+  final ValueChanged<PurchaseImage> onRemove;
 
-  @override
-  Widget build(BuildContext context) => AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const PanelHeader(
-              icon: Icons.shopping_cart_outlined,
-              title: 'Purchase',
-              iconColor: AppColors.info,
-            ),
-            const SizedBox(height: 10),
-            LvLine('Vendor', order.vendorName),
-            if (order.vendorContact.isNotEmpty) LvLine('Contact', order.vendorContact),
-            if (order.expectedOn != null) LvLine('Expected', formatDate(order.expectedOn)),
-            if (order.remarks.isNotEmpty) LvLine('Remarks', order.remarks),
-            LvLine('Ordered by', order.by),
-            LvLine('Ordered', formatDateTime(order.at)),
-          ],
-        ),
-      );
-}
-
-class _ReceivedSection extends StatelessWidget {
-  const _ReceivedSection({required this.received});
-
-  final LowValueReceipt received;
-
-  @override
-  Widget build(BuildContext context) => AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const PanelHeader(
-              icon: Icons.inventory_2_outlined,
-              title: 'Received',
-              iconColor: AppColors.success,
-            ),
-            const SizedBox(height: 10),
-            if (received.billNo.isNotEmpty) LvLine('Bill no.', received.billNo),
-            if (received.billDate != null) LvLine('Bill date', formatDate(received.billDate)),
-            if (received.remarks.isNotEmpty) LvLine('Remarks', received.remarks),
-            LvLine('Received by', received.by),
-            LvLine('Received', formatDateTime(received.at)),
-          ],
-        ),
-      );
-}
-
-class _ClosedSection extends StatelessWidget {
-  const _ClosedSection({required this.status, required this.closed});
-
-  final String status;
-  final LowValueClosure closed;
-
-  @override
-  Widget build(BuildContext context) => AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            PanelHeader(
-              icon: Icons.block_outlined,
-              title: status,
-              iconColor: LowValueStatusBadge.colorOf(status),
-            ),
-            const SizedBox(height: 10),
-            LvLine('Reason', closed.reason),
-            LvLine('By', closed.by),
-            LvLine('When', formatDateTime(closed.at)),
-          ],
-        ),
-      );
-}
-
-/// The frame every step's sheet shares: a heading, the fields, the problem if
-/// there is one, and Cancel beside the step itself.
-class _StepSheet extends StatelessWidget {
-  const _StepSheet({
-    required this.title,
-    required this.blurb,
-    required this.children,
-    required this.problem,
-    required this.saving,
-    required this.action,
-    required this.onSubmit,
-  });
-
-  final String title;
-  final String blurb;
-  final List<Widget> children;
-  final String problem;
-  final bool saving;
-  final String action;
-  final VoidCallback onSubmit;
+  static String _size(int bytes) {
+    if (bytes <= 0) return '';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).ceil()} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 16,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: Theme.of(context).textTheme.titleLarge),
-              if (blurb.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(blurb, style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-              ],
-              const SizedBox(height: 16),
-              ...children,
-              if (problem.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(problem, style: const TextStyle(color: AppColors.danger, fontSize: 13)),
-              ],
-              const SizedBox(height: 18),
-              Row(
+        padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(
+              width: 120,
+              child: Text('Image samples', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: saving ? null : () => Navigator.of(context).pop(),
-                      child: const Text('Cancel'),
+                  if (row.images.isEmpty)
+                    const Text('—', style: TextStyle(fontSize: 13, color: AppColors.textFaint)),
+                  for (final image in row.images)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          _Thumb(image: image),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  image.fileName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12.5, color: AppColors.textPrimary),
+                                ),
+                                Text(
+                                  [_size(image.size), if (image.addedAt != null) formatDate(image.addedAt)]
+                                      .where((s) => s.isNotEmpty)
+                                      .join(' · '),
+                                  style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (row.canAttach)
+                            IconButton(
+                              tooltip: 'Remove',
+                              visualDensity: VisualDensity.compact,
+                              icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.danger),
+                              onPressed: busy ? null : () => onRemove(image),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: saving ? null : onSubmit,
-                      child: Text(saving ? 'Saving…' : action),
+                  if (row.canAttach)
+                    TextButton.icon(
+                      style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
+                      icon: const Icon(Icons.add_a_photo_outlined, size: 16),
+                      label: const Text('Add a photo'),
+                      onPressed: busy ? null : onAdd,
                     ),
-                  ),
                 ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
 }
 
-const _box = InputDecoration(border: OutlineInputBorder(), isDense: true);
+class _Thumb extends StatelessWidget {
+  const _Thumb({required this.image});
 
-/// The purchase manager bought it: from whom, and at what rate per item.
-///
-/// Each rate starts at the estimate, because most small buys cost what was
-/// guessed - the buyer only corrects the ones that did not.
-class _OrderSheet extends StatefulWidget {
-  const _OrderSheet({required this.repo, required this.record});
-
-  final PurchasingRepository repo;
-  final LowValuePurchase record;
+  final PurchaseImage image;
 
   @override
-  State<_OrderSheet> createState() => _OrderSheetState();
-}
-
-class _OrderSheetState extends State<_OrderSheet> {
-  final _vendor = TextEditingController();
-  final _contact = TextEditingController();
-  final _remarks = TextEditingController();
-  late final Map<int, TextEditingController> _rates = {
-    for (final line in widget.record.lines)
-      line.idx: TextEditingController(
-        text: line.estRate > 0 ? formatQty(line.estRate) : '',
+  Widget build(BuildContext context) {
+    final showable = !image.isPrivate && image.url.startsWith('http');
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 40,
+        height: 40,
+        color: AppColors.surfaceMuted,
+        child: showable
+            ? Image.network(
+                image.url,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) =>
+                    const Icon(Icons.image_outlined, size: 18, color: AppColors.textMuted),
+              )
+            : const Icon(Icons.image_outlined, size: 18, color: AppColors.textMuted),
       ),
+    );
+  }
+}
+
+/// Who added the row and who last touched it - not columns of the sheet,
+/// but what anyone asking "who changed this?" needs.
+class _Trail extends StatelessWidget {
+  const _Trail({required this.row});
+
+  final PurchaseRequest row;
+
+  @override
+  Widget build(BuildContext context) {
+    const style = TextStyle(fontSize: 11.5, color: AppColors.textMuted);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (row.raisedBy.isNotEmpty || row.raisedAt != null)
+          Text('Added by ${row.raisedBy.isEmpty ? '—' : row.raisedBy} · ${formatDateTime(row.raisedAt)}',
+              style: style),
+        if (row.updatedBy.isNotEmpty || row.updatedAt != null) ...[
+          const SizedBox(height: 2),
+          Text(
+            'Last changed by ${row.updatedBy.isEmpty ? '—' : row.updatedBy} · ${formatDateTime(row.updatedAt)}',
+            style: style,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Changing one column. A pick saves as soon as a choice is tapped; a date or
+/// text saves with the button. Pops the updated row.
+class _EditColumnSheet extends StatefulWidget {
+  const _EditColumnSheet({
+    required this.repo,
+    required this.row,
+    required this.column,
+    required this.options,
+  });
+
+  final PurchasingRepository repo;
+  final PurchaseRequest row;
+  final SheetColumn column;
+  final PurchaseSheetOptions options;
+
+  @override
+  State<_EditColumnSheet> createState() => _EditColumnSheetState();
+}
+
+class _EditColumnSheetState extends State<_EditColumnSheet> {
+  late final _text = TextEditingController(text: widget.row.textOf(widget.column.key));
+  late DateTime? _day = switch (widget.column.key) {
+    'date' => widget.row.date,
+    'expectedOn' => widget.row.expectedOn,
+    'receivedOn' => widget.row.receivedOn,
+    _ => null,
   };
-  DateTime? _expected;
   bool _saving = false;
   String _problem = '';
 
   @override
   void dispose() {
-    _vendor.dispose();
-    _contact.dispose();
-    _remarks.dispose();
-    for (final c in _rates.values) {
-      c.dispose();
-    }
+    _text.dispose();
     super.dispose();
   }
 
-  /// A blank box keeps the estimate, the same as the server reads it.
-  double _rateOf(LowValueLine line) {
-    final text = _rates[line.idx]?.text.trim() ?? '';
-    if (text.isEmpty) return line.estRate;
-    return double.tryParse(text) ?? 0;
-  }
-
-  double get _total =>
-      widget.record.lines.fold<double>(0, (sum, l) => sum + l.qty * _rateOf(l));
-
-  Future<void> _submit() async {
+  Future<void> _save(String value) async {
     FocusScope.of(context).unfocus();
-    if (_vendor.text.trim().isEmpty) {
-      setState(() => _problem = 'Say who it is bought from.');
-      return;
-    }
-    final rates = <int, double>{};
-    for (final line in widget.record.lines) {
-      final rate = _rateOf(line);
-      if (rate <= 0) {
-        setState(() => _problem = 'Give the rate paid for ${line.description}.');
-        return;
-      }
-      rates[line.idx] = rate;
-    }
-
     setState(() {
       _saving = true;
       _problem = '';
     });
     try {
-      final updated = await widget.repo.orderLowValue(
-        widget.record.id,
-        vendorName: _vendor.text.trim(),
-        vendorContact: _contact.text.trim(),
-        expectedOn: _expected == null ? '' : apiDay(_expected!),
-        remarks: _remarks.text.trim(),
-        rates: rates,
-      );
+      final updated = await widget.repo.change(widget.row.id, widget.column.key, value);
       if (mounted) Navigator.of(context).pop(updated);
     } on ApiException catch (e) {
       if (mounted) setState(() => _problem = e.message);
@@ -584,232 +504,102 @@ class _OrderSheetState extends State<_OrderSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final today = DateTime.now();
+    final column = widget.column;
 
-    return _StepSheet(
-      title: 'Record the purchase',
-      blurb: '${widget.record.id} · ${widget.record.plant}',
-      problem: _problem,
-      saving: _saving,
-      action: 'Save purchase',
-      onSubmit: _submit,
-      children: [
-        const LvFieldLabel('Bought from'),
-        TextField(controller: _vendor, maxLength: 140, decoration: _box.copyWith(counterText: '')),
-        const SizedBox(height: 12),
-        const LvFieldLabel('Vendor contact'),
-        TextField(
-          controller: _contact,
-          maxLength: 60,
-          keyboardType: TextInputType.phone,
-          decoration: _box.copyWith(counterText: '', hintText: 'Phone or name'),
-        ),
-        const SizedBox(height: 12),
-        const LvFieldLabel('Expected on'),
-        LvDateField(
-          value: _expected,
-          firstDate: DateTime(today.year, today.month, today.day),
-          lastDate: today.add(const Duration(days: 365)),
-          placeholder: 'Not known',
-          clearable: true,
-          onChanged: (d) => setState(() => _expected = d),
-        ),
-        const SizedBox(height: 16),
-        Text('Rate paid', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        for (final line in widget.record.lines) ...[
-          Row(
-            children: [
-              Expanded(
-                flex: 3,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      line.description,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                    ),
-                    Text(
-                      '${formatQty(line.qty)} ${line.unit} · est. ${formatCurrency(line.estRate)}',
-                      style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 2,
-                child: TextField(
-                  controller: _rates[line.idx],
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  onChanged: (_) => setState(() {}),
-                  decoration: _box.copyWith(labelText: 'Rate ₹'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-        ],
-        LvTotalRow(label: 'Purchased total', amount: _total, strong: true),
-        const SizedBox(height: 12),
-        const LvFieldLabel('Remarks'),
-        TextField(controller: _remarks, maxLines: 2, maxLength: 500, decoration: _box),
-      ],
-    );
-  }
-}
-
-/// It arrived. The bill is optional - a small buy from a counter often has
-/// only a slip.
-class _ReceiveSheet extends StatefulWidget {
-  const _ReceiveSheet({required this.repo, required this.record});
-
-  final PurchasingRepository repo;
-  final LowValuePurchase record;
-
-  @override
-  State<_ReceiveSheet> createState() => _ReceiveSheetState();
-}
-
-class _ReceiveSheetState extends State<_ReceiveSheet> {
-  final _billNo = TextEditingController();
-  final _remarks = TextEditingController();
-  DateTime? _billDate;
-  bool _saving = false;
-  String _problem = '';
-
-  @override
-  void dispose() {
-    _billNo.dispose();
-    _remarks.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    FocusScope.of(context).unfocus();
-    setState(() {
-      _saving = true;
-      _problem = '';
-    });
-    try {
-      final updated = await widget.repo.receiveLowValue(
-        widget.record.id,
-        billNo: _billNo.text.trim(),
-        billDate: _billDate == null ? '' : apiDay(_billDate!),
-        remarks: _remarks.text.trim(),
-      );
-      if (mounted) Navigator.of(context).pop(updated);
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _problem = e.message);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final today = DateTime.now();
-    final vendor = widget.record.order?.vendorName ?? '';
-
-    return _StepSheet(
-      title: 'Mark received',
-      blurb: vendor.isEmpty ? widget.record.id : '${widget.record.id} · from $vendor',
-      problem: _problem,
-      saving: _saving,
-      action: 'Received',
-      onSubmit: _submit,
-      children: [
-        const LvFieldLabel('Bill number'),
-        TextField(controller: _billNo, maxLength: 60, decoration: _box.copyWith(counterText: '')),
-        const SizedBox(height: 12),
-        const LvFieldLabel('Bill date'),
-        LvDateField(
-          value: _billDate,
-          firstDate: today.subtract(const Duration(days: 365)),
-          lastDate: today,
-          placeholder: 'No bill',
-          clearable: true,
-          onChanged: (d) => setState(() => _billDate = d),
-        ),
-        const SizedBox(height: 12),
-        const LvFieldLabel('Remarks'),
-        TextField(controller: _remarks, maxLines: 2, maxLength: 500, decoration: _box),
-      ],
-    );
-  }
-}
-
-enum _Close { reject, withdraw }
-
-/// Rejecting or withdrawing, which both want a reason - a request that vanishes
-/// without one stops people raising them.
-class _CloseSheet extends StatefulWidget {
-  const _CloseSheet({required this.repo, required this.record, required this.step});
-
-  final PurchasingRepository repo;
-  final LowValuePurchase record;
-  final _Close step;
-
-  @override
-  State<_CloseSheet> createState() => _CloseSheetState();
-}
-
-class _CloseSheetState extends State<_CloseSheet> {
-  final _reason = TextEditingController();
-  bool _saving = false;
-  String _problem = '';
-
-  bool get _rejecting => widget.step == _Close.reject;
-
-  @override
-  void dispose() {
-    _reason.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    FocusScope.of(context).unfocus();
-    final reason = _reason.text.trim();
-    if (reason.isEmpty) {
-      setState(() => _problem = 'Say why.');
-      return;
-    }
-    setState(() {
-      _saving = true;
-      _problem = '';
-    });
-    try {
-      final id = widget.record.id;
-      final updated = _rejecting
-          ? await widget.repo.rejectLowValue(id, reason)
-          : await widget.repo.withdrawLowValue(id, reason);
-      if (mounted) Navigator.of(context).pop(updated);
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _problem = e.message);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => _StepSheet(
-        title: _rejecting ? 'Reject this request' : 'Withdraw this request',
-        blurb: _rejecting
-            ? 'The person who raised it sees the reason.'
-            : 'It will not be bought. The purchase manager sees the reason.',
-        problem: _problem,
-        saving: _saving,
-        action: _rejecting ? 'Reject' : 'Withdraw',
-        onSubmit: _submit,
+    if (column.kind == SheetColumnKind.pick) {
+      // The same list the filters use, painted in the column's colours.
+      return Stack(
         children: [
-          const LvFieldLabel('Why'),
-          TextField(
-            controller: _reason,
-            autofocus: true,
-            maxLines: 3,
-            maxLength: 500,
-            decoration: _box,
+          ChoiceSheet(
+            title: column.label,
+            choices: widget.options.choicesFor(column.key),
+            selected: widget.row.textOf(column.key),
+            colorOf: (v) => SheetColors.of(column.key, v),
+            onPicked: (v) {
+              if (_saving || v == widget.row.textOf(column.key)) {
+                Navigator.of(context).pop();
+              } else {
+                _save(v);
+              }
+            },
           ),
+          if (_saving)
+            const Positioned(left: 0, right: 0, top: 0, child: LinearProgressIndicator(minHeight: 2)),
+          if (_problem.isNotEmpty)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 8,
+              child: Text(_problem, style: const TextStyle(color: AppColors.danger, fontSize: 13)),
+            ),
         ],
       );
+    }
+
+    final today = DateTime.now();
+    final isDate = column.kind == SheetColumnKind.date;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(column.label, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            if (isDate)
+              LvDateField(
+                value: _day,
+                firstDate: today.subtract(const Duration(days: 365 * 3)),
+                // The request's own date is never in the future; when it is
+                // expected may well be.
+                lastDate: column.key == 'expectedOn' ? today.add(const Duration(days: 365 * 2)) : today,
+                clearable: column.clearable,
+                placeholder: 'No date',
+                onChanged: (d) => setState(() => _day = d),
+              )
+            else
+              TextField(
+                controller: _text,
+                autofocus: true,
+                minLines: column.multiline ? 3 : 1,
+                maxLines: column.multiline ? 8 : 1,
+                maxLength: column.key == 'raisedByName' ? 60 : 1000,
+                decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+              ),
+            if (_problem.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(_problem, style: const TextStyle(color: AppColors.danger, fontSize: 13)),
+            ],
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _saving ? null : () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _saving || (isDate && _day == null && !column.clearable)
+                        ? null
+                        : () => _save(isDate ? (_day == null ? '' : apiDay(_day!)) : _text.text.trim()),
+                    child: Text(_saving ? 'Saving…' : 'Save'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

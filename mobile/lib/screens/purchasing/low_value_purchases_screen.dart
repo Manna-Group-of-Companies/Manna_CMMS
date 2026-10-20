@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -7,22 +9,20 @@ import '../../core/formatters.dart';
 import '../../core/palette.dart';
 import '../../core/toast.dart';
 import '../../data/purchasing_repository.dart';
-import '../../models/maintenance.dart' show PlantOption;
 import '../../models/purchasing.dart';
+import '../../state/auth_provider.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/common.dart';
 import 'low_value_widgets.dart';
 
-/// Used until `/low-value-purchases/options` answers, so the filter is never
-/// empty on a slow connection. The server's own list replaces it.
-const _fallbackStatuses = ['Requested', 'Ordered', 'Received', 'Rejected', 'Withdrawn'];
-
-/// Low value purchase requests: small buys made locally, kept in ERPNext and
-/// never sent to SAP.
+/// The Purchase Request Sheet: the business's shared Google Sheet of things to
+/// buy or repair, moved into ERPNext and kept there only - never sent to SAP.
 ///
-/// Every manager and the plant heads raise them from here; the purchase manager
-/// works the same list as their queue. Newest first, as the server sends them -
-/// the filter is how the purchase manager narrows it to what is still to buy.
+/// Everyone with the screen sees every company's rows and adds rows; the
+/// purchase manager works the same list as their queue. Newest first, as the
+/// server sends them. On a phone each row is a card that reads left to right
+/// the way the sheet does; the grid icon in the bar shows the sheet itself,
+/// scrolling sideways, for anyone who wants the columns they are used to.
 class LowValuePurchasesScreen extends StatefulWidget {
   const LowValuePurchasesScreen({super.key});
 
@@ -32,10 +32,22 @@ class LowValuePurchasesScreen extends StatefulWidget {
 
 class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
   late final PurchasingRepository _repo = PurchasingRepository(context.read<ApiClient>());
+  final _search = TextEditingController();
 
-  List<LowValuePurchase> _rows = const [];
-  LowValueOptions? _options;
-  String _status = '';
+  List<PurchaseRequest> _rows = const [];
+  PurchaseSheetOptions _options = PurchaseSheetOptions.fallback;
+  // The built-in lists stand in for the filters, but the form waits for the
+  // server's: it decides which companies this person may ask for.
+  bool _optionsReady = false;
+
+  /// Open (not yet Received or Delivered) is where the work is, so it is
+  /// where the screen starts.
+  bool _openOnly = true;
+  String _company = '';
+  String _approval = '';
+  String _purchase = '';
+  String _query = '';
+  bool _asSheet = false;
   bool _loading = true;
   String _error = '';
 
@@ -46,10 +58,21 @@ class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
     _loadOptions();
   }
 
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() => _loading = _rows.isEmpty);
     try {
-      final rows = await _repo.lowValuePurchases(status: _status);
+      final rows = await _repo.sheet(
+        company: _company,
+        approval: _approval,
+        purchase: _purchase,
+        openOnly: _openOnly,
+      );
       if (!mounted) return;
       setState(() {
         _rows = rows;
@@ -62,245 +85,425 @@ class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
     }
   }
 
-  /// Quietly: the list works without it, and the raise sheet asks again.
+  /// Quietly: the built-in lists stand in until it answers.
   Future<void> _loadOptions() async {
     try {
-      final options = await _repo.lowValueOptions();
-      if (mounted) setState(() => _options = options);
+      final options = await _repo.options();
+      if (mounted) {
+        setState(() {
+          _options = options;
+          _optionsReady = true;
+        });
+      }
     } on ApiException catch (e) {
-      debugPrint('Low value options: ${e.message}');
+      debugPrint('Purchase sheet options: ${e.message}');
     }
   }
 
-  Future<void> _raise() async {
-    final made = await showModalBottomSheet<LowValuePurchase>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => RaiseLowValueSheet(repo: _repo, options: _options),
-    );
-    if (made == null) return;
-    Toast.success('Raised ${made.id}');
+  void _refilter(VoidCallback change) {
+    setState(() {
+      change();
+      // A different filter is a different list: show the spinner, not the
+      // old rows under the new chips.
+      _rows = const [];
+    });
     _load();
   }
 
-  void _filter(String status) {
-    if (status == _status) return;
-    setState(() => _status = status);
+  Future<void> _add() async {
+    if (!_optionsReady) await _loadOptions();
+    if (!mounted) return;
+    if (!_optionsReady) {
+      Toast.error('Could not reach the server. Try again in a moment.');
+      return;
+    }
+    final made = await showModalBottomSheet<PurchaseRequest>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => NewPurchaseRequestSheet(
+        repo: _repo,
+        options: _options,
+        raisedByName: context.read<AuthProvider>().user?.name ?? '',
+      ),
+    );
+    if (made == null) return;
+    Toast.success('Added to the sheet');
     _load();
+  }
+
+  Future<void> _open(PurchaseRequest row) async {
+    final changed = await context.push<bool>('/purchases/low-value/${row.id}');
+    if (changed == true) _load();
+  }
+
+  /// One filter's choices in a sheet. Returns null when dismissed, "" for any.
+  Future<void> _pick(String title, List<String> choices, String current, ValueChanged<String> set) async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (_) => ChoiceSheet(title: title, choices: choices, selected: current, anyLabel: 'Any'),
+    );
+    if (picked == null || picked == current) return;
+    _refilter(() => set(picked));
   }
 
   @override
   Widget build(BuildContext context) {
-    final toBuy = _rows.where((r) => r.status == 'Requested').length;
-    final onOrder = _rows.where((r) => r.status == 'Ordered').length;
-    final statuses = _options?.statuses.isNotEmpty == true ? _options!.statuses : _fallbackStatuses;
+    final shown = _rows.where((r) => r.matches(_query)).toList(growable: false);
+    final filtered = _company.isNotEmpty || _approval.isNotEmpty || _purchase.isNotEmpty;
 
     return AppShell(
-      title: 'Low Value Purchases',
-      // Everyone with the screen raises one; the server narrows a plant head to
-      // their own plants when the form loads.
+      title: 'Purchase Request Sheet',
+      actions: [
+        IconButton(
+          tooltip: _asSheet ? 'Show as cards' : 'Show as the sheet',
+          icon: Icon(_asSheet ? Icons.view_agenda_outlined : Icons.table_chart_outlined),
+          onPressed: () => setState(() => _asSheet = !_asSheet),
+        ),
+      ],
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _raise,
+        onPressed: _add,
         icon: const Icon(Icons.add),
-        label: const Text('Raise'),
+        label: const Text('New request'),
       ),
       child: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: MetricCard(
-                    title: 'To buy',
-                    value: toBuy,
-                    icon: Icons.shopping_cart_outlined,
-                    accent: toBuy > 0 ? AppColors.warning : AppColors.textMuted,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: MetricCard(
-                    title: 'On order',
-                    value: onOrder,
-                    icon: Icons.local_shipping_outlined,
-                    accent: onOrder > 0 ? AppColors.info : AppColors.textMuted,
-                  ),
-                ),
-              ],
+            TextField(
+              controller: _search,
+              onChanged: (v) => setState(() => _query = v),
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'Search description, purpose, raised by…',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                border: const OutlineInputBorder(),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear',
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () => setState(() {
+                          _search.clear();
+                          _query = '';
+                        }),
+                      ),
+              ),
             ),
-            const SizedBox(height: 14),
-            _StatusChips(
-              options: ['', ...statuses],
-              selected: _status,
-              onChanged: _filter,
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _FilterChip(
+                    label: 'Open',
+                    active: _openOnly,
+                    onTap: () {
+                      if (!_openOnly) _refilter(() => _openOnly = true);
+                    },
+                  ),
+                  const SizedBox(width: 6),
+                  _FilterChip(
+                    label: 'All',
+                    active: !_openOnly,
+                    onTap: () {
+                      if (_openOnly) _refilter(() => _openOnly = false);
+                    },
+                  ),
+                  // A plant head has one company; there is nothing to choose.
+                  if (_options.companies.length > 1) ...[
+                    const SizedBox(width: 12),
+                    _FilterChip(
+                      label: _company.isEmpty ? 'Company' : _company,
+                      active: _company.isNotEmpty,
+                      dropdown: true,
+                      onTap: () => _pick('Company', _options.companies, _company, (v) => _company = v),
+                    ),
+                  ],
+                  const SizedBox(width: 6),
+                  _FilterChip(
+                    label: _approval.isEmpty ? 'Approval' : _approval,
+                    active: _approval.isNotEmpty,
+                    dropdown: true,
+                    onTap: () =>
+                        _pick('Status of Approval', _options.approvalStatuses, _approval, (v) => _approval = v),
+                  ),
+                  const SizedBox(width: 6),
+                  _FilterChip(
+                    label: _purchase.isEmpty ? 'Purchase' : _purchase,
+                    active: _purchase.isNotEmpty,
+                    dropdown: true,
+                    onTap: () => _pick(
+                      'Status of Purchase/Repair',
+                      _options.purchaseStatuses,
+                      _purchase,
+                      (v) => _purchase = v,
+                    ),
+                  ),
+                  if (filtered) ...[
+                    const SizedBox(width: 6),
+                    TextButton(
+                      onPressed: () => _refilter(() {
+                        _company = '';
+                        _approval = '';
+                        _purchase = '';
+                      }),
+                      child: const Text('Clear'),
+                    ),
+                  ],
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             if (_loading)
               const Padding(
                 padding: EdgeInsets.only(top: 40),
-                child: LoadingView(message: 'Loading purchase requests…'),
+                child: LoadingView(message: 'Loading the sheet…'),
               )
             else if (_error.isNotEmpty)
               EmptyState(
-                title: 'Could not load purchase requests',
+                title: 'Could not load the sheet',
                 message: _error,
                 icon: Icons.error_outline,
                 iconColor: AppColors.danger,
               )
-            else if (_rows.isEmpty)
+            else if (shown.isEmpty)
               EmptyState(
                 title: 'Nothing here',
-                message: _status.isEmpty
-                    ? 'No low value purchase requests yet. Raise one with the button below.'
-                    : 'No requests are ${_status.toLowerCase()}.',
+                message: _query.isNotEmpty
+                    ? 'No row matches "$_query".'
+                    : filtered || _openOnly
+                        ? 'No rows match these filters.'
+                        : 'The sheet is empty. Add a request with the button below.',
                 icon: Icons.inbox_outlined,
               )
-            else
-              for (final row in _rows) ...[
-                _LowValueTile(row: row, onOpen: () => _open(row)),
-                const SizedBox(height: 10),
-              ],
+            else ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  shown.length == 1 ? '1 row' : '${shown.length} rows',
+                  style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                ),
+              ),
+              if (_asSheet)
+                _SheetGrid(rows: shown, onOpen: _open)
+              else
+                for (final row in shown) ...[
+                  _RowCard(row: row, onOpen: () => _open(row)),
+                  const SizedBox(height: 10),
+                ],
+            ],
           ],
         ),
       ),
     );
   }
+}
 
-  Future<void> _open(LowValuePurchase row) async {
-    final changed = await context.push<bool>('/purchases/low-value/${row.id}');
-    if (changed == true) _load();
+/// A filter as a pill: filled when it is narrowing the list.
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({
+    required this.label,
+    required this.active,
+    required this.onTap,
+    this.dropdown = false,
+  });
+
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  final bool dropdown;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = active ? Colors.white : AppColors.textSecondary;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: EdgeInsets.fromLTRB(14, 8, dropdown ? 8 : 14, 8),
+        decoration: BoxDecoration(
+          color: active ? AppColors.primary : AppColors.surfaceMuted,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: active ? AppColors.primary : AppColors.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 180),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (dropdown) Icon(Icons.arrow_drop_down, size: 18, color: fg),
+          ],
+        ),
+      ),
+    );
   }
 }
 
-/// The status filter. Five statuses and "All" do not fit [FilterTabs] on a
-/// phone, so they scroll sideways in the same colours instead.
-class _StatusChips extends StatelessWidget {
-  const _StatusChips({required this.options, required this.selected, required this.onChanged});
+/// One choice from a list, in a bottom sheet. Pops the choice, or "" for
+/// [anyLabel] when given.
+class ChoiceSheet extends StatelessWidget {
+  const ChoiceSheet({
+    super.key,
+    required this.title,
+    required this.choices,
+    required this.selected,
+    this.anyLabel,
+    this.colorOf,
+    this.onPicked,
+  });
 
-  /// An empty string is "All".
-  final List<String> options;
+  final String title;
+  final List<String> choices;
   final String selected;
-  final ValueChanged<String> onChanged;
+
+  /// When set, a first entry that clears the choice - a filter's "Any".
+  final String? anyLabel;
+
+  /// Paints each choice as its chip would be, for the status columns.
+  final Color? Function(String value)? colorOf;
+
+  /// What a tap does instead of popping the choice - the detail saves it
+  /// before the sheet closes.
+  final ValueChanged<String>? onPicked;
 
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
+  Widget build(BuildContext context) {
+    Widget tile(String value, String label) {
+      final color = value.isEmpty ? null : colorOf?.call(value);
+      return ListTile(
+        dense: true,
+        title: color == null
+            ? Text(label)
+            : Align(alignment: Alignment.centerLeft, child: SheetChip(label, color: color)),
+        trailing: value == selected ? const Icon(Icons.check, color: AppColors.primary) : null,
+        onTap: () => onPicked != null ? onPicked!(value) : Navigator.of(context).pop(value),
+      );
+    }
+
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final option in options) ...[
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => onChanged(option),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: selected == option ? AppColors.primary : AppColors.surfaceMuted,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: selected == option ? AppColors.primary : AppColors.border,
-                    ),
-                  ),
-                  child: Text(
-                    option.isEmpty ? 'All' : option,
-                    style: TextStyle(
-                      color: selected == option ? Colors.white : AppColors.textSecondary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                primary: false,
+                children: [
+                  if (anyLabel != null) tile('', anyLabel!),
+                  for (final choice in choices) tile(choice, choice),
+                ],
               ),
-              const SizedBox(width: 8),
-            ],
+            ),
           ],
         ),
-      );
+      ),
+    );
+  }
 }
 
-class _LowValueTile extends StatelessWidget {
-  const _LowValueTile({required this.row, required this.onOpen});
+/// One row of the sheet as a card: when, where and what first, then who
+/// asked, then where it stands. Green once it is in, as the sheet colours it.
+class _RowCard extends StatelessWidget {
+  const _RowCard({required this.row, required this.onOpen});
 
-  final LowValuePurchase row;
+  final PurchaseRequest row;
   final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final items = row.lines.length;
-    final names = row.lines.map((l) => l.description).where((d) => d.isNotEmpty).toList();
+    const muted = TextStyle(fontSize: 12, color: AppColors.textSecondary);
 
     return AppCard(
       onTap: onOpen,
+      color: row.done ? sheetDoneFill : null,
+      borderColor: row.done ? sheetDoneGreen : null,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text(
+                row.date == null ? '—' : formatDate(row.date),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textStrong),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  row.purpose,
-                  maxLines: 2,
+                  row.company.isEmpty ? '—' : row.company,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                  style: muted,
                 ),
               ),
               const SizedBox(width: 8),
-              LowValueStatusBadge(row.status),
+              SoftChip(row.type == 'Repair Request' ? 'Repair' : 'Purchase'),
             ],
           ),
-          const SizedBox(height: 2),
-          MonoText(row.id),
-          if (names.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              names.length > 2
-                  ? '${names.take(2).join(', ')} +${names.length - 2} more'
-                  : names.join(', '),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, color: AppColors.textBody),
-            ),
-          ],
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              SoftChip(row.plant),
-              SoftChip(items == 1 ? '1 item' : '$items items'),
-              if (row.requiredBy != null) SoftChip('Needed by ${formatDate(row.requiredBy)}'),
-              if (row.isUrgent) const AppBadge('urgent', color: AppColors.danger),
-            ],
+          const SizedBox(height: 8),
+          Text(
+            row.description.isEmpty ? '(no description)' : row.description,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
           Row(
             children: [
+              const Icon(Icons.person_outline, size: 14, color: AppColors.textMuted),
+              const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  'Estimated ${formatCurrency(row.estTotal)}',
-                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  row.raisedByName.isEmpty ? '—' : row.raisedByName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: muted,
                 ),
               ),
-              if (row.hasActual)
-                Text(
-                  'Paid ${formatCurrency(row.total)}',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textStrong,
-                  ),
-                ),
+              if (row.imageCount > 0) ...[
+                const Icon(Icons.image_outlined, size: 14, color: AppColors.textMuted),
+                const SizedBox(width: 2),
+                Text('${row.imageCount}', style: muted),
+              ],
             ],
           ),
-          if (row.waitingOn.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              if (row.priority.isNotEmpty) SheetChip.priority(row.priority),
+              SheetChip.approval(row.approvalStatus),
+              SheetChip.purchase(row.purchaseStatus),
+            ],
+          ),
+          if (row.receivedOn != null || row.expectedOn != null) ...[
             const SizedBox(height: 8),
             Text(
-              'Waiting on: ${row.waitingOn}',
-              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+              row.receivedOn != null
+                  ? 'Received ${formatDate(row.receivedOn)}'
+                  : 'Expected ${formatDate(row.expectedOn)}',
+              style: muted,
             ),
           ],
         ],
@@ -309,152 +512,189 @@ class _LowValueTile extends StatelessWidget {
   }
 }
 
-/// One item being typed into the raise form.
-class _DraftLine {
-  final description = TextEditingController();
-  final specification = TextEditingController();
-  final qty = TextEditingController(text: '1');
-  final unit = TextEditingController();
-  final rate = TextEditingController();
+/// The sheet itself, scrolling sideways: the "Purchase" tab's columns in its
+/// order, a finished row in its green. Tapping a row opens it.
+class _SheetGrid extends StatelessWidget {
+  const _SheetGrid({required this.rows, required this.onOpen});
 
-  /// Rows are added and removed in the middle, so each keeps its own key
-  /// rather than its position - otherwise removing item 2 leaves item 3's
-  /// text in item 2's boxes.
-  final key = UniqueKey();
+  final List<PurchaseRequest> rows;
+  final ValueChanged<PurchaseRequest> onOpen;
 
-  double get qtyValue => double.tryParse(qty.text.trim()) ?? 0;
-  double get rateValue => double.tryParse(rate.text.trim()) ?? 0;
-  double get amount => qtyValue * rateValue;
+  static const _widths = <String, double>{
+    'date': 92,
+    'type': 120,
+    'company': 160,
+    'raisedByName': 120,
+    'description': 240,
+    'purpose': 200,
+    imageSamplesColumn: 80,
+    'links': 180,
+    'priority': 100,
+    'approvalStatus': 170,
+    'purchaseStatus': 170,
+    'expectedOn': 110,
+    'receivedOn': 110,
+    'remarks': 200,
+  };
 
-  /// Nothing typed but the defaults - an "add item" tapped and then left.
-  bool get isBlank =>
-      description.text.trim().isEmpty &&
-      specification.text.trim().isEmpty &&
-      rate.text.trim().isEmpty;
+  Widget _cell(String column, Widget child, {Color? fill}) => Container(
+        width: _widths[column] ?? 120,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        decoration: BoxDecoration(
+          color: fill,
+          border: const Border(
+            right: BorderSide(color: AppColors.border),
+            bottom: BorderSide(color: AppColors.border),
+          ),
+        ),
+        child: child,
+      );
 
-  void dispose() {
-    description.dispose();
-    specification.dispose();
-    qty.dispose();
-    unit.dispose();
-    rate.dispose();
+  Widget _value(PurchaseRequest row, String column) {
+    final text = row.textOf(column);
+    final color = SheetColors.of(column, text);
+    if (color != null && text.isNotEmpty) {
+      return Align(alignment: Alignment.centerLeft, child: SheetChip(text, color: color));
+    }
+    return Text(
+      text,
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 12, color: AppColors.textBody),
+    );
   }
-}
-
-/// Raising a low value purchase request.
-///
-/// The plant is filled in for anyone who may raise for only one - the server
-/// narrows the list, so one entry means there is nothing to choose.
-class RaiseLowValueSheet extends StatefulWidget {
-  const RaiseLowValueSheet({super.key, required this.repo, this.options});
-
-  final PurchasingRepository repo;
-
-  /// Passed in when the list already has them, to save asking again.
-  final LowValueOptions? options;
 
   @override
-  State<RaiseLowValueSheet> createState() => _RaiseLowValueSheetState();
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: AppColors.borderStrong),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final column in sheetColumns)
+                      _cell(
+                        column.key,
+                        Text(
+                          column.label,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textStrong,
+                          ),
+                        ),
+                        fill: AppColors.surfaceMuted,
+                      ),
+                  ],
+                ),
+              ),
+              for (final row in rows)
+                InkWell(
+                  onTap: () => onOpen(row),
+                  child: IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final column in sheetColumns)
+                          _cell(
+                            column.key,
+                            _value(row, column.key),
+                            fill: row.done ? sheetDoneGreen : AppColors.surface,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
 }
 
-class _RaiseLowValueSheetState extends State<RaiseLowValueSheet> {
-  final _department = TextEditingController();
-  final _purpose = TextEditingController();
-  final List<_DraftLine> _lines = [];
+/// Adding a row to the sheet: the columns whoever asks fills in. Approval and
+/// purchase status start at Pending and Not Ordered on the server, and the
+/// rest is the purchase manager's.
+class NewPurchaseRequestSheet extends StatefulWidget {
+  const NewPurchaseRequestSheet({
+    super.key,
+    required this.repo,
+    required this.options,
+    this.raisedByName = '',
+  });
 
-  List<String> _units = const [];
-  List<PlantOption> _plants = const [];
-  int _maxLines = 30;
-  String _plant = '';
-  String _urgency = 'Normal';
-  DateTime? _requiredBy;
-  bool _loading = true;
+  final PurchasingRepository repo;
+  final PurchaseSheetOptions options;
+
+  /// The signed-in person's name, to start "Raised By" with. They may be
+  /// writing it up for someone else, so it can be changed.
+  final String raisedByName;
+
+  @override
+  State<NewPurchaseRequestSheet> createState() => _NewPurchaseRequestSheetState();
+}
+
+class _NewPurchaseRequestSheetState extends State<NewPurchaseRequestSheet> {
+  late final _raisedBy = TextEditingController(text: widget.raisedByName);
+  final _description = TextEditingController();
+  final _purpose = TextEditingController();
+  final _links = TextEditingController();
+
+  DateTime _date = DateTime.now();
+  late String _type = widget.options.types.first;
+  // Filled in when there is only one to choose - a plant head's own company.
+  late String _company = widget.options.companies.length == 1 ? widget.options.companies.first : '';
+  late String _priority =
+      widget.options.priorities.contains('High') ? 'High' : widget.options.priorities.first;
+
+  /// Held until the row exists: an image attaches *to* a row.
+  PickedPhoto? _photo;
   bool _saving = false;
   String _problem = '';
 
   @override
-  void initState() {
-    super.initState();
-    _lines.add(_newLine());
-    final given = widget.options;
-    if (given != null) {
-      _apply(given);
-      _loading = false;
-    } else {
-      _loadOptions();
-    }
-  }
-
-  _DraftLine _newLine() {
-    final line = _DraftLine();
-    if (_units.isNotEmpty) line.unit.text = _units.first;
-    return line;
-  }
-
-  void _apply(LowValueOptions options) {
-    _units = options.units;
-    _plants = options.plants;
-    _maxLines = options.maxLines;
-    if (_plants.length == 1) _plant = _plants.first.name;
-    for (final line in _lines) {
-      if (line.unit.text.isEmpty && _units.isNotEmpty) line.unit.text = _units.first;
-    }
-  }
-
-  Future<void> _loadOptions() async {
-    try {
-      final options = await widget.repo.lowValueOptions();
-      if (!mounted) return;
-      setState(() => _apply(options));
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _problem = e.message);
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  @override
   void dispose() {
-    _department.dispose();
+    _raisedBy.dispose();
+    _description.dispose();
     _purpose.dispose();
-    for (final line in _lines) {
-      line.dispose();
-    }
+    _links.dispose();
     super.dispose();
   }
 
-  double get _total => _lines.fold<double>(0, (sum, l) => sum + l.amount);
-
-  void _addLine() => setState(() => _lines.add(_newLine()));
-
-  void _removeLine(_DraftLine line) {
-    setState(() => _lines.remove(line));
-    line.dispose();
-  }
-
-  /// The obvious gaps, said before the round trip. The server checks all of
-  /// it again, and its wording is the same.
-  String? _check(List<_DraftLine> lines) {
-    if (_plant.isEmpty) return 'Choose the plant it is for.';
-    if (_requiredBy == null) return 'Say by when it is needed.';
-    if (_purpose.text.trim().isEmpty) return 'Say what it is for.';
-    if (lines.isEmpty) return 'Add at least one item.';
-    for (var i = 0; i < lines.length; i++) {
-      final line = lines[i];
-      if (line.description.text.trim().isEmpty) return 'Item ${i + 1}: say what is needed.';
-      if (line.qtyValue <= 0) return 'Item ${i + 1}: the quantity must be more than zero.';
-      if (line.unit.text.trim().isEmpty) return 'Item ${i + 1}: give the unit.';
+  Future<void> _addPhoto() async {
+    FocusScope.of(context).unfocus();
+    final source = await askPhotoSource(context);
+    if (source == null) return;
+    try {
+      final photo = await pickPhoto(source);
+      if (photo != null && mounted) {
+        setState(() {
+          _photo = photo;
+          _problem = '';
+        });
+      }
+    } on PhotoProblem catch (e) {
+      if (mounted) setState(() => _problem = e.message);
     }
-    return null;
   }
 
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
-    final lines = _lines.where((l) => !l.isBlank).toList();
-
-    final problem = _check(lines);
-    if (problem != null) {
-      setState(() => _problem = problem);
+    // The obvious gaps, said before the round trip. The server checks again.
+    final gap = _company.isEmpty
+        ? 'Choose the company it is for.'
+        : _description.text.trim().isEmpty
+            ? 'Say what is needed.'
+            : '';
+    if (gap.isNotEmpty) {
+      setState(() => _problem = gap);
       return;
     }
 
@@ -463,25 +703,33 @@ class _RaiseLowValueSheetState extends State<RaiseLowValueSheet> {
       _problem = '';
     });
     try {
-      final made = await widget.repo.raiseLowValue(
-        plant: _plant,
-        department: _department.text.trim(),
-        urgency: _urgency,
-        requiredBy: apiDay(_requiredBy!),
+      final made = await widget.repo.add(
+        date: apiDay(_date),
+        type: _type,
+        company: _company,
+        raisedByName: _raisedBy.text.trim(),
+        description: _description.text.trim(),
         purpose: _purpose.text.trim(),
-        lines: [
-          for (final line in lines)
-            {
-              'description': line.description.text.trim(),
-              'specification': line.specification.text.trim(),
-              'qty': line.qtyValue,
-              'unit': line.unit.text.trim(),
-              // Blank is allowed: the server reads it as no estimate.
-              'estRate': line.rate.text.trim().isEmpty ? '' : line.rateValue,
-              'remarks': '',
-            },
-        ],
+        links: _links.text.trim(),
+        priority: _priority,
       );
+
+      // A failed image does not undo the row - the request is on the sheet
+      // either way - but it is said, so nobody assumes it went up.
+      final photo = _photo;
+      if (photo != null) {
+        try {
+          await widget.repo.attachImage(
+            made.id,
+            fileName: photo.name,
+            contentType: photo.contentType,
+            dataBase64: base64Encode(photo.bytes),
+          );
+        } on ApiException catch (e) {
+          Toast.show('Added, but the photo failed: ${e.message}', ToastType.error);
+        }
+      }
+
       if (mounted) Navigator.of(context).pop(made);
     } on ApiException catch (e) {
       if (mounted) setState(() => _problem = e.message);
@@ -490,9 +738,17 @@ class _RaiseLowValueSheetState extends State<RaiseLowValueSheet> {
     }
   }
 
+  InputDecoration _box([String? hint]) => InputDecoration(
+        border: const OutlineInputBorder(),
+        isDense: true,
+        counterText: '',
+        hintText: hint,
+      );
+
   @override
   Widget build(BuildContext context) {
     final today = DateTime.now();
+    final options = widget.options;
 
     return Padding(
       padding: EdgeInsets.only(
@@ -506,92 +762,113 @@ class _RaiseLowValueSheetState extends State<RaiseLowValueSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Raise a low value purchase', style: Theme.of(context).textTheme.titleLarge),
+            Text('New purchase request', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 4),
             const Text(
-              'Bought locally by the purchase manager. Not sent to SAP.',
+              'A new row on the Purchase Request Sheet. Not sent to SAP.',
               style: TextStyle(fontSize: 12, color: AppColors.textMuted),
             ),
             const SizedBox(height: 16),
-            if (_loading)
-              const LoadingView(message: 'Loading…')
-            else ...[
-              const LvFieldLabel('Plant'),
-              if (_plants.length == 1)
-                Text(_plant, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))
-              else if (_plants.isEmpty)
-                const Text(
-                  'There is no plant you may buy for.',
-                  style: TextStyle(fontSize: 13, color: AppColors.danger),
-                )
-              else
-                AppDropdown<String>(
-                  value: _plant,
-                  items: ['', ..._plants.map((p) => p.name)],
-                  labelBuilder: (p) => p.isEmpty ? 'Choose…' : p,
-                  onChanged: (v) => setState(() => _plant = v ?? ''),
-                ),
-              const SizedBox(height: 12),
-              const LvFieldLabel('Department'),
-              TextField(
-                controller: _department,
-                maxLength: 60,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  counterText: '',
-                  hintText: 'e.g. Maintenance, Mixing',
-                ),
+            const LvFieldLabel('Date'),
+            LvDateField(
+              value: _date,
+              // The server refuses a date in the future.
+              firstDate: today.subtract(const Duration(days: 365)),
+              lastDate: today,
+              onChanged: (d) => setState(() => _date = d ?? today),
+            ),
+            const SizedBox(height: 12),
+            const LvFieldLabel('Type of Request'),
+            FilterTabs(
+              options: options.types,
+              selected: _type,
+              onChanged: (v) => setState(() => _type = v),
+            ),
+            const SizedBox(height: 12),
+            const LvFieldLabel('Company'),
+            DropdownShell(
+              child: AppDropdown<String>(
+                value: _company,
+                items: ['', ...options.companies],
+                labelBuilder: (c) => c.isEmpty ? 'Choose…' : c,
+                onChanged: (v) => setState(() => _company = v ?? ''),
               ),
-              const SizedBox(height: 12),
-              const LvFieldLabel('How urgent'),
-              FilterTabs(
-                options: const ['Normal', 'Urgent'],
-                selected: _urgency,
-                onChanged: (v) => setState(() => _urgency = v),
-              ),
-              const SizedBox(height: 12),
-              const LvFieldLabel('Needed by'),
-              LvDateField(
-                value: _requiredBy,
-                firstDate: DateTime(today.year, today.month, today.day),
-                lastDate: today.add(const Duration(days: 365)),
-                onChanged: (d) => setState(() => _requiredBy = d),
-              ),
-              const SizedBox(height: 12),
-              const LvFieldLabel('What is it for'),
-              TextField(
-                controller: _purpose,
-                maxLines: 3,
-                maxLength: 500,
-                decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Items (${_lines.length} of $_maxLines)',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              for (var i = 0; i < _lines.length; i++) ...[
-                _DraftLineCard(
-                  key: _lines[i].key,
-                  number: i + 1,
-                  line: _lines[i],
-                  units: _units,
-                  onChanged: () => setState(() {}),
-                  onRemove: _lines.length > 1 ? () => _removeLine(_lines[i]) : null,
-                ),
-                const SizedBox(height: 10),
+            ),
+            const SizedBox(height: 12),
+            const LvFieldLabel('Raised By'),
+            TextField(controller: _raisedBy, maxLength: 60, decoration: _box()),
+            const SizedBox(height: 12),
+            const LvFieldLabel('Description'),
+            TextField(
+              controller: _description,
+              minLines: 2,
+              maxLines: 5,
+              maxLength: 1000,
+              decoration: _box('What is needed - one item a line'),
+            ),
+            const SizedBox(height: 12),
+            const LvFieldLabel('Purpose of Purchase/Repair'),
+            TextField(controller: _purpose, minLines: 1, maxLines: 4, maxLength: 1000, decoration: _box()),
+            const SizedBox(height: 12),
+            const LvFieldLabel('Links/Brands or vendor contact'),
+            TextField(
+              controller: _links,
+              minLines: 1,
+              maxLines: 4,
+              maxLength: 1000,
+              decoration: _box('A link, a brand, or who sells it'),
+            ),
+            const SizedBox(height: 12),
+            const LvFieldLabel('Priority'),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final p in options.priorities)
+                  ChoiceChip(
+                    label: Text(p),
+                    selected: _priority == p,
+                    selectedColor: SheetColors.priority(p).withValues(alpha: 0.18),
+                    labelStyle: TextStyle(
+                      color: _priority == p ? SheetColors.priority(p) : AppColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                    onSelected: (_) => setState(() => _priority = p),
+                  ),
               ],
-              if (_lines.length < _maxLines)
-                TextButton.icon(
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add an item'),
-                  onPressed: _addLine,
-                ),
-              const SizedBox(height: 8),
-              LvTotalRow(label: 'Estimated total', amount: _total, strong: true),
-            ],
+            ),
+            const SizedBox(height: 12),
+            const LvFieldLabel('Image sample (optional)'),
+            if (_photo == null)
+              OutlinedButton.icon(
+                icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+                label: const Text('Add a photo'),
+                onPressed: _saving ? null : _addPhoto,
+              )
+            else
+              Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.memory(_photo!.bytes, width: 64, height: 64, fit: BoxFit.cover),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _photo!.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Remove',
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: _saving ? null : () => setState(() => _photo = null),
+                  ),
+                ],
+              ),
             if (_problem.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text(_problem, style: const TextStyle(color: AppColors.danger, fontSize: 13)),
@@ -608,8 +885,8 @@ class _RaiseLowValueSheetState extends State<RaiseLowValueSheet> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: FilledButton(
-                    onPressed: _saving || _loading || _plants.isEmpty ? null : _submit,
-                    child: Text(_saving ? 'Raising…' : 'Raise it'),
+                    onPressed: _saving ? null : _submit,
+                    child: Text(_saving ? 'Adding…' : 'Add to sheet'),
                   ),
                 ),
               ],
@@ -619,143 +896,4 @@ class _RaiseLowValueSheetState extends State<RaiseLowValueSheet> {
       ),
     );
   }
-}
-
-class _DraftLineCard extends StatelessWidget {
-  const _DraftLineCard({
-    super.key,
-    required this.number,
-    required this.line,
-    required this.units,
-    required this.onChanged,
-    required this.onRemove,
-  });
-
-  final int number;
-  final _DraftLine line;
-  final List<String> units;
-  final VoidCallback onChanged;
-
-  /// Null on the last item left, which cannot be removed.
-  final VoidCallback? onRemove;
-
-  @override
-  Widget build(BuildContext context) => AppCard(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Item $number',
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                  ),
-                ),
-                if (onRemove != null)
-                  IconButton(
-                    tooltip: 'Remove',
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.close, size: 18),
-                    onPressed: onRemove,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            TextField(
-              controller: line.description,
-              maxLength: 140,
-              decoration: const InputDecoration(
-                labelText: 'What is needed',
-                border: OutlineInputBorder(),
-                isDense: true,
-                counterText: '',
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: line.specification,
-              maxLength: 140,
-              decoration: const InputDecoration(
-                labelText: 'Specification (size, make, model)',
-                border: OutlineInputBorder(),
-                isDense: true,
-                counterText: '',
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: TextField(
-                    controller: line.qty,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    onChanged: (_) => onChanged(),
-                    decoration: const InputDecoration(
-                      labelText: 'Qty',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 3,
-                  // Typed or picked: the list covers most buys, but a
-                  // "Bundle" or "Tin" should not need a release to raise.
-                  child: TextField(
-                    controller: line.unit,
-                    maxLength: 20,
-                    decoration: InputDecoration(
-                      labelText: 'Unit',
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                      counterText: '',
-                      suffixIcon: units.isEmpty
-                          ? null
-                          : PopupMenuButton<String>(
-                              tooltip: 'Pick a unit',
-                              icon: const Icon(Icons.arrow_drop_down),
-                              onSelected: (u) {
-                                line.unit.text = u;
-                                onChanged();
-                              },
-                              itemBuilder: (_) => [
-                                for (final u in units) PopupMenuItem(value: u, child: Text(u)),
-                              ],
-                            ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 3,
-                  child: TextField(
-                    controller: line.rate,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    onChanged: (_) => onChanged(),
-                    decoration: const InputDecoration(
-                      labelText: 'Est. rate ₹',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (line.amount > 0) ...[
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  formatCurrency(line.amount),
-                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                ),
-              ),
-            ],
-          ],
-        ),
-      );
 }
