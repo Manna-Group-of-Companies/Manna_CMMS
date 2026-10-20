@@ -26,6 +26,7 @@ void main() {
         'updatedAt': '2026-10-21 11:00:00',
         'files': '2',
         'editable': ['purchaseStatus', 'remarks', 'expectedOn'],
+        'deletable': true,
         'images': [
           {
             'id': 'f1',
@@ -48,6 +49,10 @@ void main() {
       expect(row.canEdit('purchaseStatus'), isTrue);
       expect(row.canEdit('approvalStatus'), isFalse);
       expect(row.canAttach, isTrue);
+      expect(row.deletable, isTrue);
+      expect(row.withImages(const []).deletable, isTrue, reason: 'kept when the images are swapped');
+      expect(row.dayOf('expectedOn'), DateTime(2026, 10, 22));
+      expect(row.dayOf('remarks'), isNull, reason: 'only the date columns have a day');
       expect(row.textOf('description'), contains('\n'), reason: 'line breaks are kept');
       expect(row.textOf('images'), '1 image');
       expect(row.withImages(const []).imageCount, 2, reason: 'falls back to the count');
@@ -64,7 +69,19 @@ void main() {
       expect(row.textOf('expectedOn'), '');
       expect(row.editable, isEmpty);
       expect(row.canAttach, isFalse);
+      expect(row.deletable, isFalse);
       expect(row.images, isEmpty);
+    });
+
+    test('only a true deletable lets the row be deleted', () {
+      expect(PurchaseRequest.fromJson(const {'id': 'PRS-2', 'deletable': false}).deletable, isFalse);
+      expect(PurchaseRequest.fromJson(const {'id': 'PRS-3', 'deletable': 'true'}).deletable, isFalse);
+      expect(PurchaseRequest.fromJson(const {'id': 'PRS-4', 'deletable': null}).deletable, isFalse);
+      expect(
+        PurchaseRequest.fromJson(const {'id': 'PRS-5', 'deletable': true, 'editable': []}).deletable,
+        isTrue,
+        reason: 'deleting is its own say, apart from the columns',
+      );
     });
 
     test('search looks across the typed columns, ignoring case', () {

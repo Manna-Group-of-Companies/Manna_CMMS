@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/formatters.dart';
 import '../../core/palette.dart';
+import '../../models/purchasing.dart';
 import '../../widgets/common.dart';
 
 /// Pieces the Purchase Request Sheet's list, detail and form share.
@@ -261,3 +262,43 @@ Future<ImageSource?> askPhotoSource(BuildContext context) => showModalBottomShee
         ),
       ),
     );
+
+/// A row named in a line: its number and the first line of what is needed.
+String requestHeadline(PurchaseRequest row) {
+  final what = row.description.split('\n').first.trim();
+  return what.isEmpty ? row.id : '${row.id} · $what';
+}
+
+/// Asked before a row is deleted, from the detail or a card held down in the
+/// list - there is no undo. True to go ahead.
+Future<bool> confirmDeleteRequest(BuildContext context, PurchaseRequest row) async {
+  final sure = await showDialog<bool>(
+    context: context,
+    builder: (dialog) => AlertDialog(
+      title: const Text('Delete this request?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            requestHeadline(row),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 8),
+          const Text('This cannot be undone.'),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(dialog).pop(false), child: const Text('Keep')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+          onPressed: () => Navigator.of(dialog).pop(true),
+          child: const Text('Delete'),
+        ),
+      ],
+    ),
+  );
+  return sure == true;
+}

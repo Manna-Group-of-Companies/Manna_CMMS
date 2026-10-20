@@ -23,6 +23,10 @@ import 'low_value_widgets.dart';
 /// server sends them. On a phone each row is a card that reads left to right
 /// the way the sheet does; the grid icon in the bar shows the sheet itself,
 /// scrolling sideways, for anyone who wants the columns they are used to.
+///
+/// Holding a row down offers what this person may do to it without opening
+/// it - edit the whole row, or delete it - going by the row's `editable` and
+/// `deletable`, as the detail does.
 class LowValuePurchasesScreen extends StatefulWidget {
   const LowValuePurchasesScreen({super.key});
 
@@ -136,6 +140,91 @@ class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
     final changed = await context.push<bool>('/purchases/low-value/${row.id}');
     if (changed == true) _load();
   }
+
+  /// Edit and Delete for a row held down, where the row allows either.
+  Future<void> _rowActions(PurchaseRequest row) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Text(
+                requestHeadline(row),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.open_in_new),
+              title: const Text('Open'),
+              onTap: () => Navigator.of(sheet).pop('open'),
+            ),
+            if (row.editable.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit'),
+                onTap: () => Navigator.of(sheet).pop('edit'),
+              ),
+            if (row.deletable)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: AppColors.danger),
+                title: const Text('Delete', style: TextStyle(color: AppColors.danger)),
+                onTap: () => Navigator.of(sheet).pop('delete'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'open':
+        await _open(row);
+      case 'edit':
+        await _edit(row);
+      case 'delete':
+        await _delete(row);
+    }
+  }
+
+  Future<void> _edit(PurchaseRequest row) async {
+    // The form's company list is the server's, as for a new row; the
+    // built-in one stands in if it cannot be had, and the server checks.
+    if (!_optionsReady) await _loadOptions();
+    if (!mounted) return;
+    final updated = await showModalBottomSheet<PurchaseRequest>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => EditPurchaseRequestSheet(repo: _repo, row: row, options: _options),
+    );
+    if (updated == null) return;
+    Toast.success('Request saved');
+    // Reloaded rather than patched in: the change may move it out of the
+    // filters on screen.
+    _load();
+  }
+
+  Future<void> _delete(PurchaseRequest row) async {
+    if (!await confirmDeleteRequest(context, row)) return;
+    try {
+      await _repo.delete(row.id);
+      Toast.success('Request deleted');
+      if (mounted) setState(() => _rows = _rows.where((r) => r.id != row.id).toList(growable: false));
+      _load();
+    } on ApiException catch (e) {
+      Toast.show(e.message, ToastType.error);
+    }
+  }
+
+  /// Null for a row this person can only read: holding it does nothing.
+  VoidCallback? _holdFor(PurchaseRequest row) =>
+      row.editable.isNotEmpty || row.deletable ? () => _rowActions(row) : null;
 
   /// One filter's choices in a sheet. Returns null when dismissed, "" for any.
   Future<void> _pick(String title, List<String> choices, String current, ValueChanged<String> set) async {
@@ -290,10 +379,10 @@ class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
                 ),
               ),
               if (_asSheet)
-                _SheetGrid(rows: shown, onOpen: _open)
+                _SheetGrid(rows: shown, onOpen: _open, onHold: _holdFor)
               else
                 for (final row in shown) ...[
-                  _RowCard(row: row, onOpen: () => _open(row)),
+                  _RowCard(row: row, onOpen: () => _open(row), onHold: _holdFor(row)),
                   const SizedBox(height: 10),
                 ],
             ],
@@ -424,10 +513,13 @@ class ChoiceSheet extends StatelessWidget {
 /// One row of the sheet as a card: when, where and what first, then who
 /// asked, then where it stands. Green once it is in, as the sheet colours it.
 class _RowCard extends StatelessWidget {
-  const _RowCard({required this.row, required this.onOpen});
+  const _RowCard({required this.row, required this.onOpen, this.onHold});
 
   final PurchaseRequest row;
   final VoidCallback onOpen;
+
+  /// Edit and Delete, when the row allows either.
+  final VoidCallback? onHold;
 
   @override
   Widget build(BuildContext context) {
@@ -435,6 +527,7 @@ class _RowCard extends StatelessWidget {
 
     return AppCard(
       onTap: onOpen,
+      onLongPress: onHold,
       color: row.done ? sheetDoneFill : null,
       borderColor: row.done ? sheetDoneGreen : null,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -513,12 +606,14 @@ class _RowCard extends StatelessWidget {
 }
 
 /// The sheet itself, scrolling sideways: the "Purchase" tab's columns in its
-/// order, a finished row in its green. Tapping a row opens it.
+/// order, a finished row in its green. Tapping a row opens it; holding it
+/// offers Edit and Delete, as a card does.
 class _SheetGrid extends StatelessWidget {
-  const _SheetGrid({required this.rows, required this.onOpen});
+  const _SheetGrid({required this.rows, required this.onOpen, required this.onHold});
 
   final List<PurchaseRequest> rows;
   final ValueChanged<PurchaseRequest> onOpen;
+  final VoidCallback? Function(PurchaseRequest row) onHold;
 
   static const _widths = <String, double>{
     'date': 92,
@@ -599,6 +694,7 @@ class _SheetGrid extends StatelessWidget {
               for (final row in rows)
                 InkWell(
                   onTap: () => onOpen(row),
+                  onLongPress: onHold(row),
                   child: IntrinsicHeight(
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -896,4 +992,258 @@ class _NewPurchaseRequestSheetState extends State<NewPurchaseRequestSheet> {
       ),
     );
   }
+}
+
+/// Changing a whole row at once: every column in the sheet's order, filled in
+/// as it stands. A column this person may not change - not in the row's
+/// `editable` - is shown with a lock and cannot be touched. Save sends one
+/// `PUT` of just the columns that changed. Pops the updated row.
+///
+/// The images are listed but not changed here: they go up and come off one at
+/// a time on the request itself.
+class EditPurchaseRequestSheet extends StatefulWidget {
+  const EditPurchaseRequestSheet({
+    super.key,
+    required this.repo,
+    required this.row,
+    required this.options,
+  });
+
+  final PurchasingRepository repo;
+  final PurchaseRequest row;
+  final PurchaseSheetOptions options;
+
+  @override
+  State<EditPurchaseRequestSheet> createState() => _EditPurchaseRequestSheetState();
+}
+
+class _EditPurchaseRequestSheetState extends State<EditPurchaseRequestSheet> {
+  late final Map<String, TextEditingController> _texts = {
+    for (final c in sheetColumns)
+      if (c.kind == SheetColumnKind.text && c.key != imageSamplesColumn)
+        c.key: TextEditingController(text: widget.row.textOf(c.key)),
+  };
+  late final Map<String, String> _picks = {
+    for (final c in sheetColumns)
+      if (c.kind == SheetColumnKind.pick) c.key: widget.row.textOf(c.key),
+  };
+  late final Map<String, DateTime?> _days = {
+    for (final c in sheetColumns)
+      if (c.kind == SheetColumnKind.date) c.key: widget.row.dayOf(c.key),
+  };
+  bool _saving = false;
+  String _problem = '';
+
+  @override
+  void dispose() {
+    for (final c in _texts.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  static String _day(DateTime? d) => d == null ? '' : apiDay(d);
+
+  /// A column's value as the form has it now, in the form the API takes it.
+  String _now(SheetColumn c) => switch (c.kind) {
+        SheetColumnKind.pick => _picks[c.key] ?? '',
+        SheetColumnKind.date => _day(_days[c.key]),
+        SheetColumnKind.text => _texts[c.key]?.text.trim() ?? '',
+      };
+
+  /// The same, as the row came.
+  String _was(SheetColumn c) => switch (c.kind) {
+        SheetColumnKind.date => _day(widget.row.dayOf(c.key)),
+        // Trimmed, so a stray space already in the sheet is not taken for a
+        // change.
+        _ => widget.row.textOf(c.key).trim(),
+      };
+
+  /// The columns that differ from the row as it came, by key. Only ones this
+  /// person may change can differ - the rest are locked.
+  Map<String, String> get _changes => {
+        for (final c in sheetColumns)
+          if (c.key != imageSamplesColumn && widget.row.canEdit(c.key) && _now(c) != _was(c)) c.key: _now(c),
+      };
+
+  Future<void> _save() async {
+    FocusScope.of(context).unfocus();
+    final changes = _changes;
+    if (changes.isEmpty) return;
+    setState(() {
+      _saving = true;
+      _problem = '';
+    });
+    try {
+      final updated = await widget.repo.update(widget.row.id, changes);
+      if (mounted) Navigator.of(context).pop(updated);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _problem = e.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Widget _field(SheetColumn column) {
+    final row = widget.row;
+    if (column.key == imageSamplesColumn) {
+      return _LockedValue(row.textOf(column.key), note: 'Added and removed on the request itself.');
+    }
+    if (!row.canEdit(column.key)) return _LockedValue(row.textOf(column.key));
+
+    switch (column.kind) {
+      case SheetColumnKind.pick:
+        final current = _picks[column.key] ?? '';
+        final choices = widget.options.choicesFor(column.key);
+        return DropdownShell(
+          child: AppDropdown<String>(
+            value: current,
+            // What the row holds stays in the list even when the server's
+            // options no longer have it - an old value, or a blank priority.
+            items: [if (!choices.contains(current)) current, ...choices],
+            labelBuilder: (v) => v.isEmpty ? '—' : v,
+            onChanged: (v) {
+              if (!_saving && v != null) setState(() => _picks[column.key] = v);
+            },
+          ),
+        );
+      case SheetColumnKind.date:
+        final today = DateTime.now();
+        return LvDateField(
+          value: _days[column.key],
+          firstDate: today.subtract(const Duration(days: 365 * 3)),
+          // The request's own date is never in the future; when it is
+          // expected may well be.
+          lastDate: column.key == 'expectedOn' ? today.add(const Duration(days: 365 * 2)) : today,
+          clearable: column.clearable,
+          placeholder: 'No date',
+          onChanged: (d) {
+            if (!_saving) setState(() => _days[column.key] = d);
+          },
+        );
+      case SheetColumnKind.text:
+        return TextField(
+          controller: _texts[column.key],
+          enabled: !_saving,
+          minLines: column.multiline ? 2 : 1,
+          maxLines: column.multiline ? 6 : 1,
+          maxLength: column.key == 'raisedByName' ? 60 : 1000,
+          decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true, counterText: ''),
+          onChanged: (_) => setState(() {}),
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final row = widget.row;
+    final changed = _changes.length;
+    final anyLocked = sheetColumns.any((c) => c.key != imageSamplesColumn && !row.canEdit(c.key));
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Edit request', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text(
+              anyLocked ? '${row.id} · the columns with a lock are not yours to change.' : row.id,
+              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+            ),
+            const SizedBox(height: 16),
+            for (final column in sheetColumns) ...[
+              LvFieldLabel(column.label),
+              _field(column),
+              const SizedBox(height: 12),
+            ],
+            if (_problem.isNotEmpty) ...[
+              Text(_problem, style: const TextStyle(color: AppColors.danger, fontSize: 13)),
+              const SizedBox(height: 12),
+            ],
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _saving ? null : () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _saving || changed == 0 ? null : _save,
+                    child: Text(
+                      _saving
+                          ? 'Saving…'
+                          : changed == 0
+                              ? 'No changes'
+                              : changed == 1
+                                  ? 'Save 1 change'
+                                  : 'Save $changed changes',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A column shown but not changeable here: the value in a muted box, with a
+/// lock.
+class _LockedValue extends StatelessWidget {
+  const _LockedValue(this.text, {this.note});
+
+  final String text;
+
+  /// Where it is changed instead, when that is somewhere else.
+  final String? note;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceMuted,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    text.isEmpty ? '—' : text,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: text.isEmpty ? AppColors.textFaint : AppColors.textSecondary,
+                    ),
+                  ),
+                  if (note != null) ...[
+                    const SizedBox(height: 2),
+                    Text(note!, style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.lock_outline, size: 14, color: AppColors.textFaint),
+          ],
+        ),
+      );
 }

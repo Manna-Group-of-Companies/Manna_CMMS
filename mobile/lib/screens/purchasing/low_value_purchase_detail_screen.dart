@@ -10,7 +10,7 @@ import '../../core/toast.dart';
 import '../../data/purchasing_repository.dart';
 import '../../models/purchasing.dart';
 import '../../widgets/common.dart';
-import 'low_value_purchases_screen.dart' show ChoiceSheet;
+import 'low_value_purchases_screen.dart' show ChoiceSheet, EditPurchaseRequestSheet;
 import 'low_value_widgets.dart';
 
 /// One row of the Purchase Request Sheet, read down instead of across: every
@@ -20,7 +20,10 @@ import 'low_value_widgets.dart';
 /// A column this person may change - exactly the row's `editable`, which the
 /// server works out per person and per row - shows a pencil and opens a sheet
 /// to change it; the change is saved on its own with a `PUT` of that one
-/// column. Nothing here looks at the role.
+/// column. The pencil in the bar opens every column at once, the ones this
+/// person may not change locked, and saves what changed in one `PUT`. The bin
+/// beside it deletes the row, shown only when the row's `deletable` says so.
+/// Nothing here looks at the role.
 class LowValuePurchaseDetailScreen extends StatefulWidget {
   const LowValuePurchaseDetailScreen({super.key, required this.id});
 
@@ -80,12 +83,41 @@ class _LowValuePurchaseDetailScreenState extends State<LowValuePurchaseDetailScr
       builder: (_) => _EditColumnSheet(repo: _repo, row: row, column: column, options: _options),
     );
     if (updated == null || !mounted) return;
-    setState(() {
-      // The PUT answers with the row but not its images; keep the ones shown.
-      _row = updated.images.isEmpty ? updated.withImages(row.images) : updated;
-      _changed = true;
-    });
+    _saved(row, updated);
     Toast.success('${column.label} saved');
+  }
+
+  /// Every column at once, in one `PUT` of the ones that changed.
+  Future<void> _editAll(PurchaseRequest row) async {
+    final updated = await showModalBottomSheet<PurchaseRequest>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => EditPurchaseRequestSheet(repo: _repo, row: row, options: _options),
+    );
+    if (updated == null || !mounted) return;
+    _saved(row, updated);
+    Toast.success('Request saved');
+  }
+
+  void _saved(PurchaseRequest row, PurchaseRequest updated) => setState(() {
+        // The PUT answers with the row but not its images; keep the ones shown.
+        _row = updated.images.isEmpty ? updated.withImages(row.images) : updated;
+        _changed = true;
+      });
+
+  /// Gone from the sheet, so back to the list - which reloads without it.
+  Future<void> _delete(PurchaseRequest row) async {
+    if (!await confirmDeleteRequest(context, row) || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await _repo.delete(row.id);
+      Toast.success('Request deleted');
+      if (mounted) Navigator.of(context).pop(true);
+    } on ApiException catch (e) {
+      Toast.show(e.message, ToastType.error);
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _addImage(PurchaseRequest row) async {
@@ -155,6 +187,21 @@ class _LowValuePurchaseDetailScreenState extends State<LowValuePurchaseDetailScr
             icon: const Icon(Icons.arrow_back),
             onPressed: () => Navigator.of(context).pop(_changed),
           ),
+          actions: [
+            if (row != null && row.editable.isNotEmpty)
+              IconButton(
+                tooltip: 'Edit request',
+                icon: const Icon(Icons.edit_outlined),
+                onPressed: _busy ? null : () => _editAll(row),
+              ),
+            if (row != null && row.deletable)
+              IconButton(
+                tooltip: 'Delete request',
+                icon: const Icon(Icons.delete_outline),
+                color: AppColors.danger,
+                onPressed: _busy ? null : () => _delete(row),
+              ),
+          ],
           bottom: _busy
               ? const PreferredSize(
                   preferredSize: Size.fromHeight(2),
@@ -471,12 +518,7 @@ class _EditColumnSheet extends StatefulWidget {
 
 class _EditColumnSheetState extends State<_EditColumnSheet> {
   late final _text = TextEditingController(text: widget.row.textOf(widget.column.key));
-  late DateTime? _day = switch (widget.column.key) {
-    'date' => widget.row.date,
-    'expectedOn' => widget.row.expectedOn,
-    'receivedOn' => widget.row.receivedOn,
-    _ => null,
-  };
+  late DateTime? _day = widget.row.dayOf(widget.column.key);
   bool _saving = false;
   String _problem = '';
 
