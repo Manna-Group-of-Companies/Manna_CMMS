@@ -138,6 +138,24 @@ export const pickHsn = (list, value, company) => {
   return digits;
 };
 
+/** An HSN code as digits only: "7318.15.00" -> "73181500". */
+export const hsnDigits = (value) => String(value ?? "").replace(/\D/g, "");
+
+/**
+ * Why these digits are not an HSN code, or "" when they are one.
+ *
+ * 4, 6 or 8 digits, in a chapter that exists: 01 to 98, and not 77, which the
+ * tariff keeps empty. Checked here and in the goods receipt form alike, since
+ * a code that is not in SAP's list yet is created in SAP from what is typed
+ * (20 Oct 2026) and has no list to be checked against.
+ */
+export const hsnProblem = (digits) => {
+  if (![4, 6, 8].includes(digits.length)) return "an HSN code has 4, 6 or 8 digits";
+  const chapter = Number(digits.slice(0, 2));
+  if (chapter < 1 || chapter > 98 || chapter === 77) return `chapter ${digits.slice(0, 2)} does not exist in the HSN`;
+  return "";
+};
+
 /** SAP's Items.ItemName is 100 characters. */
 export const SAP_NAME_MAX = 100;
 
