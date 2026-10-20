@@ -23,7 +23,16 @@ const router = express.Router();
  */
 router.use(
   protect,
-  requireRole("Manager", "Maintenance Manager", "Supervisor", "Production Manager")
+  requireRole(
+    "Manager",
+    "Maintenance Manager",
+    "Supervisor",
+    "Production Manager",
+    // The roles that have the purchase screens (20 Oct 2026); the bell is empty for all.
+    "Purchase Manager",
+    "VP Operations",
+    "Higher Management"
+  )
 );
 
 router.get("/", (_req, res) => res.json([]));
