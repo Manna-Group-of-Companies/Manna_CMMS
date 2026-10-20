@@ -271,6 +271,12 @@ The sync had only ever run dry (24-25 Sep). Three things the 10 Oct clean-up pro
    next run publishes the suppliers, and the purchase manager can pick one. A PO is copied from the SAP
    purchase request, so the request must be In SAP first; SAP's refusal (a frozen vendor, a closed request
    line, a missing tax code) shows on the request, which can send it again.
+   **A PO cancelled in SAP (20 Oct):** the open PO read checks each PO a request had that is no longer
+   open; a cancelled one (`Cancelled = tYES`) comes off the request, and when all of them are cancelled the
+   request **ends** - Closed, PO status Cancelled for one made in the CMMS, the reason on the request - and
+   its SAP purchase request is closed (`PurchaseRequests(n)/Close`, only with `post_purchase_requests` and
+   not in a dry run). Run `node scripts/syncPurchasing.js` again first for the PO status value Cancelled;
+   without it the request still ends, and the log says why the PO status was left as it was.
 5. When the dry runs look right, untick **Dry Run** on *SAP Item Category Sync Control* in ERPNext. A
    receipt entered in the CMMS while Dry Run is on stays Queued and posts on the first live run - so enter
    only real ones.

@@ -43,6 +43,7 @@ const ORDER_STYLE = {
   Queued: "badge-amber",
   Posted: "badge-emerald",
   Failed: "badge-rose",
+  Cancelled: "badge-slate",
 };
 
 const STATUS_STYLE = {
@@ -319,6 +320,9 @@ const RequestCard = ({ request: r, canRetry, canBuy, busy, onRetry, onOrder, onR
           {r.status === "Failed" && r.error && (
             <p className="mt-2 text-xs text-rose-700">SAP said: {r.error}</p>
           )}
+
+          {/* Ended by the sync: every PO raised from it was cancelled in SAP. */}
+          {r.status === "Closed" && r.error && <p className="mt-2 text-xs text-slate-600">{r.error}</p>}
         </div>
 
         {((canRetry && r.status === "Failed") || (canBuy && (r.mayOrder || o?.status === "Failed"))) && (
@@ -362,7 +366,9 @@ const OrderState = ({ order: o }) => (
           ? "PO waiting for the SAP sync"
           : o.status === "Posted"
             ? `SAP PO ${o.sapDocNumber || "posted"}`
-            : "PO refused by SAP"}
+            : o.status === "Cancelled"
+              ? `SAP PO ${o.sapDocNumber} cancelled in SAP`
+              : "PO refused by SAP"}
       </span>
       <span className="text-[13px] text-slate-800">
         {o.vendorName || o.vendorCode}

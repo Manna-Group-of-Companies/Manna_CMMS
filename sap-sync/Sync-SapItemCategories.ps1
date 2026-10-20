@@ -75,6 +75,9 @@
   or Failed with SAP's reason; the open PO read below then turns the request Ordered as for a PO made in
   SAP. With it on, each company's suppliers (BusinessPartners, cSupplier, active) and purchase tax codes
   are published in item_master_options (vendors, tax_codes) for the PO form, refreshed hourly.
+  A PO cancelled in SAP (Cancelled = tYES) comes off its request on the open PO read; once every PO of a
+  request is cancelled the request ends - Closed, po_status Cancelled for one made in the CMMS, the reason
+  in error - and its SAP purchase request is closed (PurchaseRequests(n)/Close, with post_purchase_requests).
 
   Then each company's open PO lines for engineering items are read and published (open_po_lines - in a
   dry run too: they only describe SAP), and the per-company options (next codes, HSN list) refreshed.
@@ -84,7 +87,8 @@
   the PO), nil-value stock additions, revaluing nil-valued engineering stock, new engineering item
   groups, and purchase requests for engineering items; on 10 Oct 2026 goods issues of engineering spares
   used on breakdowns; on 20 Oct 2026 purchase orders for engineering purchase requests, made by the purchase
-  manager in the CMMS. Every engineering goods receipt is made from the CMMS from then on; raw materials and
+  manager in the CMMS, and closing the SAP purchase request of a CMMS request whose every PO was cancelled
+  in SAP (asked for by the user, 20 Oct 2026). Every engineering goods receipt is made from the CMMS from then on; raw materials and
   consumables stay in SAP. It only creates items in a company's engineering item groups, only PATCHes the
   fields above, only posts receipts for engineering items mirrored in the CMMS, never renames item groups.
   On 20 Oct 2026 (approved by melvinmathew@mannarubber.com, an exception to rule 3 as well): new HSN codes
@@ -248,7 +252,7 @@ try {
     $groupReqs = @(Erp-List 'CMMS SAP Item Group Request' @('name', 'company', 'group_name', 'code_prefix', 'template_group_code') '[["status","=","Queued"]]')
     $prs = @(Erp-List 'CMMS Purchase Request' @('name') '[["status","=","Queued"]]' | ForEach-Object { (Erp-Get (Res 'CMMS Purchase Request' $_.name)).data })
     # Requests already in SAP: watched for the PO the purchase manager raises from them.
-    $openPrs = @(Erp-List 'CMMS Purchase Request' @('name', 'company', 'status', 'sap_doc_entry', 'po_numbers') '[["status","in",["In SAP","Ordered"]]]')
+    $openPrs = @(Erp-List 'CMMS Purchase Request' @('name', 'company', 'status', 'sap_doc_entry', 'sap_doc_number', 'po_numbers', 'po_status', 'po_doc_entry', 'po_doc_number') '[["status","in",["In SAP","Ordered"]]]')
     # POs the purchase manager made from a request in the CMMS, with the request's lines. Read in a try: the
     # po_* fields exist only once server/scripts/syncPurchasing.js has been run.
     $orders = @()
@@ -1188,20 +1192,59 @@ try {
                 # Where each CMMS purchase request stands: Ordered once a PO is raised from it (its numbers are
                 # kept after the PO is received and closed), Closed if SAP closed it with no PO. Written in a dry
                 # run too: it only reports what SAP holds.
+                # A PO it had that is no longer open was received, closed - or cancelled in SAP, which only this
+                # read can see (PO 669, PR-2026-00323, cancelled 20 Oct 2026 and still Ordered here). A cancelled
+                # one comes off the request; when every PO it had was cancelled, the request ends (the user, 20 Oct
+                # 2026): Closed, not ordered again, and its SAP purchase request closed so it is not ordered there.
                 foreach ($pq in $w.openPrs) {
                     try {
                         $known = @("$($pq.po_numbers)" -split '\s*,\s*' | Where-Object { $_ })
                         $new = if ($pq.sap_doc_entry -and $prToPo.ContainsKey([int]$pq.sap_doc_entry)) { @($prToPo[[int]$pq.sap_doc_entry]) } else { @() }
-                        $all = @(@($known) + @($new) | Select-Object -Unique)
+                        $cancelled = @()
+                        foreach ($n in @($known | Where-Object { @($new) -notcontains $_ })) {
+                            $doc = $null
+                            if ("$n" -eq "$($pq.po_doc_number)" -and [int]("0$($pq.po_doc_entry)") -gt 0) {
+                                $pr = Invoke-Sl -Method GET -Url ("$slBase/PurchaseOrders({0})?`$select=DocEntry,DocNum,Cancelled" -f [int]$pq.po_doc_entry) -Jar $jar
+                                if ($pr.Http -eq '200') { $doc = $pr.Body | ConvertFrom-Json }
+                            } else {
+                                # DocNum repeats across numbering series, so the PO must also be based on this request.
+                                $hits = Sl-All ("PurchaseOrders?`$select=DocEntry,DocNum,Cancelled,DocumentLines&`$filter=DocNum eq {0}" -f [int]$n) $jar
+                                $doc = @($hits | Where-Object { @($_.DocumentLines | Where-Object { "$($_.BaseType)" -eq '1470000113' -and [int]("0$($_.BaseEntry)") -eq [int]$pq.sap_doc_entry }).Count }) | Select-Object -First 1
+                            }
+                            if ($doc -and "$($doc.Cancelled)" -eq 'tYES') { $cancelled += "$n" }
+                        }
+                        $all = @(@($known) + @($new) | Select-Object -Unique | Where-Object { $cancelled -notcontains $_ })
                         $status = if ($all.Count) { 'Ordered' } else { 'In SAP' }
-                        if (-not $all.Count -and $pq.sap_doc_entry) {
+                        $edit = [ordered]@{}
+                        if ($cancelled.Count -and -not $all.Count) {
+                            $status = 'Closed'
+                            $all = @($known)   # the numbers stay, for the record
+                            $edit.error = ("SAP PO {0} was cancelled in SAP - request closed {1}" -f ($cancelled -join ', '), (Now-Ist))
+                            if ("$($pq.po_status)" -eq 'Posted' -and $cancelled -contains "$($pq.po_doc_number)") { $edit.po_status = 'Cancelled' }
+                            if (-not $DryRun -and $postPrs -and $pq.sap_doc_entry) {
+                                $rr = Invoke-Sl -Method GET -Url ("$slBase/PurchaseRequests({0})?`$select=DocEntry,DocumentStatus" -f [int]$pq.sap_doc_entry) -Jar $jar
+                                if ($rr.Http -eq '200' -and "$(($rr.Body | ConvertFrom-Json).DocumentStatus)" -eq 'bost_Open') {
+                                    $cl = Invoke-Sl -Method POST -Url ("$slBase/PurchaseRequests({0})/Close" -f [int]$pq.sap_doc_entry) -Jar $jar
+                                    if ($cl.Http -eq '204' -or $cl.Http -eq '200') { Log INFO ("{0} [{1}]: SAP purchase request {2} closed" -f $pq.name, $db, $pq.sap_doc_number) }
+                                    else { Log WARN ("{0} [{1}]: SAP purchase request {2} not closed (HTTP {3}): {4} - close it in the SAP client" -f $pq.name, $db, $pq.sap_doc_number, $cl.Http, ("$($cl.Body)" -replace '\s+', ' ').Trim()) }
+                                }
+                            }
+                        } elseif (-not $all.Count -and $pq.sap_doc_entry) {
                             $rr = Invoke-Sl -Method GET -Url ("$slBase/PurchaseRequests({0})?`$select=DocEntry,DocumentStatus" -f [int]$pq.sap_doc_entry) -Jar $jar
                             if ($rr.Http -eq '200' -and "$(($rr.Body | ConvertFrom-Json).DocumentStatus)" -eq 'bost_Close') { $status = 'Closed' }
                         }
                         $joined = $all -join ', '
-                        if ($status -ne "$($pq.status)" -or $joined -ne "$($pq.po_numbers)") {
-                            $null = Erp-Send PUT (Res 'CMMS Purchase Request' $pq.name) @{ status = $status; po_numbers = $joined }
-                            Log INFO ("{0} [{1}]: {2}{3}" -f $pq.name, $db, $status, $(if ($joined) { " - PO $joined" } else { '' }))
+                        if ($status -ne "$($pq.status)" -or $joined -ne "$($pq.po_numbers)" -or $edit.Count) {
+                            $body = [ordered]@{ status = $status; po_numbers = $joined }; foreach ($k in $edit.Keys) { $body[$k] = $edit[$k] }
+                            try { $null = Erp-Send PUT (Res 'CMMS Purchase Request' $pq.name) $body }
+                            catch {
+                                # po_status "Cancelled" exists once server/scripts/syncPurchasing.js has been run again;
+                                # until then the request still ends, without it.
+                                if (-not $body.Contains('po_status')) { throw }
+                                Log WARN ("{0}: po_status Cancelled refused (run server/scripts/syncPurchasing.js?): {1}" -f $pq.name, $_.Exception.Message)
+                                $body.Remove('po_status'); $null = Erp-Send PUT (Res 'CMMS Purchase Request' $pq.name) $body
+                            }
+                            Log INFO ("{0} [{1}]: {2}{3}{4}" -f $pq.name, $db, $status, $(if ($joined) { " - PO $joined" } else { '' }), $(if ($cancelled.Count) { " (cancelled in SAP: $($cancelled -join ', '))" } else { '' }))
                         }
                     } catch { Log WARN ("{0}: purchase request status not refreshed: {1}" -f $pq.name, $_.Exception.Message) }
                 }

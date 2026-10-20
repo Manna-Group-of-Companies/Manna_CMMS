@@ -35,7 +35,8 @@ const f = (fieldname, label, fieldtype, extra = {}) => ({ fieldname, label, fiel
 const PR_FIELDS = {
   "CMMS Purchase Request": [
     f("po_section", "Purchase Order (made in the CMMS)", "Section Break", { collapsible: 1 }),
-    f("po_status", "PO Status", "Select", { options: "\nQueued\nPosted\nFailed", read_only: 1, in_list_view: 1 }),
+    // Cancelled: the PO was cancelled in SAP, and the request ended with it (20 Oct 2026).
+    f("po_status", "PO Status", "Select", { options: "\nQueued\nPosted\nFailed\nCancelled", read_only: 1, in_list_view: 1 }),
     f("po_vendor_code", "Vendor Code", "Data", { read_only: 1 }),
     f("po_vendor_name", "Vendor", "Data", { read_only: 1 }),
     f("po_date", "PO Date", "Date", { read_only: 1 }),
@@ -99,11 +100,17 @@ const syncPoFields = async () => {
       log(`  ! ${doctype} is not on this site - run sap-sync/setup-purchase-request.js first`);
       continue;
     }
-    const custom = await listDocs("Custom Field", { filters: [["dt", "=", doctype]], fields: ["fieldname"], limit: 500 });
+    const custom = await listDocs("Custom Field", { filters: [["dt", "=", doctype]], fields: ["name", "fieldname", "options"], limit: 500 });
     const present = new Set([...(meta.fields || []), ...custom].map((x) => x.fieldname));
     let after = meta.fields?.[meta.fields.length - 1]?.fieldname;
     for (const field of wanted) {
       if (present.has(field.fieldname)) {
+        // A Select that gained a value (po_status: Cancelled) is widened in place; nothing else is changed.
+        const mine = custom.find((x) => x.fieldname === field.fieldname);
+        if (mine && field.fieldtype === "Select" && (mine.options || "") !== field.options) {
+          log(`  ~ ${doctype}.${field.fieldname} options: ${JSON.stringify(mine.options || "")} -> ${JSON.stringify(field.options)}`);
+          if (!DRY) await updateDoc("Custom Field", mine.name, { options: field.options });
+        }
         after = field.fieldname;
         continue;
       }
