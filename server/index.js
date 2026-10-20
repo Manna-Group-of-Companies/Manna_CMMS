@@ -57,8 +57,7 @@ app.set("trust proxy", 1);
 // Configure CORS - allow the deployed client plus local dev servers.
 // Extra origins can be added at deploy time via CORS_ORIGINS (comma separated).
 const allowedOrigins = [
-  "https://mannagroupcmms.pages.dev", // Cloudflare Pages, the original account
-  "https://manna-cmms.pages.dev", // Cloudflare Pages, Manna Group account (deploy-client.yml)
+  "https://mannagroupcmms.pages.dev", // Cloudflare Pages (production client)
   "http://localhost:5173", // vite dev
   "http://localhost:4173", // vite preview
   ...(process.env.CORS_ORIGINS || "")
@@ -72,8 +71,8 @@ const allowedOrigins = [
 // same client against the same API, but the hostname is not known ahead of
 // time, so the project's preview subdomains are matched rather than listed.
 // Anchored, and only the label itself is a wildcard — nothing outside the
-// two projects' own domains can satisfy it.
-const PAGES_PREVIEW = /^https:\/\/[a-z0-9-]+\.(mannagroupcmms|manna-cmms)\.pages\.dev$/;
+// project's own domain can satisfy it.
+const PAGES_PREVIEW = /^https:\/\/[a-z0-9-]+\.mannagroupcmms\.pages\.dev$/;
 
 const isAllowedOrigin = (origin) =>
   allowedOrigins.includes(origin) || PAGES_PREVIEW.test(origin);
