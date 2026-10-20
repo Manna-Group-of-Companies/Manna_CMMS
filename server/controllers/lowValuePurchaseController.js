@@ -1,4 +1,5 @@
 import * as sheet from "../repository/lowValuePurchases.js";
+import { scopeFor } from "../repository/plantScope.js";
 
 /** The Purchase Request Sheet. See repository/lowValuePurchases.js. */
 
@@ -21,6 +22,7 @@ export const list = async (req, res) => {
         open: ["1", "true"].includes(String(req.query.open || "")),
         limit: Math.min(Number(req.query.limit) || 500, 1000),
         user: req.user,
+        scope: await scopeFor(req.user),
       })
     );
   } catch (error) {
@@ -29,12 +31,18 @@ export const list = async (req, res) => {
 };
 
 /** @route GET /api/low-value-purchases/options - the dropdowns */
-export const options = (req, res) => res.json(sheet.sheetOptions());
+export const options = async (req, res) => {
+  try {
+    res.json(sheet.sheetOptions(await scopeFor(req.user)));
+  } catch (error) {
+    fail(res, error, "Could not load the choices");
+  }
+};
 
 /** @route GET /api/low-value-purchases/:id */
 export const detail = async (req, res) => {
   try {
-    res.json(await sheet.getEntry(req.params.id, req.user));
+    res.json(await sheet.getEntry(req.params.id, req.user, await scopeFor(req.user)));
   } catch (error) {
     fail(res, error, "Could not load the request");
   }
@@ -43,7 +51,7 @@ export const detail = async (req, res) => {
 /** @route POST /api/low-value-purchases - a new row */
 export const add = async (req, res) => {
   try {
-    res.status(201).json(await sheet.addEntry(req.body, req.user));
+    res.status(201).json(await sheet.addEntry(req.body, req.user, await scopeFor(req.user)));
   } catch (error) {
     fail(res, error, "Could not add the request");
   }
@@ -52,7 +60,7 @@ export const add = async (req, res) => {
 /** @route PUT /api/low-value-purchases/:id - { <column>: value } for the columns being changed */
 export const edit = async (req, res) => {
   try {
-    res.json(await sheet.editEntry(req.params.id, req.body, req.user));
+    res.json(await sheet.editEntry(req.params.id, req.body, req.user, await scopeFor(req.user)));
   } catch (error) {
     fail(res, error, "Could not save the change");
   }
@@ -61,7 +69,7 @@ export const edit = async (req, res) => {
 /** @route POST /api/low-value-purchases/:id/files - an image of the item */
 export const addImage = async (req, res) => {
   try {
-    res.status(201).json(await sheet.addImage(req.params.id, req.body || {}, req.user));
+    res.status(201).json(await sheet.addImage(req.params.id, req.body || {}, req.user, await scopeFor(req.user)));
   } catch (error) {
     fail(res, error, "Could not attach the image");
   }
@@ -70,7 +78,7 @@ export const addImage = async (req, res) => {
 /** @route DELETE /api/low-value-purchases/:id/files/:fileId */
 export const removeImage = async (req, res) => {
   try {
-    res.json(await sheet.removeImage(req.params.id, req.params.fileId, req.user));
+    res.json(await sheet.removeImage(req.params.id, req.params.fileId, req.user, await scopeFor(req.user)));
   } catch (error) {
     fail(res, error, "Could not remove the image");
   }

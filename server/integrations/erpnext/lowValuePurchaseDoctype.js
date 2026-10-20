@@ -48,6 +48,25 @@ export const PURCHASE_STATUSES = [
   "Received",
   "Delivered",
 ];
+/**
+ * The sheet's company for each CMMS plant, so a plant head sees their own.
+ *
+ * The sheet names companies its own way, and one of them differently from the
+ * plant: Manna Treads' rows are "Hi-tech Pretreads" (every one of Ajith's 88
+ * rows on the sheet). Soorya Rubbers has no plant in the CMMS, so only the
+ * roles that see every company see it.
+ */
+export const PLANT_COMPANIES = {
+  "Manna Rubber Products": ["Manna Rubber Products"],
+  "Hi-Tech Rubber Industries": ["Hi-tech Rubber Industries"],
+  "Manna Treads": ["Hi-tech Pretreads"],
+  "Manna Tyre Retreads": ["Manna Tyre Retreading"],
+};
+
+/** The sheet companies a scope allows: every one, or a plant head's own (null = every one). */
+export const sheetCompaniesFor = (scope) =>
+  scope?.scoped ? [...new Set((scope.plants || []).flatMap((p) => PLANT_COMPANIES[p] || []))] : null;
+
 /** The sheet greys a row out - green, in fact - once it reaches one of these. */
 export const DONE_STATUSES = ["Received", "Delivered"];
 

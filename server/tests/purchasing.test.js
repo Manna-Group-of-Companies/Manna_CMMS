@@ -10,6 +10,7 @@ import { maySee } from "../config/access.js";
 import { cmmsRoleFor } from "../integrations/erpnext/auth.js";
 import { checkOrder as checkPo, mayOrder } from "../repository/purchaseRequests.js";
 import { checkEdit, checkNew, editableFields } from "../repository/lowValuePurchases.js";
+import { sheetCompaniesFor } from "../integrations/erpnext/lowValuePurchaseDoctype.js";
 
 const TODAY = "2026-10-20";
 const refusal = (fn, pattern) => assert.throws(fn, (e) => e.status >= 400 && pattern.test(e.message));
@@ -123,6 +124,17 @@ describe("the purchase request sheet (low value)", () => {
     assert.ok(!editableFields(row({ approval_status: "Approved" }), plantHead).includes("description"), "decided: no more edits");
     assert.deepEqual(editableFields(row(), md).sort(), ["approvalStatus", "remarks"]);
     assert.deepEqual(editableFields(row(), { email: "other@x", role: "Production Manager" }), []);
+  });
+
+  it("shows a plant head their own company only", () => {
+    assert.deepEqual(sheetCompaniesFor({ scoped: true, plants: ["Manna Treads"] }), ["Hi-tech Pretreads"]);
+    assert.deepEqual(sheetCompaniesFor({ scoped: true, plants: ["Hi-Tech Rubber Industries"] }), ["Hi-tech Rubber Industries"]);
+    assert.deepEqual(sheetCompaniesFor({ scoped: true, plants: [] }), []);
+    assert.equal(sheetCompaniesFor({ scoped: false }), null, "everyone else sees every company");
+    const own = ["Hi-tech Pretreads"];
+    assert.equal(checkNew({ company: "Hi-tech Pretreads", description: "x" }, { today: TODAY, companies: own }).company, "Hi-tech Pretreads");
+    refusal(() => checkNew({ company: "Manna Rubber Products", description: "x" }, { today: TODAY, companies: own }), /not yours/);
+    refusal(() => checkEdit(row(), { company: "Manna Rubber Products" }, plantHead, own), /not yours/);
   });
 
   it("checks each change against who is making it", () => {

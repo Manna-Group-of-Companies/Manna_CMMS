@@ -8,6 +8,7 @@ import {
   PURCHASE_STATUSES,
   REQUEST_TYPES,
   SHEET_COMPANIES,
+  sheetCompaniesFor,
 } from "../integrations/erpnext/lowValuePurchaseDoctype.js";
 import { attach, attachmentCounts, detach, listAttachments } from "./attachments.js";
 import {
@@ -21,7 +22,8 @@ import {
  * The Purchase Request Sheet (20 Oct 2026). See lowValuePurchaseDoctype.js.
  *
  * Everybody with the screen sees every company's rows - it replaces a sheet
- * they all shared - and adds rows. What each person may then change:
+ * they all shared - and adds rows; except a plant head, who sees and adds their
+ * own company's only (20 Oct 2026). What each person may then change:
  *
  *   - whoever raised a row: what they asked for, while it is still Pending;
  *   - the purchase manager and the Admin: every column;
@@ -110,7 +112,7 @@ const cleanValue = (column, value) => {
  *
  * @param body { date, type, company, raisedByName, description, purpose, links, priority }
  */
-export const checkNew = (body = {}, { fullName = "", today = erpToday() } = {}) => {
+export const checkNew = (body = {}, { fullName = "", today = erpToday(), companies = null } = {}) => {
   const fields = {
     request_date: tidy(body.date) ? cleanValue("date", body.date) : today,
     request_type: cleanValue("type", body.type || "Purchase Request"),
@@ -124,6 +126,7 @@ export const checkNew = (body = {}, { fullName = "", today = erpToday() } = {}) 
     purchase_status: "Not Ordered",
   };
   if (!fields.company) throw badRequest("Choose the company it is for.");
+  if (companies && !companies.includes(fields.company)) throw forbidden("That company is not yours to ask for.");
   if (fields.request_date > today) throw badRequest("The date cannot be in the future.");
   return fields;
 };
@@ -133,12 +136,15 @@ export const checkNew = (body = {}, { fullName = "", today = erpToday() } = {}) 
  *
  * @param body { <column>: value, ... } - only the columns being changed
  */
-export const checkEdit = (row, body = {}, user = {}) => {
+export const checkEdit = (row, body = {}, user = {}, companies = null) => {
   const allowed = editableFields(row, user);
   const edits = {};
   for (const [column, value] of Object.entries(body || {})) {
     if (!COLUMNS[column]) throw badRequest(`"${column}" is not a column of the sheet.`);
     if (!allowed.includes(column)) throw forbidden("You may not change that column on this row.");
+    if (column === "company" && companies && !companies.includes(cleanValue(column, value))) {
+      throw forbidden("That company is not yours to ask for.");
+    }
     edits[COLUMNS[column].field] = cleanValue(column, value);
   }
   if (!Object.keys(edits).length) throw badRequest("Nothing to change.");
@@ -177,18 +183,22 @@ const toRow = (row, user, files = 0) => ({
 
 /* ------------------------------------------------------------------ reads and writes */
 
-const loadRow = async (id) => {
+/** One row - and for a plant head, missing unless it is their company's. */
+const loadRow = async (id, scope) => {
   const doc = await getDoc(DOCTYPE, id).catch((error) => {
     if (error?.status === 404) return null;
     throw error;
   });
-  if (!doc) throw notFound("That request is not on the sheet");
+  const companies = sheetCompaniesFor(scope);
+  if (!doc || (companies && !companies.includes(doc.company))) throw notFound("That request is not on the sheet");
   return doc;
 };
 
 /** The sheet, newest first. Filters are optional; every company is visible. */
-export const listSheet = async ({ company = "", approval = "", purchase = "", type = "", open = false, limit = 500, user } = {}) => {
+export const listSheet = async ({ company = "", approval = "", purchase = "", type = "", open = false, limit = 500, user, scope } = {}) => {
   const filters = [];
+  const companies = sheetCompaniesFor(scope);
+  if (companies) filters.push([DOCTYPE, "company", "in", companies.length ? companies : ["__none__"]]);
   if (company) filters.push([DOCTYPE, "company", "=", company]);
   if (approval) filters.push([DOCTYPE, "approval_status", "=", approval]);
   if (purchase) filters.push([DOCTYPE, "purchase_status", "=", purchase]);
@@ -204,14 +214,17 @@ export const listSheet = async ({ company = "", approval = "", purchase = "", ty
   return rows.map((r) => toRow(r, user, counts.get(r.name) || 0));
 };
 
-export const getEntry = async (id, user) => {
-  const doc = await loadRow(id);
+export const getEntry = async (id, user, scope) => {
+  const doc = await loadRow(id, scope);
   return { ...toRow(doc, user), images: await listAttachments(DOCTYPE, id) };
 };
 
-export const addEntry = async (body, user) => {
+export const addEntry = async (body, user, scope) => {
   const profile = await getDoc("User", user?.email || "").catch(() => null);
-  const fields = checkNew(body, { fullName: profile?.full_name || profile?.first_name || "" });
+  const fields = checkNew(body, {
+    fullName: profile?.full_name || profile?.first_name || "",
+    companies: sheetCompaniesFor(scope),
+  });
   const now = erpNow();
   const created = await createDoc(DOCTYPE, {
     doctype: DOCTYPE,
@@ -221,33 +234,33 @@ export const addEntry = async (body, user) => {
     updated_by: user?.email || "",
     updated_at: now,
   });
-  return getEntry(created.name, user);
+  return getEntry(created.name, user, scope);
 };
 
-export const editEntry = async (id, body, user) => {
-  const doc = await loadRow(id);
-  const edits = checkEdit(doc, body, user);
+export const editEntry = async (id, body, user, scope) => {
+  const doc = await loadRow(id, scope);
+  const edits = checkEdit(doc, body, user, sheetCompaniesFor(scope));
   await updateDoc(DOCTYPE, id, { ...edits, updated_by: user?.email || "", updated_at: erpNow() });
-  return getEntry(id, user);
+  return getEntry(id, user, scope);
 };
 
 /** An image of the item - the sheet's "Image samples" column. Whoever may edit the row. */
-export const addImage = async (id, file, user) => {
-  const doc = await loadRow(id);
+export const addImage = async (id, file, user, scope) => {
+  const doc = await loadRow(id, scope);
   if (!editableFields(doc, user).length) throw forbidden("You may not add to this row.");
   return attach(DOCTYPE, id, file);
 };
 
-export const removeImage = async (id, fileId, user) => {
-  const doc = await loadRow(id);
+export const removeImage = async (id, fileId, user, scope) => {
+  const doc = await loadRow(id, scope);
   if (!editableFields(doc, user).length) throw forbidden("You may not change this row.");
   return detach(DOCTYPE, id, fileId);
 };
 
-/** The dropdowns, for the screens. */
-export const sheetOptions = () => ({
+/** The dropdowns, for the screens - a plant head is offered only their own company. */
+export const sheetOptions = (scope) => ({
   types: REQUEST_TYPES,
-  companies: SHEET_COMPANIES,
+  companies: sheetCompaniesFor(scope) || SHEET_COMPANIES,
   priorities: PRIORITIES,
   approvalStatuses: APPROVAL_STATUSES,
   purchaseStatuses: PURCHASE_STATUSES,
