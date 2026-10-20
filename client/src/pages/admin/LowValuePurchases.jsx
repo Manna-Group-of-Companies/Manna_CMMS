@@ -193,6 +193,9 @@ const LowValuePurchases = () => {
   const [search, setSearch] = useState("");
   // The filters fold away on a phone, where they would take the whole screen.
   const [showFilters, setShowFilters] = useState(false);
+  const [editing, setEditing] = useState(null); // { id, key }
+  const [imagesFor, setImagesFor] = useState(null); // a row
+  const [raising, setRaising] = useState(false);
   // The sheet over the whole window, menus and all hidden; Esc brings them back.
   const [fullScreen, setFullScreen] = useState(false);
 
@@ -202,9 +205,6 @@ const LowValuePurchases = () => {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [fullScreen, editing]);
-  const [editing, setEditing] = useState(null); // { id, key }
-  const [imagesFor, setImagesFor] = useState(null); // a row
-  const [raising, setRaising] = useState(false);
 
   useEffect(() => {
     API.get("/low-value-purchases/options")
