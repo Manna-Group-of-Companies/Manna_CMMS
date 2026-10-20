@@ -1,6 +1,6 @@
 import express from "express";
 
-import { list, options, detail, add, edit, addImage, removeImage } from "../controllers/lowValuePurchaseController.js";
+import { list, options, detail, add, edit, remove, addImage, removeImage } from "../controllers/lowValuePurchaseController.js";
 import { protect } from "../middleware/session.js";
 import { requireView } from "../config/access.js";
 
@@ -19,6 +19,7 @@ router.get("/options", VIEW, options);
 router.get("/:id", VIEW, detail);
 router.post("/", VIEW, add);
 router.put("/:id", VIEW, edit);
+router.delete("/:id", VIEW, remove);
 router.post("/:id/files", VIEW, addImage);
 router.delete("/:id/files/:fileId", VIEW, removeImage);
 

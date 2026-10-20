@@ -10,6 +10,7 @@ import {
   Maximize2,
   Minimize2,
   Paperclip,
+  Pencil,
   Plus,
   Printer,
   RefreshCw,
@@ -196,6 +197,8 @@ const LowValuePurchases = () => {
   const [editing, setEditing] = useState(null); // { id, key }
   const [imagesFor, setImagesFor] = useState(null); // a row
   const [raising, setRaising] = useState(false);
+  // The row open in the edit form, if any.
+  const [changing, setChanging] = useState(null);
   // The sheet over the whole window, menus and all hidden; Esc brings them back.
   const [fullScreen, setFullScreen] = useState(false);
 
@@ -267,6 +270,17 @@ const LowValuePurchases = () => {
     } catch (err) {
       patchRow(row.id, (r) => ({ ...r, ...before }));
       showToast(errorOf(err, "Could not save the change"), "error");
+    }
+  };
+
+  const removeRow = async (row) => {
+    if (!window.confirm(`Delete this request?\n\n${row.description || row.id}\n\nThis cannot be undone.`)) return;
+    try {
+      await API.delete(`/low-value-purchases/${row.id}`);
+      setRows((rs) => rs.filter((r) => r.id !== row.id));
+      showToast("Request deleted", "success");
+    } catch (err) {
+      showToast(errorOf(err, "Could not delete the request"), "error");
     }
   };
 
@@ -387,6 +401,8 @@ const LowValuePurchases = () => {
               onCancel={() => setEditing(null)}
               onSave={(key, value) => saveCell(row, key, value)}
               onImages={() => setImagesFor(row)}
+              onChange={() => setChanging(row)}
+              onDelete={() => removeRow(row)}
             />
           ))}
         </div>
@@ -429,6 +445,8 @@ const LowValuePurchases = () => {
                   onCancel={() => setEditing(null)}
                   onSave={(key, value) => saveCell(row, key, value)}
                   onImages={() => setImagesFor(row)}
+                  onChange={() => setChanging(row)}
+                  onDelete={() => removeRow(row)}
                 />
               ))}
             </tbody>
@@ -458,6 +476,19 @@ const LowValuePurchases = () => {
           row={rows.find((r) => r.id === imagesFor.id) || imagesFor}
           onClose={() => setImagesFor(null)}
           onCount={(files) => patchRow(imagesFor.id, (r) => ({ ...r, files }))}
+        />
+      )}
+
+      {changing && (
+        <EditRequest
+          row={rows.find((r) => r.id === changing.id) || changing}
+          options={opts}
+          onClose={() => setChanging(null)}
+          onDone={(row) => {
+            setChanging(null);
+            patchRow(row.id, (r) => ({ ...r, ...row }));
+            showToast("Request updated", "success");
+          }}
         />
       )}
 
@@ -493,7 +524,39 @@ const FilterSelect = ({ label, value, onChange, items }) => (
   </select>
 );
 
-const SheetRow = ({ row, striped, options, editing, onEdit, onCancel, onSave, onImages }) => {
+/** Edit and Delete for one row - each only when the server says this person may. */
+const RowActions = ({ row, onChange, onDelete, className = "" }) => {
+  const canChange = (row.editable || []).length > 0;
+  if (!canChange && !row.deletable) return null;
+  return (
+    <div className={`flex gap-1 ${className}`}>
+      {canChange && (
+        <button
+          type="button"
+          onClick={onChange}
+          className="rounded p-1 text-slate-500 hover:bg-black/10 hover:text-brand-700"
+          title="Edit this request"
+          aria-label={`Edit ${row.description || row.id}`}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {row.deletable && (
+        <button
+          type="button"
+          onClick={onDelete}
+          className="rounded p-1 text-slate-500 hover:bg-rose-100 hover:text-rose-700"
+          title="Delete this request"
+          aria-label={`Delete ${row.description || row.id}`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+};
+
+const SheetRow = ({ row, striped, options, editing, onEdit, onCancel, onSave, onImages, onChange, onDelete }) => {
   const editable = row.editable || [];
   const urgent = row.priority === "Emergency" && OPEN(row);
   // The cells take the row's ground (bg-inherit), so the sticky Date cell is
@@ -520,16 +583,21 @@ const SheetRow = ({ row, striped, options, editing, onEdit, onCancel, onSave, on
               <span className="text-[12px]">{row.files ? row.files : editable.length ? "Add" : "—"}</span>
             </button>
           ) : (
-            <Cell
-              row={row}
-              col={col}
-              items={col.from ? options[col.from] : null}
-              canEdit={editable.includes(col.key)}
-              isEditing={editing === col.key}
-              onEdit={() => onEdit(col.key)}
-              onCancel={onCancel}
-              onSave={(value) => onSave(col.key, value)}
-            />
+            <>
+              <Cell
+                row={row}
+                col={col}
+                items={col.from ? options[col.from] : null}
+                canEdit={editable.includes(col.key)}
+                isEditing={editing === col.key}
+                onEdit={() => onEdit(col.key)}
+                onCancel={onCancel}
+                onSave={(value) => onSave(col.key, value)}
+              />
+              {i === 0 && editing !== col.key && (
+                <RowActions row={row} onChange={onChange} onDelete={onDelete} className="px-1 pb-1" />
+              )}
+            </>
           )}
         </td>
       ))}
@@ -543,7 +611,7 @@ const COL = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
  * One row on a phone. The same cells as the sheet - so a tap edits a cell the
  * same way - laid out top to bottom instead of across.
  */
-const RowCard = ({ row, options, editing, onEdit, onCancel, onSave, onImages }) => {
+const RowCard = ({ row, options, editing, onEdit, onCancel, onSave, onImages, onChange, onDelete }) => {
   const [open, setOpen] = useState(false);
   const editable = row.editable || [];
   const urgent = row.priority === "Emergency" && OPEN(row);
@@ -575,9 +643,10 @@ const RowCard = ({ row, options, editing, onEdit, onCancel, onSave, onImages }) 
         <span className="font-semibold text-slate-800">{dmy(row.date)}</span>
         <span>·</span>
         <span className="truncate">{row.company}</span>
-        <span className="ml-auto flex gap-1">
+        <span className="ml-auto flex items-center gap-1">
           <Chip value={row.type} />
           <Chip value={row.priority} />
+          <RowActions row={row} onChange={onChange} onDelete={onDelete} />
         </span>
       </div>
       <div className="mt-1 text-[14px] font-semibold text-slate-900">{cell("description")}</div>
@@ -964,6 +1033,132 @@ const NewRequest = ({ options, defaultName, onClose, onDone }) => {
           <button type="submit" className="btn btn-sm btn-primary" disabled={saving}>
             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
             Add to sheet
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+/**
+ * Every column of one row in a form. The columns this person may not change
+ * are shown but locked; saving sends only what was changed, in one call.
+ */
+const EditRequest = ({ row, options, onClose, onDone }) => {
+  const editable = row.editable || [];
+  const fields = COLUMNS.filter((c) => c.kind !== "images");
+  const initial = Object.fromEntries(
+    fields.map((c) => [c.key, c.kind === "date" ? String(row[c.key] || "").slice(0, 10) : row[c.key] ?? ""])
+  );
+  const [form, setForm] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const changes = {};
+    for (const c of fields) {
+      if (!editable.includes(c.key)) continue;
+      const value = c.kind === "text" ? String(form[c.key] || "").trim() : form[c.key];
+      if (value !== (c.kind === "text" ? String(initial[c.key] || "").trim() : initial[c.key])) changes[c.key] = value;
+    }
+    if (!Object.keys(changes).length) return onClose();
+    if ("description" in changes && !changes.description) return setError("Describe what is needed.");
+    setError("");
+    setSaving(true);
+    try {
+      const { data } = await API.put(`/low-value-purchases/${row.id}`, changes);
+      onDone(asRow(data));
+    } catch (err) {
+      setSaving(false);
+      setError(errorOf(err, "Could not save the changes."));
+    }
+  };
+
+  const WIDE = ["description", "purpose", "links", "remarks"];
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="modal max-w-3xl" onClick={(e) => e.stopPropagation()} onSubmit={submit} noValidate>
+        <div className="modal-head">
+          <div className="min-w-0">
+            <h3 className="modal-title">
+              <Pencil className="h-[18px] w-[18px] shrink-0 text-brand-700" />
+              Edit request
+            </h3>
+            <p className="modal-sub truncate">
+              {row.id} · {row.company}
+            </p>
+          </div>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="modal-body grid gap-4 sm:grid-cols-2">
+          {fields.map((c) => {
+            const locked = !editable.includes(c.key);
+            return (
+              <Field key={c.key} label={c.header} wide={WIDE.includes(c.key)}>
+                {c.kind === "pick" ? (
+                  <select
+                    value={form[c.key]}
+                    onChange={set(c.key)}
+                    disabled={locked}
+                    className="field field-sm cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {!(options[c.from] || []).includes(form[c.key]) && <option value={form[c.key]}>{form[c.key] || "—"}</option>}
+                    {(options[c.from] || []).map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                ) : c.kind === "date" ? (
+                  <input
+                    type="date"
+                    value={form[c.key]}
+                    onChange={set(c.key)}
+                    disabled={locked}
+                    className="field field-sm disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                ) : WIDE.includes(c.key) ? (
+                  <textarea
+                    value={form[c.key]}
+                    onChange={set(c.key)}
+                    disabled={locked}
+                    rows={c.key === "description" ? 3 : 2}
+                    className="field field-area disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                ) : (
+                  <input
+                    value={form[c.key]}
+                    onChange={set(c.key)}
+                    disabled={locked}
+                    maxLength={60}
+                    className="field field-sm disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                )}
+              </Field>
+            );
+          })}
+          {error && (
+            <div className="note note-rose sm:col-span-2">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="modal-foot">
+          <button type="button" className="btn btn-sm btn-neutral" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-sm btn-primary" disabled={saving}>
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            Save changes
           </button>
         </div>
       </form>

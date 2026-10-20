@@ -9,7 +9,7 @@ import { describe, it } from "node:test";
 import { maySee } from "../config/access.js";
 import { cmmsRoleFor } from "../integrations/erpnext/auth.js";
 import { checkOrder as checkPo, mayOrder } from "../repository/purchaseRequests.js";
-import { checkEdit, checkNew, editableFields } from "../repository/lowValuePurchases.js";
+import { checkEdit, checkNew, editableFields, mayDelete } from "../repository/lowValuePurchases.js";
 import { sheetCompaniesFor } from "../integrations/erpnext/lowValuePurchaseDoctype.js";
 
 const TODAY = "2026-10-20";
@@ -124,6 +124,15 @@ describe("the purchase request sheet (low value)", () => {
     assert.ok(!editableFields(row({ approval_status: "Approved" }), plantHead).includes("description"), "decided: no more edits");
     assert.deepEqual(editableFields(row(), md).sort(), ["approvalStatus", "remarks"]);
     assert.deepEqual(editableFields(row(), { email: "other@x", role: "Production Manager" }), []);
+  });
+
+  it("is deleted by the purchase manager, or by whoever raised it while pending", () => {
+    assert.ok(mayDelete(row({ approval_status: "Approved" }), purchaser));
+    assert.ok(mayDelete(row({ approval_status: "Rejected" }), { email: "a@x", role: "Manager" }));
+    assert.ok(mayDelete(row(), plantHead), "their own, still pending");
+    assert.ok(!mayDelete(row({ approval_status: "Approved" }), plantHead), "decided: no longer theirs to delete");
+    assert.ok(!mayDelete(row(), md), "approving is not owning");
+    assert.ok(!mayDelete(row(), { email: "other@x", role: "Production Manager" }));
   });
 
   it("shows a plant head their own company only", () => {

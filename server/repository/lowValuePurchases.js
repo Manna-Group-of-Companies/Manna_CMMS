@@ -1,4 +1,4 @@
-import { createDoc, getDoc, listDocs, updateDoc } from "../integrations/erpnext/client.js";
+import { createDoc, deleteDoc, getDoc, listDocs, updateDoc } from "../integrations/erpnext/client.js";
 import { erpNow, erpToday } from "../integrations/erpnext/time.js";
 import {
   APPROVAL_STATUSES,
@@ -84,6 +84,17 @@ export const editableFields = (row, user = {}) => {
   if (APPROVERS.includes(user.role)) out.add("approvalStatus");
   if (mine || out.size) out.add("remarks");
   return [...out];
+};
+
+/**
+ * Whether this person may delete the row (20 Oct 2026): the purchase manager
+ * and the Admin always, as they could clear a line off the sheet; whoever
+ * raised it while it is still Pending, to take back a request made by mistake.
+ */
+export const mayDelete = (row, user = {}) => {
+  if (BUYERS.includes(user.role)) return true;
+  const mine = Boolean(user.email) && row.raised_by === user.email;
+  return mine && (row.approval_status || "Pending") === "Pending";
 };
 
 /** One column's value, checked; what to write to ERPNext. */
@@ -179,6 +190,7 @@ const toRow = (row, user, files = 0) => ({
   updatedAt: row.updated_at || row.modified || null,
   files,
   editable: editableFields(row, user),
+  deletable: mayDelete(row, user),
 });
 
 /* ------------------------------------------------------------------ reads and writes */
@@ -266,3 +278,17 @@ export const sheetOptions = (scope) => ({
   purchaseStatuses: PURCHASE_STATUSES,
   doneStatuses: DONE_STATUSES,
 });
+
+/** Takes a row off the sheet; its images go with it (ERPNext deletes a document's attachments). */
+export const deleteEntry = async (id, user, scope) => {
+  const doc = await loadRow(id, scope);
+  if (!mayDelete(doc, user)) {
+    throw forbidden(
+      doc.raised_by === user?.email
+        ? "This request has been decided, so it can no longer be deleted. Ask the purchase manager."
+        : "Only whoever raised it, or the purchase manager, may delete this request."
+    );
+  }
+  await deleteDoc(DOCTYPE, id);
+  return { deleted: id };
+};
