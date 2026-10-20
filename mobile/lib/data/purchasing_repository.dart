@@ -8,9 +8,10 @@ import '../models/purchasing.dart';
 /// only, and a screen reading it should not have to wonder whether SAP is
 /// involved. It never is.
 ///
-/// A row is changed one column at a time with a `PUT` of just that column, and
-/// the server decides whether the signed-in person may - the row's `editable`
-/// is how the screens know beforehand.
+/// A row is changed with a `PUT` of just the columns that changed - one, from
+/// a tap on it, or several from the whole-row form - and the server decides
+/// whether the signed-in person may: the row's `editable` (and `deletable`, for
+/// taking it off the sheet) is how the screens know beforehand.
 class PurchasingRepository {
   PurchasingRepository(this._api);
 
@@ -72,9 +73,20 @@ class PurchasingRepository {
         'priority': priority,
       }));
 
-  /// Changes one column. Dates go as "YYYY-MM-DD", or "" to empty one.
-  Future<PurchaseRequest> change(String id, String column, String value) async =>
-      _row(await _api.put('/low-value-purchases/$id', {column: value}));
+  /// Changes several columns in one go, keyed by [SheetColumn.key]. Dates go
+  /// as "YYYY-MM-DD", or "" to empty one. Answers with the row, without its
+  /// images.
+  Future<PurchaseRequest> update(String id, Map<String, dynamic> changes) async =>
+      _row(await _api.put('/low-value-purchases/$id', changes));
+
+  /// Changes one column - [update] with just that one.
+  Future<PurchaseRequest> change(String id, String column, String value) =>
+      update(id, {column: value});
+
+  /// Takes the row off the sheet. There is no undo.
+  Future<void> delete(String id) async {
+    await _api.delete('/low-value-purchases/$id');
+  }
 
   /// Attaches an image already read into memory. Mirrors the breakdown photo.
   Future<void> attachImage(

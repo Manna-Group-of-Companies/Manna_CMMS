@@ -1,6 +1,6 @@
 import express from "express";
 
-import { list, detail, raise, retry, vendors, order, retryOrder } from "../controllers/purchaseRequestController.js";
+import { list, detail, raise, retry, companies, vendors, order, retryOrder } from "../controllers/purchaseRequestController.js";
 import { protect, requireRole } from "../middleware/session.js";
 import { requireView } from "../config/access.js";
 
@@ -17,7 +17,8 @@ const WRITE = requireRole("Maintenance Manager", "Production Manager");
 const BUY = requireRole("Purchase Manager", "Manager");
 
 router.get("/", requireView("purchaseRequests"), list);
-// Before /:id, or "vendors" is read as a request number.
+// Before /:id, or "companies" and "vendors" are read as request numbers.
+router.get("/companies", requireView("purchaseRequests"), companies);
 router.get("/vendors", BUY, vendors);
 router.get("/:id", requireView("purchaseRequests"), detail);
 router.post("/", WRITE, raise);

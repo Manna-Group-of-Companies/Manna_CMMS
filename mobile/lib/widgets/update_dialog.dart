@@ -283,7 +283,7 @@ class _Header extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                mandatory ? 'Required update' : 'Manna CMMS',
+                mandatory ? 'Required update' : 'CMMS',
                 style: const TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 11.5,

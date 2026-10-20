@@ -11,7 +11,8 @@ import '../core/formatters.dart';
 /// Which columns of a row the signed-in person may change is the server's to
 /// say, per row, in `editable`. The screens read that and nothing else -
 /// deciding it again here from the role would drift the first time the rule
-/// changes on the server.
+/// changes on the server. Whether the row may be deleted outright is the
+/// same: `deletable`, per row.
 
 List<String> _asStrings(dynamic value) =>
     (value as List? ?? []).map((e) => asString(e)).where((e) => e.isNotEmpty).toList();
@@ -114,6 +115,7 @@ class PurchaseRequest {
     required this.updatedAt,
     required this.files,
     required this.editable,
+    this.deletable = false,
     this.images = const [],
   });
 
@@ -149,6 +151,9 @@ class PurchaseRequest {
 
   /// The columns this person may change on this row, by [SheetColumn.key].
   final Set<String> editable;
+
+  /// Whether this person may delete the row - the server's word, per row.
+  final bool deletable;
   final List<PurchaseImage> images;
 
   bool canEdit(String column) => editable.contains(column);
@@ -177,6 +182,7 @@ class PurchaseRequest {
         updatedAt: updatedAt,
         files: files,
         editable: editable,
+        deletable: deletable,
         images: images,
       );
 
@@ -203,6 +209,14 @@ class PurchaseRequest {
         'receivedOn' => receivedOn == null ? '' : formatDate(receivedOn),
         'remarks' => remarks,
         _ => '',
+      };
+
+  /// A date column's day; null for an empty one or any other column.
+  DateTime? dayOf(String column) => switch (column) {
+        'date' => date,
+        'expectedOn' => expectedOn,
+        'receivedOn' => receivedOn,
+        _ => null,
       };
 
   /// The search box: every typed column, the row number and who added it.
@@ -237,6 +251,7 @@ class PurchaseRequest {
         updatedAt: parseDate(json['updatedAt']),
         files: asInt(json['files']),
         editable: _asStrings(json['editable']).toSet(),
+        deletable: json['deletable'] == true,
         images: (json['images'] as List? ?? [])
             .whereType<Map<String, dynamic>>()
             .map(PurchaseImage.fromJson)

@@ -86,6 +86,8 @@ const PurchaseRequests = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [company, setCompany] = useState("");
+  const [sapCompanies, setSapCompanies] = useState([]);
   const [busy, setBusy] = useState("");
   const [raising, setRaising] = useState(false);
   const [ordering, setOrdering] = useState(null);
@@ -111,6 +113,14 @@ const PurchaseRequests = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Every SAP company, so the filter offers one before it has a request. If
+  // this fails, the filter still offers the companies on the list.
+  useEffect(() => {
+    API.get("/purchase-requests/companies")
+      .then(({ data }) => setSapCompanies(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
 
   // Only worth polling while the SAP server still has something to create.
   // Paused while the dialog is open, so the list does not shift under it.
@@ -147,7 +157,20 @@ const PurchaseRequests = () => {
     }
   };
 
-  const shown = useMemo(() => rows.filter((r) => !status || r.status === status), [rows, status]);
+  // Every SAP company, plus any company on the list that SAP no longer
+  // publishes, by code, named as the card names them.
+  const companies = useMemo(() => {
+    const byCode = new Map(sapCompanies.map((c) => [c.abbr, c.company || c.abbr]));
+    for (const r of rows) {
+      if (r.company && !byCode.has(r.company)) byCode.set(r.company, r.companyName || r.company);
+    }
+    return [...byCode].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [sapCompanies, rows]);
+
+  const shown = useMemo(
+    () => rows.filter((r) => (!status || r.status === status) && (!company || r.company === company)),
+    [rows, status, company]
+  );
 
   return (
     <div className="space-y-5">
@@ -165,6 +188,19 @@ const PurchaseRequests = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            className="field field-sm w-auto cursor-pointer"
+            aria-label="Filter by company"
+          >
+            <option value="">All companies</option>
+            {companies.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}

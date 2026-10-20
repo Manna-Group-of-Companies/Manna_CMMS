@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Manna CMMS</string>
+	<string>CMMS</string>
 	<!-- Allows plain-http calls to a StockMaster API on the local network
 	     during development. Drop this once the API is served over https. -->
 	<key>NSAppTransportSecurity</key>

@@ -126,7 +126,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 14),
                       const Text(
-                        'Manna CMMS',
+                        'CMMS',
                         style: TextStyle(
                           color: AppColors.textStrong,
                           fontSize: 28,

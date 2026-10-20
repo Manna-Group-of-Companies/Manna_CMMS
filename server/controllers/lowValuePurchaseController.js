@@ -83,3 +83,12 @@ export const removeImage = async (req, res) => {
     fail(res, error, "Could not remove the image");
   }
 };
+
+/** @route DELETE /api/low-value-purchases/:id */
+export const remove = async (req, res) => {
+  try {
+    res.json(await sheet.deleteEntry(req.params.id, req.user, await scopeFor(req.user)));
+  } catch (error) {
+    fail(res, error, "Could not delete the request");
+  }
+};

@@ -59,7 +59,7 @@ const AdminLayout = () => {
     ],
     [
       "/admin/low-value-purchases",
-      "Purchase Request Sheet",
+      "Miscellaneous Requests",
       "Purchase and repair requests for every company",
     ],
     ["/admin/categories", "Categories", "The category tree items are filed under"],

@@ -17,7 +17,7 @@
     <!-- usesCleartextTraffic: the dev/LAN API is served over plain http.
          Remove it once the API is reachable over https. -->
     <application
-        android:label="Manna CMMS"
+        android:label="CMMS"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">

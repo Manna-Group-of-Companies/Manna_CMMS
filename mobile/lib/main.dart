@@ -122,7 +122,7 @@ class _StockMasterAppState extends State<StockMasterApp> {
         ),
       ],
       child: MaterialApp.router(
-        title: 'Manna CMMS',
+        title: 'CMMS',
         debugShowCheckedModeBanner: false,
         theme: buildAppTheme(),
         scaffoldMessengerKey: Toast.messengerKey,

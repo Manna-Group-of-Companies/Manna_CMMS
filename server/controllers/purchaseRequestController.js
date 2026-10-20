@@ -54,6 +54,18 @@ export const raise = async (req, res) => {
   }
 };
 
+/** @route GET /api/purchase-requests/companies - the SAP companies, for the list's filter */
+export const companies = async (req, res) => {
+  try {
+    // A plant head is offered their own company only, as their list holds.
+    const scope = await scopeFor(req.user);
+    const all = await requests.companyOptions();
+    res.json(scope.companies ? all.filter((c) => scope.companies.includes(c.abbr)) : all);
+  } catch (error) {
+    fail(res, error, "Could not load the SAP companies");
+  }
+};
+
 /** @route GET /api/purchase-requests/vendors?company=HRI - the SAP suppliers, for the PO form */
 export const vendors = async (req, res) => {
   try {

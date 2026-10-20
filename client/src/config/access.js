@@ -235,7 +235,7 @@ export const NAV = [
   // board's landing off Breakdowns.
   {
     view: "lowValuePurchases",
-    label: "Low Value Purchases",
+    label: "Miscellaneous Requests",
     path: "low-value-purchases",
     icon: ReceiptIndianRupee,
   },
