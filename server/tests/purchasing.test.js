@@ -9,13 +9,7 @@ import { describe, it } from "node:test";
 import { maySee } from "../config/access.js";
 import { cmmsRoleFor } from "../integrations/erpnext/auth.js";
 import { checkOrder as checkPo, mayOrder } from "../repository/purchaseRequests.js";
-import {
-  allowedSteps,
-  checkClose,
-  checkOrder,
-  checkRaise,
-  checkReceive,
-} from "../repository/lowValuePurchases.js";
+import { checkEdit, checkNew, editableFields } from "../repository/lowValuePurchases.js";
 
 const TODAY = "2026-10-20";
 const refusal = (fn, pattern) => assert.throws(fn, (e) => e.status >= 400 && pattern.test(e.message));
@@ -90,74 +84,55 @@ describe("a PO from a purchase request", () => {
   });
 });
 
-describe("low value purchase requests", () => {
-  const raise = (extra = {}) => ({
-    plant: "Manna Treads",
-    department: "Production",
-    requiredBy: "2026-10-25",
-    purpose: "Curing press gauges",
-    lines: [{ description: "Pressure gauge", specification: "0-10 bar, 4in", qty: 2, unit: "Nos", estRate: 850 }],
-    ...extra,
-  });
-
-  it("is raised for one's own plant, with the estimate worked out", () => {
-    const fields = checkRaise(raise(), ["Manna Treads"], TODAY);
-    assert.equal(fields.status, "Requested");
-    assert.equal(fields.est_total, 1700);
-    assert.equal(fields.lines[0].est_amount, 1700);
-    refusal(() => checkRaise(raise(), ["Hi-Tech Rubber Industries"], TODAY), /not yours/);
-    assert.equal(checkRaise(raise(), null, TODAY).plant, "Manna Treads", "an unscoped manager raises for any plant");
-  });
-
-  it("refuses an incomplete request", () => {
-    refusal(() => checkRaise(raise({ plant: "" }), null, TODAY), /plant/);
-    refusal(() => checkRaise(raise({ purpose: " " }), null, TODAY), /what it is for/);
-    refusal(() => checkRaise(raise({ requiredBy: "2026-10-01" }), null, TODAY), /past/);
-    refusal(() => checkRaise(raise({ lines: [] }), null, TODAY), /at least one/);
-    refusal(() => checkRaise(raise({ lines: [{ description: "x", qty: 0, unit: "Nos" }] }), null, TODAY), /quantity/);
-    refusal(() => checkRaise(raise({ lines: [{ description: "x", qty: 1, unit: "" }] }), null, TODAY), /unit/);
-  });
-
-  const doc = (extra = {}) => ({
-    plant: "Manna Treads",
-    status: "Requested",
+describe("the purchase request sheet (low value)", () => {
+  const purchaser = { email: "shantu@x", role: "Purchase Manager" };
+  const plantHead = { email: "pm@x", role: "Production Manager" };
+  const md = { email: "md@x", role: "Higher Management" };
+  const row = (extra = {}) => ({
+    company: "Hi-tech Pretreads",
     raised_by: "pm@x",
-    lines: [{ name: "a", idx: 1, description: "Pressure gauge", qty: 2, uom: "Nos", est_rate: 850 }],
+    approval_status: "Pending",
+    purchase_status: "Not Ordered",
     ...extra,
   });
 
-  it("is bought by the purchase manager; the estimate stands where no rate is given", () => {
-    const bought = checkOrder(doc(), { vendorName: "Local Traders" }, TODAY);
-    assert.equal(bought.status, "Ordered");
-    assert.equal(bought.total, 1700);
-    assert.equal(checkOrder(doc(), { vendorName: "X", lines: [{ idx: 1, rate: 900 }] }, TODAY).total, 1800);
-    refusal(() => checkOrder(doc(), { vendorName: "" }, TODAY), /bought from/);
-    refusal(() => checkOrder(doc({ status: "Ordered" }), { vendorName: "X" }, TODAY), /only a requested one/);
-    refusal(() => checkOrder(doc({ lines: [{ idx: 1, description: "g", qty: 1, est_rate: 0 }] }), { vendorName: "X" }, TODAY), /rate paid/);
+  it("adds a row as the sheet would, pending and not ordered", () => {
+    const fields = checkNew(
+      { company: "hi-tech pretreads", description: "Weighing balance 150 kg", priority: "emergency" },
+      { fullName: "Suresh", today: TODAY }
+    );
+    assert.equal(fields.company, "Hi-tech Pretreads", "picked in the sheet's own spelling");
+    assert.equal(fields.priority, "Emergency");
+    assert.equal(fields.raised_by_name, "Suresh");
+    assert.equal(fields.request_date, TODAY);
+    assert.equal(fields.request_type, "Purchase Request");
+    assert.equal(fields.approval_status, "Pending");
+    assert.equal(fields.purchase_status, "Not Ordered");
+    refusal(() => checkNew({ description: "x" }, { today: TODAY }), /company/);
+    refusal(() => checkNew({ company: "Manna Rubber Products", description: " " }, { today: TODAY }), /what is needed/);
+    refusal(() => checkNew({ company: "Nowhere Ltd", description: "x" }, { today: TODAY }), /not one of the choices/);
+    refusal(() => checkNew({ company: "Manna Rubber Products", description: "x", date: "2026-12-01" }, { today: TODAY }), /future/);
   });
 
-  it("gives each person only their own steps", () => {
-    const buyer = { email: "shantu@x", role: "Purchase Manager" };
-    const asker = { email: "pm@x", role: "Production Manager" };
-    const otherPlantHead = { email: "pm2@x", role: "Production Manager" };
-    const own = { scoped: true, plants: ["Manna Treads"] };
-    const other = { scoped: true, plants: ["Hi-Tech Rubber Industries"] };
-
-    assert.deepEqual(allowedSteps(doc(), buyer, {}), { order: true, reject: true, withdraw: false, receive: false });
-    assert.deepEqual(allowedSteps(doc(), asker, own), { order: false, reject: false, withdraw: true, receive: false });
-    const ordered = doc({ status: "Ordered" });
-    assert.ok(allowedSteps(ordered, asker, own).receive);
-    assert.ok(allowedSteps(ordered, buyer, {}).receive);
-    assert.ok(!allowedSteps(ordered, otherPlantHead, other).receive);
-    assert.ok(!allowedSteps(ordered, { email: "vp@x", role: "VP Operations" }, {}).receive);
+  it("lets the purchase manager change every column, and others only theirs", () => {
+    assert.ok(editableFields(row(), purchaser).includes("purchaseStatus"));
+    assert.ok(editableFields(row(), purchaser).includes("approvalStatus"));
+    const asker = editableFields(row(), plantHead);
+    assert.ok(asker.includes("description") && asker.includes("remarks"));
+    assert.ok(!asker.includes("approvalStatus") && !asker.includes("purchaseStatus"));
+    assert.ok(!editableFields(row({ approval_status: "Approved" }), plantHead).includes("description"), "decided: no more edits");
+    assert.deepEqual(editableFields(row(), md).sort(), ["approvalStatus", "remarks"]);
+    assert.deepEqual(editableFields(row(), { email: "other@x", role: "Production Manager" }), []);
   });
 
-  it("is received, rejected or withdrawn from the right state", () => {
-    assert.equal(checkReceive(doc({ status: "Ordered" }), { billNo: "B-12" }, TODAY).status, "Received");
-    refusal(() => checkReceive(doc(), {}, TODAY), /only an ordered one/);
-    refusal(() => checkReceive(doc({ status: "Ordered" }), { billDate: "2026-12-01" }, TODAY), /future/);
-    assert.equal(checkClose(doc(), "Rejected", { reason: "Buy it through SAP" }).status, "Rejected");
-    refusal(() => checkClose(doc(), "Withdrawn", { reason: "" }), /Say why/);
-    refusal(() => checkClose(doc({ status: "Ordered" }), "Withdrawn", { reason: "x" }), /no longer/);
+  it("checks each change against who is making it", () => {
+    assert.deepEqual(checkEdit(row(), { approvalStatus: "pending md approval" }, md), { approval_status: "Pending MD Approval" });
+    refusal(() => checkEdit(row(), { purchaseStatus: "Order Placed" }, md), /may not change/);
+    refusal(() => checkEdit(row(), { purchaseStatus: "Shipped" }, purchaser), /not one of the choices/);
+    refusal(() => checkEdit(row(), { colour: "red" }, purchaser), /not a column/);
+    refusal(() => checkEdit(row(), {}, purchaser), /Nothing to change/);
+    const received = checkEdit(row(), { purchaseStatus: "Received" }, purchaser);
+    assert.ok(received.received_on, "marking it received fills the received date");
+    assert.equal(checkEdit(row(), { expectedOn: "" }, purchaser).expected_on, null);
   });
 });

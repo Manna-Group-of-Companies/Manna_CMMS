@@ -109,10 +109,11 @@ export const VIEWS = {
   purchaseRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, PURCHASE_MANAGER],
 
   /**
-   * Low value purchase requests (20 Oct 2026): small buys made locally, kept in
-   * ERPNext and never posted to SAP. Every manager and the plant heads raise
-   * them, on the phone too; the purchase manager buys them. A plant head sees
-   * their own plant's - routes/lowValuePurchaseRoutes.js.
+   * Low value purchase requests (20 Oct 2026): the Purchase Request Sheet that
+   * was a Google Sheet - small buys and repairs made locally, kept in ERPNext
+   * and never posted to SAP. Every manager and the plant heads add rows, on the
+   * phone too, and all of them see every company's, as they did on the sheet;
+   * the purchase manager keeps it up to date - routes/lowValuePurchaseRoutes.js.
    */
   lowValuePurchases: [
     MANAGER,
