@@ -35,6 +35,11 @@ export const VP_OPERATIONS = "VP Operations";
  * asset register. A member clocks in; they do not browse the catalog.
  */
 export const MAINTENANCE_MEMBER = "Maintenance Member";
+/**
+ * The purchase manager (Shantu, 20 Oct 2026). Not in `ROLES` either: they
+ * buy, and have no use for the catalog or the asset register.
+ */
+export const PURCHASE_MANAGER = "Purchase Manager";
 
 export const ROLES = [
   MANAGER,
@@ -101,7 +106,23 @@ export const VIEWS = {
    * against the one SAP company. Raising one is maintenance's and the plant
    * heads' (14 Oct 2026); the Admin reads - routes/purchaseRequestRoutes.js.
    */
-  purchaseRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER],
+  purchaseRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, PURCHASE_MANAGER],
+
+  /**
+   * Low value purchase requests (20 Oct 2026): the Purchase Request Sheet that
+   * was a Google Sheet - small buys and repairs made locally, kept in ERPNext
+   * and never posted to SAP. Every manager and the plant heads add rows, on the
+   * phone too, and all of them see every company's, as they did on the sheet;
+   * the purchase manager keeps it up to date - routes/lowValuePurchaseRoutes.js.
+   */
+  lowValuePurchases: [
+    MANAGER,
+    MAINTENANCE_MANAGER,
+    PRODUCTION_MANAGER,
+    VP_OPERATIONS,
+    HIGHER_MANAGEMENT,
+    PURCHASE_MANAGER,
+  ],
 
   /**
    * The item-naming queue.
@@ -205,6 +226,7 @@ export const VIEWS = {
 // attendance released 12 Oct 2026: it is the whole of what a Maintenance Member has, so it ships with them.
 // purchaseRequests released 14 Oct 2026, so the Admin can follow the purchase queue.
 // engineeringStock and goodsReceipts released 14 Oct 2026: the plant heads run their own store.
+// lowValuePurchases released 20 Oct 2026, with the purchase manager's view.
 export const RELEASED = new Set([
   "breakdowns",
   "maintenanceRequests",
@@ -212,6 +234,7 @@ export const RELEASED = new Set([
   "purchaseRequests",
   "engineeringStock",
   "goodsReceipts",
+  "lowValuePurchases",
 ]);
 
 

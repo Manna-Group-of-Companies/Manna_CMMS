@@ -67,6 +67,15 @@
   BaseType 1470000113) and the CMMS request goes Ordered with the PO number - or Closed if SAP closed the
   request with no PO.
 
+  PASS G - PURCHASE ORDERS (post_purchase_orders, 20 Oct 2026). Every "CMMS Purchase Request" whose
+  po_status is Queued - a PO the purchase manager made in the CMMS: a SAP Purchase Order (PurchaseOrders)
+  for the vendor, PO date and delivery date given, each ordered line copied from the SAP purchase request
+  (BaseType 1470000113 / BaseEntry / BaseLine) with its quantity, unit price and tax code (SAP's default
+  when none), Reference2 = "PO<yy>-<n>" so a re-run adopts it. po_status goes Posted with the PO number,
+  or Failed with SAP's reason; the open PO read below then turns the request Ordered as for a PO made in
+  SAP. With it on, each company's suppliers (BusinessPartners, cSupplier, active) and purchase tax codes
+  are published in item_master_options (vendors, tax_codes) for the PO form, refreshed hourly.
+
   Then each company's open PO lines for engineering items are read and published (open_po_lines - in a
   dry run too: they only describe SAP), and the per-company options (next codes, HSN list) refreshed.
 
@@ -74,7 +83,8 @@
   + editing engineering items (25 Sep 2026), and on 9 Oct 2026 engineering goods receipts (GRPO against
   the PO), nil-value stock additions, revaluing nil-valued engineering stock, new engineering item
   groups, and purchase requests for engineering items; on 10 Oct 2026 goods issues of engineering spares
-  used on breakdowns. Every engineering goods receipt is made from the CMMS from then on; raw materials and
+  used on breakdowns; on 20 Oct 2026 purchase orders for engineering purchase requests, made by the purchase
+  manager in the CMMS. Every engineering goods receipt is made from the CMMS from then on; raw materials and
   consumables stay in SAP. It only creates items in a company's engineering item groups, only PATCHes the
   fields above, only posts receipts for engineering items mirrored in the CMMS, never renames item groups.
   On 20 Oct 2026 (approved by melvinmathew@mannarubber.com, an exception to rule 3 as well): new HSN codes
@@ -168,6 +178,8 @@ try {
     $postIssues = Cfg-On 'post_issues'
     $createHsn = Cfg-On 'create_hsn'
     $markGst = Cfg-On 'mark_gst_relevant'
+    # The purchase manager's POs from purchase requests (20 Oct 2026), and the supplier / tax code lists for them.
+    $postPos = Cfg-On 'post_purchase_orders'
     # Fetch from SAP: the engineering item groups' items (new ones, SAP-side changes) and their on-hand
     # quantity into the CMMS. Writes ERPNext only - SAP is read.
     $pullFromSap = Cfg-On 'pull_from_sap'
@@ -237,6 +249,12 @@ try {
     $prs = @(Erp-List 'CMMS Purchase Request' @('name') '[["status","=","Queued"]]' | ForEach-Object { (Erp-Get (Res 'CMMS Purchase Request' $_.name)).data })
     # Requests already in SAP: watched for the PO the purchase manager raises from them.
     $openPrs = @(Erp-List 'CMMS Purchase Request' @('name', 'company', 'status', 'sap_doc_entry', 'po_numbers') '[["status","in",["In SAP","Ordered"]]]')
+    # POs the purchase manager made from a request in the CMMS, with the request's lines. Read in a try: the
+    # po_* fields exist only once server/scripts/syncPurchasing.js has been run.
+    $orders = @()
+    try { $orders = @(Erp-List 'CMMS Purchase Request' @('name') '[["po_status","=","Queued"]]' | ForEach-Object { (Erp-Get (Res 'CMMS Purchase Request' $_.name)).data }) }
+    catch { if ($postPos) { Log WARN ("purchase orders not read (run server/scripts/syncPurchasing.js?): {0}" -f $_.Exception.Message) } }
+    if (-not $postPos -and $orders.Count) { Log INFO ("{0} purchase order(s) left Queued - posting them is off (post_purchase_orders)." -f $orders.Count); $orders = @() }
     if (-not $postPrs -and $prs.Count) { Log INFO ("{0} purchase request(s) left Queued - posting them is off (post_purchase_requests)." -f $prs.Count); $prs = @() }
     # Spares issued to breakdowns, with their lines. Read in a try: the doctype exists only once
     # setup-goods-issue.js has been applied, and its absence must not stop the rest of the run.
@@ -278,7 +296,7 @@ try {
     $poSnapshot = [ordered]@{}
     $groupsChanged = $false
     $today = (Get-Date).ToString('yyyy-MM-dd')
-    $result['receipts'] = 0; $result['groups'] = 0; $result['prs'] = 0; $result['fetched'] = 0; $result['issues'] = 0; $result['hsn'] = 0
+    $result['receipts'] = 0; $result['groups'] = 0; $result['prs'] = 0; $result['fetched'] = 0; $result['issues'] = 0; $result['pos'] = 0
 
     # ------------------------------------------------------------------ SAP (curl.exe, BRIEFING §2)
     $slBase = "$($cfg.sap.url)".TrimEnd('/')
@@ -328,7 +346,7 @@ try {
     function Work-For([string] $Abbr) {
         $o = $options.$Abbr
         if (-not $o) { return $null }
-        if (-not $work.ContainsKey($o.sap_db)) { $work[$o.sap_db] = @{ abbr = $Abbr; opt = $o; creates = New-Object System.Collections.ArrayList; edits = New-Object System.Collections.ArrayList; receipts = New-Object System.Collections.ArrayList; groups = New-Object System.Collections.ArrayList; prs = New-Object System.Collections.ArrayList; openPrs = New-Object System.Collections.ArrayList; issues = New-Object System.Collections.ArrayList; hsnReqs = New-Object System.Collections.ArrayList } }
+        if (-not $work.ContainsKey($o.sap_db)) { $work[$o.sap_db] = @{ abbr = $Abbr; opt = $o; creates = New-Object System.Collections.ArrayList; edits = New-Object System.Collections.ArrayList; receipts = New-Object System.Collections.ArrayList; groups = New-Object System.Collections.ArrayList; prs = New-Object System.Collections.ArrayList; openPrs = New-Object System.Collections.ArrayList; issues = New-Object System.Collections.ArrayList; orders = New-Object System.Collections.ArrayList } }
         $work[$o.sap_db]
     }
     # Every company, for its open PO lines.
@@ -344,10 +362,10 @@ try {
         [void]$w.prs.Add($pq)
     }
     foreach ($pq in $openPrs) { $w = Work-For "$($pq.company)"; if ($w) { [void]$w.openPrs.Add($pq) } }
-    foreach ($hq in $hsnQueued) {
-        $w = Work-For "$($hq.company)"
-        if (-not $w) { $result.failures++; Log ERROR ("{0}: unknown SAP company '{1}'" -f $hq.name, $hq.company); continue }
-        [void]$w.hsnReqs.Add($hq)
+    foreach ($po in $orders) {
+        $w = Work-For "$($po.company)"
+        if (-not $w) { $result.failures++; Log ERROR ("{0}: unknown SAP company '{1}'" -f $po.name, $po.company); continue }
+        [void]$w.orders.Add($po)
     }
     foreach ($rc in $receipts) {
         $w = Work-For "$($rc.company)"
@@ -382,7 +400,7 @@ try {
             $lg = Invoke-Sl -Method POST -Url "$slBase/Login" -Body $login -Jar $jar -SaveCookies
             $login = $null
             if ($lg.Http -ne '200') { Sl-Fail $lg "login to $db" }
-            Log INFO ("SAP login OK: {0} ({1} to create, {2} to edit, {3} receipt(s), {4} spares issue(s), {5} new group(s), {6} purchase request(s))" -f $db, $w.creates.Count, $w.edits.Count, $w.receipts.Count, $w.issues.Count, $w.groups.Count, $w.prs.Count)
+            Log INFO ("SAP login OK: {0} ({1} to create, {2} to edit, {3} receipt(s), {4} spares issue(s), {5} new group(s), {6} purchase request(s), {7} purchase order(s))" -f $db, $w.creates.Count, $w.edits.Count, $w.receipts.Count, $w.issues.Count, $w.groups.Count, $w.prs.Count, $w.orders.Count)
 
             # This company's HSN list: digits -> AbsEntry (ChapterID). Only read when HSN is written.
             $hsn = @{}; $hsnList = New-Object System.Collections.ArrayList
@@ -952,6 +970,66 @@ try {
                 $result.items += [pscustomobject]$entry
             }
 
+            # ---------------- PASS G: purchase orders made in the CMMS (post_purchase_orders)
+            # One SAP Purchase Order per request, every line based on the SAP purchase request's line for the same
+            # item, so SAP links the two and closes the request's lines as they are ordered. Reference2 =
+            # "PO<yy>-<n>" makes a re-run adopt a PO posted before a failure to record it.
+            foreach ($po in $w.orders) {
+                $entry = [ordered]@{ kind = 'purchase order'; request = "$($po.name)"; sap_db = $db; action = ''; sap_doc = ''; error = '' }
+                try {
+                    if (-not $po.sap_doc_entry) { throw 'the request is not in SAP yet' }
+                    if (-not "$($po.po_vendor_code)".Trim()) { throw 'no vendor' }
+                    $ordered = @(@($po.lines) | Where-Object { [double]$_.po_qty -gt 0 })
+                    if (-not $ordered.Count) { throw 'no line is ordered' }
+                    $m = [regex]::Match("$($po.name)", '\d{2}(\d{2})-(\d+)$')
+                    $stamp = if ($m.Success) { 'PO{0}-{1}' -f $m.Groups[1].Value, $m.Groups[2].Value } else { "PO-$($po.name)" }
+                    $found = Sl-All ("PurchaseOrders?`$select=DocEntry,DocNum&`$filter=Reference2 eq '{0}'" -f $stamp) $jar
+                    $poEntry = $null; $poNum = ''
+                    if ($found.Count -gt 0) { $poEntry = [int]$found[0].DocEntry; $poNum = "$($found[0].DocNum)"; $entry.action = 'adopted (already in SAP)' }
+                    else {
+                        # The request's own lines, for BaseLine: matched by item, which is unique on a request.
+                        $rq = Invoke-Sl -Method GET -Url ("$slBase/PurchaseRequests({0})?`$select=DocEntry,DocumentStatus,DocumentLines" -f [int]$po.sap_doc_entry) -Jar $jar
+                        if ($rq.Http -ne '200') { Sl-Fail $rq 'read the purchase request' }
+                        $rqDoc = $rq.Body | ConvertFrom-Json
+                        if ("$($rqDoc.DocumentStatus)" -eq 'bost_Close') { throw 'SAP has closed the purchase request' }
+                        $baseOf = @{}; foreach ($bl in @($rqDoc.DocumentLines)) { $baseOf["$($bl.ItemCode)".Trim()] = $bl }
+                        $comments = ("CMMS {0} PO by {1}{2}" -f $po.name, $po.po_raised_by, $(if ((Norm $po.po_remarks)) { ': ' + (Norm $po.po_remarks) } else { '' }))
+                        if ($comments.Length -gt 254) { $comments = $comments.Substring(0, 254) }
+                        $payload = [ordered]@{
+                            CardCode = "$($po.po_vendor_code)".Trim(); DocDate = "$($po.po_date)"; TaxDate = "$($po.po_date)"; DocDueDate = "$($po.po_due_date)"
+                            Reference2 = $stamp; Comments = $comments
+                            DocumentLines = @(foreach ($l in $ordered) {
+                                $bl = $baseOf["$($l.sap_item_code)".Trim()]
+                                if (-not $bl) { throw ("{0} is not on SAP purchase request {1}" -f $l.sap_item_code, $po.sap_doc_number) }
+                                if ("$($bl.LineStatus)" -eq 'bost_Close') { throw ("{0}'s line on SAP purchase request {1} is already closed" -f $l.sap_item_code, $po.sap_doc_number) }
+                                $ln = [ordered]@{ BaseType = 1470000113; BaseEntry = [int]$po.sap_doc_entry; BaseLine = [int]$bl.LineNum; Quantity = [double]$l.po_qty; UnitPrice = [double]$l.po_price }
+                                if ((Norm $l.po_tax_code)) { $ln.TaxCode = (Norm $l.po_tax_code) }
+                                $ln
+                            })
+                        }
+                        if ($DryRun) { $entry.action = 'would post PurchaseOrders'; $entry.payload = $payload }
+                        else {
+                            $pr = Invoke-Sl -Method POST -Url "$slBase/PurchaseOrders" -Body ($payload | ConvertTo-Json -Compress -Depth 6) -Jar $jar
+                            if ($pr.Http -ne '201' -and $pr.Http -ne '200') { Sl-Fail $pr 'post PurchaseOrders' }
+                            $doc = $pr.Body | ConvertFrom-Json
+                            $poEntry = [int]$doc.DocEntry; $poNum = "$($doc.DocNum)"
+                            $entry.action = 'posted PurchaseOrders'; $result.changed++
+                        }
+                    }
+                    if ($poEntry) {
+                        $entry.sap_doc = $poNum
+                        $null = Erp-Send PUT (Res 'CMMS Purchase Request' $po.name) @{ po_status = 'Posted'; po_doc_entry = $poEntry; po_doc_number = $poNum; po_error = '' }
+                        $result['pos']++
+                    }
+                    Log INFO ("{0} [{1}]: {2} {3}{4}" -f $po.name, $db, $entry.action, $entry.sap_doc, $(if ($DryRun -and $entry.Contains('payload')) { ' ' + ($entry.payload | ConvertTo-Json -Compress -Depth 6) } else { '' }))
+                } catch {
+                    $entry.action = 'failed'; $entry.error = $_.Exception.Message; $result.failures++
+                    Log ERROR ("{0} [{1}] PO: {2}" -f $po.name, $db, $entry.error)
+                    if (-not $DryRun) { try { $null = Erp-Send PUT (Res 'CMMS Purchase Request' $po.name) @{ po_status = 'Failed'; po_error = $entry.error.Substring(0, [Math]::Min(500, $entry.error.Length)) } } catch { Log WARN "could not record the failure on $($po.name): $($_.Exception.Message)" } }
+                }
+                $result.items += [pscustomobject]$entry
+            }
+
             # ---------------- PASS E: fetch from SAP (pull_from_sap) - the engineering item groups only
             # Items in this company's engineering groups: one SAP has that the CMMS lacks is created in ERPNext
             # (e.g. ENG-437..439, made in SAP on 30 Sep); a SAP-side change to name, groups, HSN, tax, minimum or
@@ -1129,6 +1207,31 @@ try {
                 }
             } catch { Log WARN ("{0}: open PO lines not refreshed: {1}" -f $db, $_.Exception.Message) }
 
+            # ---------------- suppliers and purchase tax codes, for the CMMS PO form (post_purchase_orders)
+            # Hourly, or at once when there are POs to make: a supplier added in SAP this morning should be
+            # pickable this morning, but reading every business partner on every run is wasted work.
+            if ($postPos) {
+                try {
+                    $stale = $true
+                    if ($opt.PSObject.Properties['vendors_refreshed_at'] -and "$($opt.vendors_refreshed_at)") {
+                        try { $stale = ((Get-Date) - [datetime]::ParseExact("$($opt.vendors_refreshed_at)", 'yyyy-MM-dd HH:mm:ss', $null)).TotalMinutes -ge 60 } catch { $stale = $true }
+                    }
+                    if ($stale -or $w.orders.Count) {
+                        $vend = @((Sl-All "BusinessPartners?`$select=CardCode,CardName&`$filter=CardType eq 'cSupplier' and Valid eq 'tYES' and Frozen eq 'tNO'&`$orderby=CardName" $jar) |
+                            ForEach-Object { [ordered]@{ code = "$($_.CardCode)"; name = (Norm $_.CardName) } })
+                        $taxes = @()
+                        try { $taxes = @((Sl-All "SalesTaxCodes?`$select=Code,Name,Rate,Inactive" $jar) | Where-Object { "$($_.Inactive)" -ne 'tYES' } |
+                            ForEach-Object { [ordered]@{ code = "$($_.Code)"; name = (Norm $_.Name); rate = [double]("0$($_.Rate)") } }) }
+                        catch { Log WARN ("{0}: tax codes not read, the PO form offers SAP's default only: {1}" -f $db, $_.Exception.Message) }
+                        $opt | Add-Member -NotePropertyName vendors -NotePropertyValue $vend -Force
+                        $opt | Add-Member -NotePropertyName tax_codes -NotePropertyValue $taxes -Force
+                        $opt | Add-Member -NotePropertyName vendors_refreshed_at -NotePropertyValue (Now-Ist) -Force
+                        $optionsChanged = $true
+                        Log INFO ("{0}: {1} supplier(s), {2} tax code(s) published for the PO form" -f $db, $vend.Count, $taxes.Count)
+                    }
+                } catch { Log WARN ("{0}: suppliers not refreshed: {1}" -f $db, $_.Exception.Message) }
+            }
+
             # ---------------- options for this company, fresh from SAP
             foreach ($p in @($opt.groups | ForEach-Object { "$($_.prefix)" } | Where-Object { $_ } | Select-Object -Unique)) {
                 if (-not $nextFor.ContainsKey($p)) {
@@ -1173,11 +1276,10 @@ try {
     $wouldG = @($result.items | Where-Object { $_.kind -eq 'group' -and $_.action -eq 'would create' }).Count
     $wouldQ = @($result.items | Where-Object { $_.kind -eq 'purchase request' -and $_.action -like 'would post*' }).Count
     $wouldI = @($result.items | Where-Object { $_.kind -eq 'issue' -and $_.action -like 'would post*' }).Count
-    $wouldH = @($result.items | Where-Object { $_.kind -eq 'hsn' -and $_.action -eq 'would create' }).Count
-    $held   = @($result.items | Where-Object { $_.kind -eq 'receipt' -and $_.action -eq 'held' }).Count
+    $wouldO = @($result.items | Where-Object { $_.kind -eq 'purchase order' -and $_.action -like 'would post*' }).Count
     $same   = @($result.items | Where-Object { $_.action -like 'already in SAP*' }).Count
-    $result.summary = if ($DryRun) { "DRY RUN: $wouldC item(s) would be created, $wouldP would change, $wouldR receipt(s) would post, $wouldG item group(s) would be created, $wouldQ purchase request(s) would post, $wouldI spares issue(s) would post, $wouldH HSN code(s) would be created, $held receipt(s) held for HSN, $($result['fetched']) change(s) would be fetched from SAP, $same already match, $($result.failures) failed." }
-                      else { "$($result.created) item(s) created in SAP, $($result.changed - $result.created - $result['receipts'] - $result['groups'] - $result['prs'] - $result['issues']) updated, $($result['receipts']) receipt(s) posted, $($result['groups']) item group(s) created, $($result['prs']) purchase request(s) posted, $($result['issues']) spares issue(s) posted, $($result['hsn']) HSN code(s) created, $held receipt(s) held for HSN, $($result['fetched']) change(s) fetched from SAP, $same already matched, $($result.failures) failed." }
+    $result.summary = if ($DryRun) { "DRY RUN: $wouldC item(s) would be created, $wouldP would change, $wouldR receipt(s) would post, $wouldG item group(s) would be created, $wouldQ purchase request(s) would post, $wouldO purchase order(s) would post, $wouldI spares issue(s) would post, $($result['fetched']) change(s) would be fetched from SAP, $same already match, $($result.failures) failed." }
+                      else { "$($result.created) item(s) created in SAP, $($result.changed - $result.created - $result['receipts'] - $result['groups'] - $result['prs'] - $result['issues'] - $result['pos']) updated, $($result['receipts']) receipt(s) posted, $($result['groups']) item group(s) created, $($result['prs']) purchase request(s) posted, $($result['pos']) purchase order(s) posted, $($result['issues']) spares issue(s) posted, $($result['fetched']) change(s) fetched from SAP, $same already matched, $($result.failures) failed." }
     Log INFO $result.summary
     if ($result.failures -gt 0) { $result.exitCode = 1 }
 } catch {

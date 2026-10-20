@@ -6,27 +6,21 @@ import { useNotifications } from "../context/NotificationContext";
 import { announceSapSyncDone } from "../hooks/useSapSync";
 import { LastSyncLine } from "./SapLastSync";
 
-/**
- * "Sync with SAP" (9 Oct 2026). One press raises the flag on the SAP item master
- * sync; the flag watcher on the SAP server starts a run within seconds, which
- * pushes everything waiting (new items, edits, receipts, purchase requests) and
- * fetches the engineering items and their stock from SAP. Nothing syncs on a
- * timer - this, or saving something that goes to SAP, is what starts a run.
- *
- * In the top bar since 13 Oct 2026, beside the time of the last finished run,
- * and only on the screens SAP is behind - see `SAP_SYNC_PATHS` in AdminLayout.
- * There is one sync for the whole system, so a button per SAP screen was four
- * buttons for one job; and on a screen SAP is not behind, a run that touches
- * nothing on it reads as a sync that did not work.
- *
- * Polls the status every 3 s while a run is Queued or Running, then says how it
- * went and announces it, so whichever list is underneath can reload itself.
- *
- * The button is the Maintenance Manager's, matching the server's guard on
- * POST /products/category-sync. Everyone else keeps the time: knowing how old
- * the figures are is not the same as being able to refresh them.
- */
 const BUSY = ["Queued", "Running"];
+
+/** Seconds left until `cooldownUntil` (an IST datetime string from ERPNext). */
+const secondsLeft = (cooldownUntil) => {
+  if (!cooldownUntil) return 0;
+  const end = new Date(String(cooldownUntil).replace(" ", "T"));
+  if (Number.isNaN(end.getTime())) return 0;
+  return Math.max(0, Math.ceil((end - Date.now()) / 1000));
+};
+
+const formatCountdown = (secs) => {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+};
 
 const SapSyncButton = () => {
   const { user } = useAuth();
@@ -34,6 +28,7 @@ const SapSyncButton = () => {
   const [status, setStatus] = useState(null);
   const [asking, setAsking] = useState(false);
   const wasBusy = useRef(false);
+  const [cooldown, setCooldown] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -66,6 +61,23 @@ const SapSyncButton = () => {
     return () => clearInterval(timer);
   }, [busy, load, showToast, status?.status, status?.lastResult]);
 
+  // Cooldown countdown — ticks every second while time remains.
+  useEffect(() => {
+    const remaining = secondsLeft(status?.cooldownUntil);
+    setCooldown(remaining);
+    if (remaining <= 0) return undefined;
+    const timer = setInterval(() => {
+      setCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [status?.cooldownUntil]);
+
   const ask = async () => {
     setAsking(true);
     try {
@@ -88,19 +100,18 @@ const SapSyncButton = () => {
         .join("\n")
     : "Sync with SAP";
 
-  // Nothing to show at all until the first status lands - an empty bar beats a
-  // button that might turn out to be the wrong one for this person.
   if (!status) return null;
+
+  const onCooldown = cooldown > 0;
+  const disabled = asking || busy || onCooldown;
 
   return (
     <div className="flex items-center gap-2.5 min-w-0">
-      {/* The bar is 64px and the title already owns the left of it, so the time
-          waits for a screen wide enough to carry both. */}
       <LastSyncLine status={status} className="hidden md:block text-right leading-tight" />
       {[MAINTENANCE_MANAGER, PRODUCTION_MANAGER, MANAGER].includes(user?.role) && (
         <button
           onClick={ask}
-          disabled={asking || busy}
+          disabled={disabled}
           className="btn btn-sm btn-neutral shrink-0"
           title={title}
         >
@@ -109,10 +120,20 @@ const SapSyncButton = () => {
           ) : (
             <RefreshCw className="h-4 w-4" />
           )}
-          {/* Below sm the icon carries it; the label would push the bell off. */}
           <span className="hidden sm:inline">
-            {busy ? (status.status === "Queued" ? "Waiting for SAP…" : "Syncing…") : "Sync with SAP"}
+            {busy
+              ? status.status === "Queued" ? "Waiting for SAP…" : "Syncing…"
+              : onCooldown
+                ? formatCountdown(cooldown)
+                : "Sync with SAP"}
           </span>
+          {/* On narrow screens the icon alone carries the button, so show the
+              countdown as a small overlay beside it. */}
+          {onCooldown && (
+            <span className="sm:hidden text-[10px] font-bold tabular-nums">
+              {formatCountdown(cooldown)}
+            </span>
+          )}
         </button>
       )}
     </div>

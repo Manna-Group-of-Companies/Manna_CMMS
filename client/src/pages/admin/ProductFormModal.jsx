@@ -7,6 +7,7 @@ import TaxonomySelect, {
   useSubCategoryBOptions,
 } from "../../components/TaxonomySelect";
 import CategorySyncNote from "../../components/CategorySyncNote";
+import ItemNameBuilder, { EMPTY_NAMING, isNamingBlank } from "../../components/ItemNameBuilder";
 import { useFormDraft, describeWhen } from "../../hooks/useFormDraft";
 
 /**
@@ -73,6 +74,8 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
   const [loadError, setLoadError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [problem, setProblem] = useState("");
+  const [naming, setNaming] = useState(EMPTY_NAMING);
+  const [showBuilder, setShowBuilder] = useState(true);
 
   // The half-finished add form survives a close; an edit never restores a draft.
   const draft = useFormDraft("add-engineering-stock-sap", { enabled: !isEdit, isWorthKeeping });
@@ -203,6 +206,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
           unit: form.unit,
           proposedName: form.name.trim(),
           openingQty,
+          ...(isNamingBlank(naming) ? {} : { naming }),
         });
         finished.current = true;
         clearDraft();
@@ -327,6 +331,28 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                   <span className="text-slate-500">The item code follows the company's SAP numbering once the group is chosen.</span>
                 )}
               </div>
+
+              {/* --- SOP name builder (add only) --- */}
+              {!isEdit && (
+                <>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowBuilder((v) => !v)}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer"
+                    >
+                      {showBuilder ? "Hide" : "Show"} standard name builder (SOI1/SOP1)
+                    </button>
+                  </div>
+                  {showBuilder && (
+                    <ItemNameBuilder
+                      value={naming}
+                      onChange={setNaming}
+                      onApply={(name) => set("name", name)}
+                    />
+                  )}
+                </>
+              )}
 
               {/* --- description --- */}
               <div className="space-y-2">

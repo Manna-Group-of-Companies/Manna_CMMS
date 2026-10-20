@@ -257,7 +257,7 @@ const BREAKDOWN = doc({
     select(
       "workflow_state",
       "Status",
-      ["Reported", "Under Repair", "Repaired", "Closed", "Cancelled"],
+      ["Reported", "Attended", "Under Repair", "Repaired", "Closed", "Cancelled"],
       { default: "Reported", read_only: 1, in_list_view: 1 }
     ),
 
@@ -329,6 +329,11 @@ const BREAKDOWN = doc({
      * to separate them.
      */
     f("repair_started_at", "Repair Started At", "Datetime", { read_only: 1 }),
+
+    // Maintenance has seen it, before any work (20 Oct 2026). Added to the live
+    // site by scripts/syncAttended.js.
+    link("attended_by", "Attended By", "User", { read_only: 1 }),
+    f("attended_at", "Attended At", "Datetime", { read_only: 1 }),
 
     // --- stage 4: repaired ---
     f("actions_performed", "Actions Performed", "Small Text"),

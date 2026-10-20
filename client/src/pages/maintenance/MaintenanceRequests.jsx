@@ -33,6 +33,7 @@ import { useNotifications } from "../../context/NotificationContext";
 
 const STATE_STYLE = {
   Requested: "badge-amber",
+  Attended: "badge-orange",
   "In Progress": "badge-cyan",
   Completed: "badge-emerald",
   Closed: "badge-slate",
@@ -71,7 +72,8 @@ const TYPES = [
  * tick-list.
  */
 const NEXT_LABEL = {
-  Requested: "Start work",
+  Requested: "Attend",
+  Attended: "Start work",
   "In Progress": "Mark complete",
   Completed: "Close it",
 };

@@ -35,6 +35,7 @@ import { useNotifications } from "../../context/NotificationContext";
 
 const STATE_STYLE = {
   Requested: "badge-amber",
+  Attended: "badge-orange",
   "In Progress": "badge-cyan",
   Completed: "badge-emerald",
   Closed: "badge-slate",
@@ -48,7 +49,8 @@ const PRIORITY_STYLE = {
 };
 
 /** Four stops, against a breakdown's five. */
-const JOURNEY = ["Requested", "In Progress", "Completed", "Closed"];
+// "Attended" (20 Oct 2026): maintenance has seen it, before taking it on.
+const JOURNEY = ["Requested", "Attended", "In Progress", "Completed", "Closed"];
 
 const WORKER_ROLES = ["Fitter", "Electrician", "Welder", "Helper", "Supervisor", "Contractor"];
 
@@ -249,7 +251,7 @@ const Header = ({ record, onClose, onLogSheet }) => (
           printed at the request stage is one that gets filled in from memory
           days later.
         */}
-        {record.state !== "Requested" && (
+        {!["Requested", "Attended"].includes(record.state) && (
           <button className="btn btn-sm btn-neutral" onClick={onLogSheet}>
             <Printer className="h-4 w-4" />
             Work sheet
@@ -278,6 +280,7 @@ const Rail = ({ record, reached }) => {
 
   const at = {
     Requested: record.requestedAt,
+    Attended: record.attendedAt,
     "In Progress": record.startedAt,
     Completed: record.completedAt,
     Closed: record.closedAt,
@@ -556,7 +559,7 @@ const TurnDown = ({ record, stages, user, onDone }) => {
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
 
-  if (record.state !== "Requested" || !user) return null;
+  if (!["Requested", "Attended"].includes(record.state) || !user) return null;
 
   const mine = user.email === record.requestedBy;
   const action = mine ? "Withdraw" : "Reject";
@@ -847,6 +850,13 @@ const Report = ({ record }) => {
         <KV label="What is needed" value={record.whatIsNeeded} wide />
         <KV label="Why" value={record.whyNeeded} wide />
       </Block>
+
+      {record.attendedAt && (
+        <Block title="Attended">
+          <KV label="Attended by" value={record.attendedBy} />
+          <KV label="Attended at" value={when(record.attendedAt)} />
+        </Block>
+      )}
 
       {reached("In Progress") && record.state !== "Cancelled" && (
         <Block title="Taken on">

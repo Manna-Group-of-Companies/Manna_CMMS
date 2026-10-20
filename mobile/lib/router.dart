@@ -14,12 +14,15 @@ import 'screens/maintenance/breakdowns_screen.dart';
 import 'screens/maintenance/request_detail_screen.dart';
 import 'screens/maintenance/requests_screen.dart';
 import 'screens/no_access_screen.dart';
+import 'screens/purchasing/low_value_purchase_detail_screen.dart';
+import 'screens/purchasing/low_value_purchases_screen.dart';
 import 'screens/supervisor/settings_screen.dart';
 import 'state/auth_provider.dart';
 import 'widgets/common.dart';
 
-/// This app is Breakdowns, Maintenance Requests and - since 12 Oct 2026 - the
-/// maintenance team's Attendance, and nothing else.
+/// This app is Breakdowns, Maintenance Requests, - since 12 Oct 2026 - the
+/// maintenance team's Attendance and - since 20 Oct 2026 - Low Value Purchase
+/// Requests, and nothing else.
 ///
 /// It was the Supervisor and Branch stock-tracking portals - the catalog, red
 /// stock, issue history, a branch's own room. Every one of those screens is
@@ -29,7 +32,8 @@ import 'widgets/common.dart';
 /// to them any more.
 ///
 /// Who sees which screen mirrors `VIEWS.breakdowns` /
-/// `VIEWS.maintenanceRequests` / `VIEWS.attendance` in
+/// `VIEWS.maintenanceRequests` / `VIEWS.attendance` /
+/// `VIEWS.lowValuePurchases` in
 /// `server/config/access.js` - the same matrix the web console enforces. Kept
 /// as a literal copy here rather than fetched, the same way the web client
 /// mirrors its own copy in `client/src/config/access.js`: change one, remember
@@ -49,6 +53,23 @@ const _requestRoles = {
   'Supervisor',
 };
 
+/// Low value purchase requests: every manager and the plant heads raise them,
+/// and the purchase manager buys them. The business asked for it on the
+/// managers' phones in particular, so this is the one screen VP Operations and
+/// the purchase manager have here - which is why they now land on it rather
+/// than on the no-access page.
+///
+/// Who may order, receive, reject or withdraw a given request is not decided
+/// by role here; the record's `may` says so, per person.
+const _lowValueRoles = {
+  'Manager',
+  'Maintenance Manager',
+  'Production Manager',
+  'VP Operations',
+  'Higher Management',
+  'Purchase Manager',
+};
+
 /// Attendance and leave, brought across from the field-sales app.
 ///
 /// A Maintenance Member - a fitter or electrician - punches in and out,
@@ -65,6 +86,7 @@ const _attendanceApproverRoles = {'Maintenance Manager', 'Manager'};
 bool canSeeBreakdowns(String role) => _breakdownRoles.contains(role);
 bool canSeeRequests(String role) => _requestRoles.contains(role);
 bool canSeeAttendance(String role) => _attendanceRoles.contains(role);
+bool canSeeLowValuePurchases(String role) => _lowValueRoles.contains(role);
 bool canApproveAttendance(String role) => _attendanceApproverRoles.contains(role);
 bool isMaintenanceMember(String role) => role == 'Maintenance Member';
 
@@ -72,15 +94,22 @@ bool isMaintenanceMember(String role) => role == 'Maintenance Member';
 /// moves none of them on from it: Start Repair, Machine Running, rejecting and
 /// the rest are recorded on the computer only. Their detail screens offer no
 /// step, no withdraw and no reject - only the record and what is due next.
+///
+/// Not applied to low value purchases, which they raise and receive like any
+/// other manager.
 bool isViewOnly(String role) => role == 'Maintenance Manager';
 
 /// Whether this role has anything to do in the app at all.
 bool worksInMaintenance(String role) =>
-    canSeeBreakdowns(role) || canSeeRequests(role) || canSeeAttendance(role);
+    canSeeBreakdowns(role) ||
+    canSeeRequests(role) ||
+    canSeeAttendance(role) ||
+    canSeeLowValuePurchases(role);
 
 const breakdownsHome = '/maintenance/breakdowns';
 const requestsHome = '/maintenance/requests';
 const attendanceHome = '/attendance';
+const lowValueHome = '/purchases/low-value';
 const noAccessHome = '/no-access';
 
 /// The root navigator, so a dialog that belongs to the app rather than to any
@@ -92,11 +121,15 @@ final rootNavigatorKey = GlobalKey<NavigatorState>();
 /// on, or the no-access page when they are on none.
 ///
 /// A team member's whole app is Attendance, so that is where they land; every
-/// manager lands on Breakdowns, which is the work they open the app for.
+/// manager lands on Breakdowns, which is the work they open the app for. Low
+/// value purchases come after the maintenance screens, so they are home only
+/// for the roles that have nothing else here - VP Operations and the purchase
+/// manager.
 String homePathFor(String role) {
   if (isMaintenanceMember(role)) return attendanceHome;
   if (canSeeBreakdowns(role)) return breakdownsHome;
   if (canSeeRequests(role)) return requestsHome;
+  if (canSeeLowValuePurchases(role)) return lowValueHome;
   if (canSeeAttendance(role)) return attendanceHome;
   return noAccessHome;
 }
@@ -123,6 +156,12 @@ GoRouter buildRouter(AuthProvider auth) {
       GoRoute(
         path: '/maintenance/requests/:id',
         builder: (_, state) => RequestDetailScreen(id: state.pathParameters['id'] ?? ''),
+      ),
+      GoRoute(path: lowValueHome, builder: (_, _) => const LowValuePurchasesScreen()),
+      GoRoute(
+        path: '$lowValueHome/:id',
+        builder: (_, state) =>
+            LowValuePurchaseDetailScreen(id: state.pathParameters['id'] ?? ''),
       ),
       // Profile details and sign-out.
       GoRoute(path: '/maintenance/settings', builder: (_, _) => const SettingsScreen()),
@@ -179,6 +218,7 @@ GoRouter buildRouter(AuthProvider auth) {
       // URL — the same thing `requireView` does on the server.
       if (path.startsWith('/maintenance/breakdowns') && !canSeeBreakdowns(user.role)) return home;
       if (path.startsWith('/maintenance/requests') && !canSeeRequests(user.role)) return home;
+      if (path.startsWith(lowValueHome) && !canSeeLowValuePurchases(user.role)) return home;
       if (path == '/maintenance/settings' && !worksInMaintenance(user.role)) return home;
 
       // Attendance: the screen is the matrix's; within it, applying for leave

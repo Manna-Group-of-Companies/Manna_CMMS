@@ -15,9 +15,9 @@ const kUserPrefsKey = 'user';
 /// Shown when an account carries the retired `Admin` role.
 ///
 /// Nothing issues that role now - ERPNext accounts map to Manager, Maintenance
-/// Manager, Supervisor, Production Manager, Higher Management or VP Operations -
-/// so this only catches a session cached by a much older build. The Manager and
-/// the Maintenance Manager are served by this app: they get the maintenance
+/// Manager, Supervisor, Production Manager, Higher Management, VP Operations,
+/// Purchase Manager or Maintenance Member - so this only catches a session
+/// cached by a much older build. The Manager and the Maintenance Manager are served by this app: they get the maintenance
 /// screens, the same two the web console shows them.
 const kAdminNotSupported =
     'Admin accounts use the web console. Sign in with a supervisor or branch account.';

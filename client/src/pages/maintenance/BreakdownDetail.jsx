@@ -37,6 +37,7 @@ import { useAuth } from "../../context/AuthContext";
 
 const STATE_STYLE = {
   Reported: "badge-rose",
+  Attended: "badge-orange",
   "Under Repair": "badge-amber",
   Repaired: "badge-emerald",
   Closed: "badge-slate",
@@ -57,7 +58,10 @@ const PRIORITY_STYLE = {
  * somebody walks to the machine, so a reported breakdown goes straight to work
  * and everything is written down once it is running again.
  */
-const JOURNEY = ["Reported", "Under Repair", "Repaired", "Closed"];
+//
+// "Attended" (20 Oct 2026): maintenance marks that it has seen the report
+// before work starts, so whoever reported it is not left wondering.
+const JOURNEY = ["Reported", "Attended", "Under Repair", "Repaired", "Closed"];
 
 const FAILURE_MODES = [
   "Mechanical",
@@ -301,6 +305,7 @@ const Rail = ({ record, reached }) => {
 
   const at = {
     Reported: record.stoppedAt,
+    Attended: record.attendedAt,
     "Under Repair": record.repairStartedAt,
     Repaired: record.completedAt,
     Closed: record.closedAt,
@@ -373,7 +378,7 @@ const CancelReport = ({ record, stages, user, onDone }) => {
 
   const stage = stages?.Cancel;
   if (!user || !stage) return null;
-  if (record.state !== stage.from) return null;
+  if (![stage.from, ...(stage.fromStates || [])].includes(record.state)) return null;
   if (!(stage.allowedRoles || []).includes(user.role)) return null;
 
   const submit = async () => {
@@ -693,7 +698,7 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
           />
         )}
 
-        {stage.fields.length === 0 && (
+        {stage.fields.length === 0 && stage.to === "Closed" && (
           <p className="text-sm text-slate-500">
             Nothing to fill in. What maintenance recorded is below.
           </p>
@@ -1259,6 +1264,13 @@ const Report = ({ record, user, onChanged }) => {
         <KV label="Reported by" value={record.reportedBy} />
         <KV label="What happened" value={record.whatHappened} wide />
       </Block>
+
+      {record.attendedAt && (
+        <Block title="Attended">
+          <KV label="Attended by" value={record.attendedBy} />
+          <KV label="Attended at" value={when(record.attendedAt)} />
+        </Block>
+      )}
 
       {reached("Repaired") && (
         <Block title="The repair">

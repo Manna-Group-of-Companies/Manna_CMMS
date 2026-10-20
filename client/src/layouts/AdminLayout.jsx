@@ -57,6 +57,11 @@ const AdminLayout = () => {
       "Purchase Requests",
       "Requests sent to SAP, and the purchase orders raised from them",
     ],
+    [
+      "/admin/low-value-purchases",
+      "Purchase Request Sheet",
+      "Purchase and repair requests for every company",
+    ],
     ["/admin/categories", "Categories", "The category tree items are filed under"],
     [
       "/admin/low-stock",
@@ -99,6 +104,10 @@ const AdminLayout = () => {
   ];
   const onSapScreen = SAP_SYNC_PATHS.some((path) => location.pathname.startsWith(path));
 
+  // The Purchase Request Sheet is a spreadsheet: it gets the whole width,
+  // where every other screen is capped to keep its tables readable.
+  const fullWidth = location.pathname.startsWith("/admin/low-value-purchases");
+
   return (
     <div className="min-h-screen bg-canvas flex">
       {/* Sidebar Navigation */}
@@ -115,7 +124,7 @@ const AdminLayout = () => {
         <main className="flex-1 overflow-y-auto bg-canvas">
           {/* Capped so the tables do not stretch to the full width of a very
               wide monitor, which leaves the eye travelling across empty cells. */}
-          <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">
+          <div className={fullWidth ? "w-full p-2 sm:p-3" : "mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8"}>
             <Outlet />
           </div>
         </main>

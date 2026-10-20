@@ -15,6 +15,7 @@ void main() {
       'Supervisor': true,
       'VP Operations': false,
       'Maintenance Member': false,
+      'Purchase Manager': false,
     };
     const expectRequests = {
       'Manager': true,
@@ -24,6 +25,7 @@ void main() {
       'Supervisor': true,
       'VP Operations': false,
       'Maintenance Member': false,
+      'Purchase Manager': false,
     };
     const expectAttendance = {
       'Manager': false,
@@ -33,14 +35,36 @@ void main() {
       'Supervisor': false,
       'VP Operations': false,
       'Maintenance Member': true,
+      'Purchase Manager': false,
     };
+    // VIEWS.lowValuePurchases: every manager and the plant heads, and the buyer.
+    const expectLowValue = {
+      'Manager': true,
+      'Maintenance Manager': true,
+      'Higher Management': true,
+      'Production Manager': true,
+      'Supervisor': false,
+      'VP Operations': true,
+      'Maintenance Member': false,
+      'Purchase Manager': true,
+    };
+    expectLowValue.forEach(
+        (role, want) => expect(canSeeLowValuePurchases(role), want, reason: role));
     expectBreakdowns.forEach((role, want) => expect(canSeeBreakdowns(role), want, reason: role));
     expectRequests.forEach((role, want) => expect(canSeeRequests(role), want, reason: role));
     expectAttendance.forEach((role, want) => expect(canSeeAttendance(role), want, reason: role));
   });
 
-  test('VP Operations - on neither screen - goes to no-access, not the store', () {
-    expect(homePathFor('VP Operations'), noAccessHome);
+  test('VP Operations and the purchase manager land on low value purchases, their one screen', () {
+    for (final role in ['VP Operations', 'Purchase Manager']) {
+      expect(homePathFor(role), lowValueHome, reason: role);
+      expect(worksInMaintenance(role), isTrue, reason: role);
+    }
+  });
+
+  test('a role on no screen at all still goes to no-access', () {
+    expect(homePathFor('Store Keeper'), noAccessHome);
+    expect(worksInMaintenance('Store Keeper'), isFalse);
   });
 
   test('Higher Management sees Breakdowns only, so that is home', () {
