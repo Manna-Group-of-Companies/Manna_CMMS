@@ -160,6 +160,7 @@ The Single starts with **`dry_run = 1`**: the sync reads SAP and reports what it
 | `revalue_nil_stock` | revalue nil-valued stock to the GR price first | off |
 | `post_purchase_requests` | SAP Purchase Requests from the CMMS | off |
 | `post_issues` | SAP Goods Issues (+ ERPNext Material Issues) for spares used on breakdowns | off |
+| `post_purchase_orders` | SAP Purchase Orders the purchase manager makes from purchase requests in the CMMS; publishes each company's suppliers and tax codes for the PO form | off |
 | `pull_from_sap` | fetch engineering items and their stock from SAP (writes ERPNext only) | off |
 | `pr_requester` | SAP user code the requests are raised under | the SAP login |
 | `skip_companies` | company databases left out (no SAP login; their CMMS work stays Queued), e.g. `["MANNA_TYRE_LIVE"]` while its password is sorted out - SAP locks a user after 3 wrong passwords, and the watcher would retry on every flag | `[]` |
@@ -237,6 +238,11 @@ The sync had only ever run dry (24-25 Sep). Three things the 10 Oct clean-up pro
    Goods Issue that would take the warehouse below zero, and may refuse one for an item with no cost (stock
    added with no bill) unless the company allows stock release without item cost - the reason shows on the
    breakdown, which can send it again.
+   **Purchase orders from the CMMS (20 Oct):** first `node scripts/syncPurchasing.js --dry-run` then without
+   it, in `server/` (the PO fields, the purchase manager's role); then `"post_purchase_orders": true`. The
+   next run publishes the suppliers, and the purchase manager can pick one. A PO is copied from the SAP
+   purchase request, so the request must be In SAP first; SAP's refusal (a frozen vendor, a closed request
+   line, a missing tax code) shows on the request, which can send it again.
 5. When the dry runs look right, untick **Dry Run** on *SAP Item Category Sync Control* in ERPNext. A
    receipt entered in the CMMS while Dry Run is on stays Queued and posts on the first live run - so enter
    only real ones.

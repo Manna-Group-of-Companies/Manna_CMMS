@@ -12,6 +12,7 @@ import {
   HardHat,
   KeyRound,
   PackageOpen,
+  ReceiptIndianRupee,
   ShoppingCart,
   TrendingDown,
   Wrench,
@@ -45,6 +46,12 @@ export const VP_OPERATIONS = "VP Operations";
  * the no-access page. Not in `ROLES`, which is handed whole to the catalog.
  */
 export const MAINTENANCE_MEMBER = "Maintenance Member";
+/**
+ * The purchase manager (Shantu, 20 Oct 2026). Works in the shared console but
+ * is not in `ROLES` either: they buy, and have no use for the catalog or the
+ * asset register.
+ */
+export const PURCHASE_MANAGER = "Purchase Manager";
 
 export const ROLES = [
   MANAGER,
@@ -89,7 +96,21 @@ export const VIEWS = {
    * queue; it was part of Engineering Stock, which this release keeps to the
    * Maintenance Manager. Raising one stays the Maintenance Manager's.
    */
-  purchaseRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER],
+  purchaseRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, PURCHASE_MANAGER],
+
+  /**
+   * Low value purchase requests (20 Oct 2026): small buys made locally, kept in
+   * ERPNext and never posted to SAP. Every manager and the plant heads raise
+   * them; the purchase manager buys them.
+   */
+  lowValuePurchases: [
+    MANAGER,
+    MAINTENANCE_MANAGER,
+    PRODUCTION_MANAGER,
+    VP_OPERATIONS,
+    HIGHER_MANAGEMENT,
+    PURCHASE_MANAGER,
+  ],
   // itemNaming (the "New Items" page, /requests) removed 10 Oct 2026: it was the VP Operations'
   // approval queue for new items, and since 9 Oct 2026 items go straight to SAP with no approval.
   // The server keeps its entry, which still guards the /naming-requests read API.
@@ -153,12 +174,14 @@ export const VIEWS = {
 // 29 Sep, and its approval step removed on 10 Oct 2026.
 // purchaseRequests released 14 Oct 2026, so the Admin can follow the purchase queue.
 // engineeringStock and goodsReceipts released 14 Oct 2026: the plant heads run their own store.
+// lowValuePurchases released 20 Oct 2026, with the purchase manager's view.
 export const RELEASED = new Set([
   "breakdowns",
   "maintenanceRequests",
   "purchaseRequests",
   "engineeringStock",
   "goodsReceipts",
+  "lowValuePurchases",
 ]);
 
 
@@ -206,6 +229,15 @@ export const NAV = [
     label: "Maintenance Requests",
     path: "maintenance-requests",
     icon: Hammer,
+  },
+  // After the maintenance screens rather than beside Purchase Requests: the
+  // first entry is where a role lands, and placed earlier this would move the
+  // board's landing off Breakdowns.
+  {
+    view: "lowValuePurchases",
+    label: "Low Value Purchases",
+    path: "low-value-purchases",
+    icon: ReceiptIndianRupee,
   },
   { view: "preventive", label: "Preventive Maintenance", path: "preventive", icon: CalendarCheck },
   { view: "assets", label: "Asset Management", path: "assets", icon: Factory },

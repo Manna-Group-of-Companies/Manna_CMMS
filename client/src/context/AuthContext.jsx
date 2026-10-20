@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import API from "../services/api";
-import { ROLES, SUPERVISOR } from "../config/access.js";
+import { PURCHASE_MANAGER, ROLES, SUPERVISOR } from "../config/access.js";
 
 const AuthContext = createContext(null);
 
@@ -20,6 +20,7 @@ export {
   PRODUCTION_MANAGER,
   HIGHER_MANAGEMENT,
   VP_OPERATIONS,
+  PURCHASE_MANAGER,
   ROLES,
   VIEWS,
   maySee,
@@ -28,8 +29,15 @@ export {
   homePathFor,
 } from "../config/access.js";
 
-/** True when this role works in the shared console at /admin. */
-export const canSeeAdminConsole = (role) => ROLES.includes(role) && role !== SUPERVISOR;
+/**
+ * True when this role works in the shared console at /admin.
+ *
+ * The purchase manager is named on its own because it is not in `ROLES`; left
+ * out, AdminLayout bounced them to their home, which is in this console, and
+ * the page never settled.
+ */
+export const canSeeAdminConsole = (role) =>
+  (ROLES.includes(role) || role === PURCHASE_MANAGER) && role !== SUPERVISOR;
 
 /** True when this role works in the store console at /supervisor. */
 export const canSeeSupervisorConsole = (role) => role === SUPERVISOR;

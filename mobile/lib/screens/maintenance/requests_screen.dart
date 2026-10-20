@@ -65,7 +65,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
   @override
   Widget build(BuildContext context) {
     final open = _rows.where((r) => r.isOpen).length;
-    final waiting = _rows.where((r) => r.state == 'Requested').length;
+    final waiting = _rows.where((r) => r.state == 'Requested' || r.state == 'Attended').length;
 
     /// Who may raise one — the plant's own job, not maintenance's. Mirrors
     /// the server's guard on POST /maintenance-requests.

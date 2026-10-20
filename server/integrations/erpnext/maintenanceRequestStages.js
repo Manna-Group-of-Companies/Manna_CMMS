@@ -36,6 +36,22 @@ const now = () => erpNow();
  */
 export const REQUEST_STAGES = {
   /**
+   * Maintenance has seen it (20 Oct 2026), before taking the job on, so the
+   * person who asked knows it is not sitting unread.
+   */
+  Attend: {
+    allowedRoles: ["Manager", "Maintenance Manager"],
+    from: "Requested",
+    to: "Attended",
+    title: "Attend to it",
+    blurb: "Tell whoever asked that maintenance has seen it.",
+    fields: [],
+    required: [],
+    labels: {},
+    stamp: (user) => ({ attended_by: user?.email || "", attended_at: now() }),
+  },
+
+  /**
    * Maintenance takes the job on.
    *
    * Nothing is required beyond the moment work began — a planned job is
@@ -48,7 +64,7 @@ export const REQUEST_STAGES = {
    */
   "Start Work": {
     allowedRoles: ["Manager", "Maintenance Manager"],
-    from: "Requested",
+    from: "Attended",
     to: "In Progress",
     title: "Take the job on",
     blurb: "",
@@ -155,6 +171,7 @@ export const REQUEST_STAGES = {
   Reject: {
     allowedRoles: ["Manager", "Maintenance Manager"],
     from: "Requested",
+    alsoFrom: ["Attended"],
     to: "Cancelled",
     title: "Turn the request down",
     blurb: "",
@@ -169,6 +186,7 @@ export const REQUEST_STAGES = {
     allowedRoles: ["Manager", "Maintenance Manager", "Supervisor", "Production Manager"],
     requesterOnly: true,
     from: "Requested",
+    alsoFrom: ["Attended"],
     to: "Cancelled",
     title: "Withdraw the request",
     blurb: "",
@@ -180,6 +198,9 @@ export const REQUEST_STAGES = {
 };
 
 /** The action that moves a request on from the state it is in. */
+/** Every state a step may be taken from: `from`, and its `alsoFrom`. */
+export const requestFromStatesOf = (stage) => [stage.from, ...(stage.alsoFrom || [])];
+
 export const nextRequestActionFor = (state) =>
   Object.entries(REQUEST_STAGES).find(
     ([action, s]) => s.from === state && !["Reject", "Withdraw"].includes(action)
@@ -234,6 +255,7 @@ export const describeRequestStages = () =>
       action,
       {
         from: s.from,
+        fromStates: requestFromStatesOf(s),
         to: s.to,
         title: s.title,
         blurb: s.blurb,

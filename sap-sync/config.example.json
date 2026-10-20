@@ -20,6 +20,7 @@
   "revalue_nil_stock": false,
   "post_purchase_requests": false,
   "post_issues": false,
+  "post_purchase_orders": false,
   "pull_from_sap": false,
   "pr_requester": "",
   "skip_companies": []

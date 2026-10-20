@@ -71,7 +71,7 @@ class _BreakdownsScreenState extends State<BreakdownsScreen> {
   @override
   Widget build(BuildContext context) {
     final open = _rows.where((r) => r.isOpen).length;
-    final notStarted = _rows.where((r) => r.state == 'Reported').length;
+    final notStarted = _rows.where((r) => r.state == 'Reported' || r.state == 'Attended').length;
     final downtime = _rows.where((r) => r.isDown).fold<double>(
           0,
           (sum, r) => sum + r.stoppedForHours,

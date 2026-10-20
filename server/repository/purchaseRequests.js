@@ -25,13 +25,22 @@ import { itemMasterOptions, raiseSapFlag } from "./sapCategories.js";
  *
  * Like the rest of the item master, this server never talks to SAP: it writes
  * a "CMMS Purchase Request" in ERPNext and raises the flag.
+ *
+ * Since 20 Oct 2026 the purchase manager can make the PO here instead of in
+ * SAP: vendor, dates and a price per line, written on the request as an order
+ * (po_status Queued). The sync posts it as a SAP Purchase Order copied from the
+ * SAP purchase request, so SAP links the two, and the request goes Ordered as
+ * it does for a PO made in SAP.
+ *
+ *   order: (none) -> Queued -> Posted (SAP PO no.), or Failed (SAP's reason)
  */
 
 const DOCTYPE = "CMMS Purchase Request";
 const LINE = "CMMS Purchase Request Line";
 
-const FIELDS = ["name", "company", "status", "required_by", "reason", "raised_by", "raised_at", "sap_doc_entry", "sap_doc_number", "po_numbers", "posted_at", "error", "modified"];
-const LINE_FIELDS = ["parent", "idx", "item", "item_name", "sap_item_code", "qty", "uom", "remarks"];
+const FIELDS = ["name", "company", "status", "required_by", "reason", "raised_by", "raised_at", "sap_doc_entry", "sap_doc_number", "po_numbers", "posted_at", "error", "modified",
+  "po_status", "po_vendor_code", "po_vendor_name", "po_date", "po_due_date", "po_remarks", "po_raised_by", "po_raised_at", "po_doc_entry", "po_doc_number", "po_error"];
+const LINE_FIELDS = ["parent", "idx", "item", "item_name", "sap_item_code", "qty", "uom", "remarks", "po_qty", "po_price", "po_tax_code"];
 
 const tidy = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
 const badRequest = (message) => Object.assign(new Error(message), { status: 400 });
@@ -41,6 +50,9 @@ const notFound = (message) => Object.assign(new Error(message), { status: 404 })
 const REASON_MAX = 250;
 /** SAP's line FreeText is 100. */
 const REMARKS_MAX = 100;
+/** The PO's remarks go to SAP's Comments with the request number, which hold 254. */
+const PO_REMARKS_MAX = 200;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 const toLine = (row) => ({
   itemCode: row.item,
@@ -49,7 +61,37 @@ const toLine = (row) => ({
   qty: Number(row.qty || 0),
   unit: row.uom || "",
   remarks: row.remarks || "",
+  orderQty: Number(row.po_qty || 0),
+  price: Number(row.po_price || 0),
+  taxCode: row.po_tax_code || "",
 });
+
+/** The purchase order made from it in the app, or null. */
+const toOrder = (row, lines) => {
+  if (!row.po_status) return null;
+  const value = lines.reduce((sum, l) => sum + Number(l.po_qty || 0) * Number(l.po_price || 0), 0);
+  return {
+    status: row.po_status,
+    vendorCode: row.po_vendor_code || "",
+    vendorName: row.po_vendor_name || "",
+    date: row.po_date || null,
+    dueDate: row.po_due_date || null,
+    remarks: row.po_remarks || "",
+    raisedBy: row.po_raised_by || "",
+    raisedAt: row.po_raised_at || null,
+    sapDocEntry: row.po_doc_entry || null,
+    sapDocNumber: row.po_doc_number || "",
+    error: row.po_error || "",
+    value: Math.round(value * 100) / 100,
+  };
+};
+
+/**
+ * A PO can be made from it: in SAP, no PO yet (one made in SAP itself turns it
+ * Ordered), and no order of ours queued or posted. A failed one is made again.
+ */
+export const mayOrder = (row) =>
+  row.status === "In SAP" && Boolean(row.sap_doc_entry) && ["", null, undefined, "Failed"].includes(row.po_status);
 
 const toRequest = (row, lines = []) => ({
   id: row.name,
@@ -66,6 +108,8 @@ const toRequest = (row, lines = []) => ({
   postedAt: row.posted_at || null,
   error: row.error || "",
   lines: lines.map(toLine),
+  order: toOrder(row, lines),
+  mayOrder: mayOrder(row),
   updatedAt: row.modified,
 });
 
@@ -164,6 +208,114 @@ export const retryRequest = async (id, user) => {
   if (!doc) throw notFound("Purchase request not found");
   if (doc.status !== "Failed") throw badRequest(`This request is ${doc.status}; only a failed one can be sent again.`);
   await updateDoc(DOCTYPE, id, { status: doc.sap_doc_entry ? "In SAP" : "Queued", error: "" });
+  await raiseSapFlag(user?.email);
+  return getRequest(id);
+};
+
+/** The SAP suppliers and purchase tax codes the sync publishes for a company. */
+export const vendorsFor = async (company) => {
+  const abbr = tidy(company).toUpperCase();
+  const options = (await itemMasterOptions())[abbr] || {};
+  return {
+    company: abbr,
+    vendors: Array.isArray(options.vendors) ? options.vendors : [],
+    taxCodes: Array.isArray(options.tax_codes) ? options.tax_codes : [],
+    refreshedAt: options.vendors_refreshed_at || null,
+  };
+};
+
+/**
+ * Checks an order against the request and the published SAP lists, and gives
+ * back what to write. Pure, so the rules can be tested without ERPNext.
+ *
+ * @param doc       the CMMS Purchase Request, with its lines
+ * @param body      { vendorCode, poDate, dueDate, remarks, lines: [{ itemCode, qty, price, taxCode }] }
+ * @param published { vendors: [{ code, name }], taxCodes: [{ code, name, rate }] }
+ * @param today     YYYY-MM-DD
+ */
+export const checkOrder = (doc, body = {}, published = {}, today = erpToday()) => {
+  if (["Queued", "Posted"].includes(doc.po_status)) throw badRequest("A purchase order has already been made from this request.");
+  if (!mayOrder(doc)) {
+    if (["Queued", "Failed"].includes(doc.status)) throw badRequest("The request is not in SAP yet, so a PO cannot be made from it. Wait for the sync.");
+    throw badRequest(`This request is ${doc.status}; only one in SAP without a PO can be ordered.`);
+  }
+
+  const vendorCode = tidy(body.vendorCode);
+  if (!vendorCode) throw badRequest("Choose the vendor.");
+  const vendor = (published.vendors || []).find((v) => tidy(v.code) === vendorCode);
+  if (!vendor) throw badRequest(`That vendor is not among the SAP suppliers for ${doc.company}.`);
+
+  const poDate = tidy(body.poDate) || today;
+  const dueDate = tidy(body.dueDate);
+  if (!DAY.test(poDate)) throw badRequest("Give the PO date.");
+  if (!DAY.test(dueDate)) throw badRequest("Give the delivery date.");
+  if (dueDate < poDate) throw badRequest("The delivery date cannot be before the PO date.");
+  const remarks = tidy(body.remarks);
+  if (remarks.length > PO_REMARKS_MAX) throw badRequest(`The remarks can be at most ${PO_REMARKS_MAX} characters.`);
+
+  const taxCodes = (published.taxCodes || []).map((t) => t.code);
+  const wanted = new Map((Array.isArray(body.lines) ? body.lines : []).map((w) => [tidy(w?.itemCode), w]));
+  let ordered = 0;
+  const lines = (doc.lines || []).map((line) => {
+    const w = wanted.get(line.item);
+    const label = line.item_name || line.item;
+    const qty = Number(w?.qty || 0);
+    if (!w || !(qty > 0)) return { ...line, po_qty: 0, po_price: 0, po_tax_code: "" };
+    if (qty > Number(line.qty || 0)) throw badRequest(`Only ${Number(line.qty)} of ${label} was requested.`);
+    const price = Number(w.price);
+    if (!Number.isFinite(price) || price <= 0) throw badRequest(`Give the price for ${label}.`);
+    const taxCode = tidy(w.taxCode);
+    if (taxCode && taxCodes.length && !taxCodes.includes(taxCode)) throw badRequest(`The tax code for ${label} is not one SAP has.`);
+    ordered += 1;
+    return { ...line, po_qty: qty, po_price: price, po_tax_code: taxCode };
+  });
+  if (!ordered) throw badRequest("Order at least one item.");
+
+  return {
+    po_status: "Queued",
+    po_vendor_code: vendorCode,
+    po_vendor_name: tidy(vendor.name),
+    po_date: poDate,
+    po_due_date: dueDate,
+    po_remarks: remarks,
+    po_error: "",
+    lines,
+  };
+};
+
+/** The purchase manager makes the PO; the sync posts it to SAP. */
+export const orderRequest = async (id, body, user) => {
+  const doc = await getDoc(DOCTYPE, id).catch(() => null);
+  if (!doc) throw notFound("Purchase request not found");
+  const edits = checkOrder(doc, body, await vendorsFor(doc.company));
+  await updateDoc(DOCTYPE, id, {
+    ...edits,
+    po_raised_by: user?.email || "",
+    po_raised_at: erpNow(),
+    // The whole table, as Frappe replaces a child table it is given.
+    lines: edits.lines.map((l) => ({
+      name: l.name,
+      item: l.item,
+      item_name: l.item_name,
+      sap_item_code: l.sap_item_code,
+      qty: l.qty,
+      uom: l.uom,
+      remarks: l.remarks,
+      po_qty: l.po_qty,
+      po_price: l.po_price,
+      po_tax_code: l.po_tax_code,
+    })),
+  });
+  await raiseSapFlag(user?.email);
+  return getRequest(id);
+};
+
+/** Sends a PO that SAP refused back to the SAP server. */
+export const retryOrder = async (id, user) => {
+  const doc = await getDoc(DOCTYPE, id).catch(() => null);
+  if (!doc) throw notFound("Purchase request not found");
+  if (doc.po_status !== "Failed") throw badRequest("Only a purchase order that failed can be sent again.");
+  await updateDoc(DOCTYPE, id, { po_status: "Queued", po_error: "" });
   await raiseSapFlag(user?.email);
   return getRequest(id);
 };

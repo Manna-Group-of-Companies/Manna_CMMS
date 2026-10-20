@@ -57,6 +57,11 @@ const AdminLayout = () => {
       "Purchase Requests",
       "Requests sent to SAP, and the purchase orders raised from them",
     ],
+    [
+      "/admin/low-value-purchases",
+      "Low Value Purchases",
+      "Small buys made locally, kept in ERPNext and never sent to SAP",
+    ],
     ["/admin/categories", "Categories", "The category tree items are filed under"],
     [
       "/admin/low-stock",

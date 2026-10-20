@@ -46,7 +46,7 @@ const breakdownOverview = async () => {
     const open = await listBreakdowns({ open: true });
     return {
       openBreakdowns: open.length,
-      unassessedBreakdowns: open.filter((b) => b.state === "Reported").length,
+      unassessedBreakdowns: open.filter((b) => ["Reported", "Attended"].includes(b.state)).length,
     };
   } catch {
     // A dashboard tile is not worth failing the whole page for.

@@ -10,6 +10,7 @@ import {
   mayTakeRequestStep,
   missingForRequest,
   nextRequestActionFor,
+  requestFromStatesOf,
 } from "../integrations/erpnext/maintenanceRequestStages.js";
 import { erpNow } from "../integrations/erpnext/time.js";
 import { attach, detach, listAttachments } from "./attachments.js";
@@ -57,7 +58,8 @@ const REQUEST_FIELDS = [
 
 /** What each stage is waiting for, in the words the screen shows. */
 const WAITING_ON = {
-  Requested: "Maintenance to take it on",
+  Requested: "Maintenance to attend to it",
+  Attended: "Maintenance to take it on",
   "In Progress": "Maintenance to finish",
   Completed: "The requester to close it",
   Closed: "",
@@ -190,6 +192,8 @@ export const getRequest = async (id) => {
     whyNeeded: doc.why_needed || "",
     planNotes: doc.plan_notes || "",
     acceptedBy: doc.accepted_by || "",
+    attendedBy: doc.attended_by || "",
+    attendedAt: doc.attended_at || null,
     workDone: doc.work_done || "",
     completedBy: doc.completed_by || "",
     closingRemarks: doc.closing_remarks || "",
@@ -334,9 +338,9 @@ export const saveAndAdvanceRequest = async (id, action, fields = {}, user = {}) 
     throw error;
   }
 
-  if (doc.workflow_state !== stage.from) {
+  if (!requestFromStatesOf(stage).includes(doc.workflow_state)) {
     throw new Error(
-      `This request is ${doc.workflow_state}. "${action}" only applies to one that is ${stage.from}.`
+      `This request is ${doc.workflow_state}. "${action}" only applies to one that is ${requestFromStatesOf(stage).join(" or ")}.`
     );
   }
 
@@ -430,7 +434,7 @@ export const requestSummary = (rows = []) => {
 
   return {
     open: live.length,
-    notStarted: rows.filter((r) => r.state === "Requested").length,
+    notStarted: rows.filter((r) => ["Requested", "Attended"].includes(r.state)).length,
     inProgress: rows.filter((r) => r.state === "In Progress").length,
     awaitingClosure: rows.filter((r) => r.state === "Completed").length,
     overdue: live.filter((r) => r.neededBy && r.neededBy < new Date().toISOString().slice(0, 10))

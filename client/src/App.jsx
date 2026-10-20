@@ -22,6 +22,7 @@ import AdminProductList from "./pages/admin/ProductList";
 import AdminLowStock from "./pages/admin/LowStockReport";
 import GoodsReceipts from "./pages/admin/GoodsReceipts";
 import PurchaseRequests from "./pages/admin/PurchaseRequests";
+import LowValuePurchases from "./pages/admin/LowValuePurchases";
 import ProductList from "./pages/supervisor/ProductList";
 import MyReturns from "./pages/supervisor/MyReturns";
 import BranchDashboard from "./pages/branch/BranchDashboard";
@@ -120,6 +121,17 @@ function App() {
                 element={
                   <RequireView view="purchaseRequests">
                     <PurchaseRequests />
+                  </RequireView>
+                }
+              />
+              {/* Small buys kept in ERPNext, never sent to SAP. Every manager and
+                  the plant heads raise them; who may take each later step is
+                  decided per record by the server. */}
+              <Route
+                path="low-value-purchases"
+                element={
+                  <RequireView view="lowValuePurchases">
+                    <LowValuePurchases />
                   </RequireView>
                 }
               />

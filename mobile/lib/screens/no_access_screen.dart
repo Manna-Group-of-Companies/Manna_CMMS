@@ -8,9 +8,9 @@ import '../widgets/common.dart';
 /// Where somebody lands when their role has no screen in this app.
 ///
 /// Mirrors `client/src/pages/auth/NoAccess.jsx`. The app now serves only
-/// Breakdowns and Maintenance Requests - every stock-tracking screen it used
-/// to carry is gone - so a role the web's own matrix does not list for either
-/// one has nothing here. Signing in still worked and the password was still
+/// Breakdowns, Maintenance Requests, Attendance and Low Value Purchases - every
+/// stock-tracking screen it used to carry is gone - so a role the web's own
+/// matrix does not list for any of them has nothing here. Signing in still worked and the password was still
 /// right; this says so, rather than looking like a failed login.
 class NoAccessScreen extends StatelessWidget {
   const NoAccessScreen({super.key});
@@ -57,8 +57,8 @@ class NoAccessScreen extends StatelessWidget {
                     const SizedBox(height: 10),
                     Text(
                       'You are signed in and your password is correct. This app covers '
-                      'breakdowns and maintenance requests, and the ${user?.role ?? 'account'} '
-                      'role is not on either of them yet.',
+                      'breakdowns, maintenance requests, attendance and low value purchases, '
+                      'and the ${user?.role ?? 'account'} role is not on any of them yet.',
                       textAlign: TextAlign.center,
                       style: const TextStyle(fontSize: 13, color: AppColors.textBody, height: 1.4),
                     ),

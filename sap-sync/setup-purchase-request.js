@@ -7,6 +7,8 @@
 // manager converts it to a Purchase Order in SAP; the sync sees the PO (its lines carry BaseType 1470000113 =
 // the request) and records the PO number, and the PO appears in the CMMS goods receipt form.
 //   status Queued -> In SAP -> Ordered -> Closed, or Failed.
+// Since 20 Oct 2026 the purchase manager can also make the PO in the CMMS: its po_* fields are Custom Fields
+// added by server/scripts/syncPurchasing.js, and PASS G of the sync posts it (post_purchase_orders).
 const erp = require('./erp.js');
 const APPLY = process.argv.includes('--apply');
 

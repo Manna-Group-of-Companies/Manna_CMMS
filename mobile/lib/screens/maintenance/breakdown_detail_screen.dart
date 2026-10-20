@@ -93,7 +93,7 @@ class _BreakdownDetailScreenState extends State<BreakdownDetailScreen> {
     // account for, and it is closed rather than made to disappear.
     final cancel = _stages['Cancel'];
     final mayCancel = !viewOnly &&
-        record != null && cancel != null && record.state == cancel.from && cancel.allows(role);
+        record != null && cancel != null && cancel.startsFrom(record.state) && cancel.allows(role);
 
     return PopScope(
       canPop: false,
@@ -186,6 +186,8 @@ class _Summary extends StatelessWidget {
             _Line('Machine', '${record.machineName} — ${record.machine}'),
             _Line('Plant', record.plant),
             _Line('Stopped at', formatDateTime(record.stoppedAt)),
+            if (record.attendedAt != null)
+              _Line('Attended', '${formatDateTime(record.attendedAt)} · ${record.attendedBy}'),
             if (record.priority.isNotEmpty) _Line('Urgency', record.priority),
             if (record.failureMode.isNotEmpty) _Line('Failure mode', record.failureMode),
             if (record.actionsPerformed.isNotEmpty)

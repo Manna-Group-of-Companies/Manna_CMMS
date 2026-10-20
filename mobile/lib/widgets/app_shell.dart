@@ -19,9 +19,10 @@ class NavLink {
   final IconData icon;
 }
 
-/// Breakdowns, Requests and Attendance, each shown only if the signed-in role
-/// is on the matching screen — see `canSeeBreakdowns` / `canSeeRequests` /
-/// `canSeeAttendance` in router.dart, which mirror the same matrix the web
+/// Breakdowns, Requests, Purchases and Attendance, each shown only if the
+/// signed-in role is on the matching screen — see `canSeeBreakdowns` /
+/// `canSeeRequests` / `canSeeLowValuePurchases` / `canSeeAttendance` in
+/// router.dart, which mirror the same matrix the web
 /// console enforces. The app used to carry a store catalog and a branch's own
 /// room here as well; both are gone. A maintenance member sees Attendance
 /// alone, which is the whole of their app.
@@ -33,6 +34,8 @@ List<NavLink> _tabsFor(AuthProvider auth) {
       const NavLink('Breakdowns', breakdownsHome, Icons.build_outlined),
     if (canSeeRequests(role))
       const NavLink('Requests', requestsHome, Icons.assignment_outlined),
+    if (canSeeLowValuePurchases(role))
+      const NavLink('Purchases', lowValueHome, Icons.shopping_cart_outlined),
     if (canSeeAttendance(role))
       const NavLink('Attendance', attendanceHome, Icons.how_to_reg_outlined),
   ];

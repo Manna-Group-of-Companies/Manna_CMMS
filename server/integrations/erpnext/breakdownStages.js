@@ -44,6 +44,23 @@ const now = () => erpNow();
  */
 export const STAGES = {
   /**
+   * Maintenance has seen it (20 Oct 2026).
+   *
+   * Before any work, so whoever reported the breakdown can see it is not
+   * sitting unread. Nothing is asked: the record is who pressed it and when.
+   */
+  Attend: {
+    allowedRoles: ["Manager", "Maintenance Manager"],
+    from: "Reported",
+    to: "Attended",
+    title: "Attend to it",
+    blurb: "Tell whoever reported it that maintenance has seen it.",
+    fields: [],
+    required: [],
+    stamp: (user) => ({ attended_by: user?.email || "", attended_at: now() }),
+  },
+
+  /**
    * Straight to work.
    *
    * There was an Assess stage and a Plan stage here. Both are gone: on this
@@ -57,7 +74,7 @@ export const STAGES = {
    */
   "Start Repair": {
     allowedRoles: ["Manager", "Maintenance Manager"],
-    from: "Reported",
+    from: "Attended",
     to: "Under Repair",
     title: "Start the repair",
     blurb: "When work actually began. The details are recorded once it runs again.",
@@ -217,6 +234,8 @@ export const STAGES = {
   Cancel: {
     allowedRoles: ["Manager", "Maintenance Manager", "Production Manager"],
     from: "Reported",
+    // Still nothing done once maintenance has only seen it.
+    alsoFrom: ["Attended"],
     to: "Cancelled",
     title: "Cancel the report",
     blurb: "Nothing was actually wrong, or it was reported twice.",
@@ -228,6 +247,7 @@ export const STAGES = {
   "Cancel as Maintenance": {
     allowedRoles: ["Manager", "Maintenance Manager"],
     from: "Reported",
+    alsoFrom: ["Attended"],
     to: "Cancelled",
     title: "Cancel the report",
     blurb: "Nothing was actually wrong, or it was reported twice.",
@@ -254,6 +274,9 @@ export const nextActionFor = (state, doc = {}) => {
     )?.[0] || ""
   );
 };
+
+/** Every state a step may be taken from: `from`, and its `alsoFrom`. */
+export const fromStatesOf = (stage) => [stage.from, ...(stage.alsoFrom || [])];
 
 /** Every field any stage may write, for the update allow-list. */
 export const WRITABLE_FIELDS = [
@@ -301,6 +324,7 @@ export const describeStages = () =>
       action,
       {
         from: s.from,
+        fromStates: fromStatesOf(s),
         to: s.to,
         title: s.title,
         blurb: s.blurb,

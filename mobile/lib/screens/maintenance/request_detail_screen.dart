@@ -97,7 +97,7 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
     final mayEnd = !viewOnly &&
         record != null &&
         end != null &&
-        record.state == end.from &&
+        end.startsFrom(record.state) &&
         end.allows(role);
 
     return PopScope(
@@ -186,6 +186,8 @@ class _Summary extends StatelessWidget {
             if (record.priority.isNotEmpty) _Line('Urgency', record.priority),
             _Line('Raised by', record.requestedBy),
             _Line('Raised', formatDateTime(record.requestedAt)),
+            if (record.attendedAt != null)
+              _Line('Attended', '${formatDateTime(record.attendedAt)} · ${record.attendedBy}'),
             if (record.neededBy != null) _Line('Wanted by', formatDate(record.neededBy)),
             if (record.workDone.isNotEmpty) _Line('Work done', record.workDone),
             if (record.waitingOn.isNotEmpty) _Line('Waiting on', record.waitingOn),

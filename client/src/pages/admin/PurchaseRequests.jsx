@@ -1,12 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2, Plus, RefreshCw, Send, ShoppingCart, Truck } from "lucide-react";
+import {
+  AlertTriangle,
+  FileText,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Send,
+  ShoppingCart,
+  Truck,
+} from "lucide-react";
 
 import API from "../../services/api";
-import { useAuth, MAINTENANCE_MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
+import {
+  useAuth,
+  MAINTENANCE_MANAGER,
+  MANAGER,
+  PRODUCTION_MANAGER,
+  PURCHASE_MANAGER,
+} from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import { useSapSyncDone } from "../../hooks/useSapSync";
 import PurchaseRequestModal from "./PurchaseRequestModal";
+import PurchaseOrderModal from "./PurchaseOrderModal";
+import { formatCurrency } from "../../utils/currency";
 
 /**
  * Purchase requests raised from the CMMS, and where each stands in SAP.
@@ -16,7 +33,17 @@ import PurchaseRequestModal from "./PurchaseRequestModal";
  * turns it into a Purchase Order, and that PO is received with Goods receipt.
  * Queued -> In SAP -> Ordered -> Closed; a failed one says why, and the
  * Maintenance Manager can send it again.
+ *
+ * Since 20 Oct 2026 the purchase manager can make that PO here instead of in
+ * SAP; the sync posts it, and the request goes Ordered as for one made in SAP.
  */
+
+/** The PO made here, as it stands with the sync. */
+const ORDER_STYLE = {
+  Queued: "badge-amber",
+  Posted: "badge-emerald",
+  Failed: "badge-rose",
+};
 
 const STATUS_STYLE = {
   Queued: "badge-amber",
@@ -50,6 +77,9 @@ const PurchaseRequests = () => {
   // Mirrors the server: only the Maintenance Manager raises a request or re-sends it.
   // Maintenance, and since 14 Oct 2026 the plant heads - mirrors the server's guard.
   const canRaise = user?.role === MAINTENANCE_MANAGER || user?.role === PRODUCTION_MANAGER;
+  // Making the PO commits the company's money: the purchase manager, and the
+  // Admin as the usual fallback - mirrors the server's guard.
+  const canBuy = user?.role === PURCHASE_MANAGER || user?.role === MANAGER;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -57,6 +87,7 @@ const PurchaseRequests = () => {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState("");
   const [raising, setRaising] = useState(false);
+  const [ordering, setOrdering] = useState(null);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -82,18 +113,31 @@ const PurchaseRequests = () => {
 
   // Only worth polling while the SAP server still has something to create.
   // Paused while the dialog is open, so the list does not shift under it.
-  const anyQueued = rows.some((r) => r.status === "Queued");
-  useAutoRefresh(() => load(true), { enabled: anyQueued && !raising });
+  const anyQueued = rows.some((r) => r.status === "Queued" || r.order?.status === "Queued");
+  useAutoRefresh(() => load(true), { enabled: anyQueued && !raising && !ordering });
 
   // A finished run is what moves a request off Queued, so the row it moved is
   // the one on screen. Not while the dialog is open - the list would shift.
-  useSapSyncDone(() => !raising && load(true));
+  useSapSyncDone(() => !raising && !ordering && load(true));
 
   const retry = async (id) => {
     setBusy(id);
     try {
       await API.post(`/purchase-requests/${id}/retry`);
       showToast(`${id} sent to SAP again`, "success");
+      load(true);
+    } catch (err) {
+      showToast(err.response?.data?.message || "That step was refused", "error");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const retryOrder = async (id) => {
+    setBusy(id);
+    try {
+      await API.post(`/purchase-requests/${id}/order/retry`);
+      showToast(`PO for ${id} sent to SAP again`, "success");
       load(true);
     } catch (err) {
       showToast(err.response?.data?.message || "That step was refused", "error");
@@ -176,8 +220,11 @@ const PurchaseRequests = () => {
               key={r.id}
               request={r}
               canRetry={canRaise}
+              canBuy={canBuy}
               busy={busy === r.id}
               onRetry={() => retry(r.id)}
+              onOrder={() => setOrdering(r)}
+              onRetryOrder={() => retryOrder(r.id)}
             />
           ))}
         </div>
@@ -186,6 +233,16 @@ const PurchaseRequests = () => {
       {raising && (
         <div className="modal-backdrop">
           <PurchaseRequestModal onClose={() => setRaising(false)} onSaved={() => load(true)} />
+        </div>
+      )}
+
+      {ordering && (
+        <div className="modal-backdrop">
+          <PurchaseOrderModal
+            request={ordering}
+            onClose={() => setOrdering(null)}
+            onSaved={() => load(true)}
+          />
         </div>
       )}
     </div>
@@ -199,66 +256,132 @@ const KV = ({ label, value }) => (
   </div>
 );
 
-const RequestCard = ({ request: r, canRetry, busy, onRetry }) => (
-  <div className="card p-5">
-    <div className="flex flex-wrap items-start gap-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="mono text-xs text-slate-500">{r.id}</span>
-          <span className={`badge ${STATUS_STYLE[r.status] || "badge-slate"}`}>
-            {r.status === "Queued" ? "Queued for SAP" : r.status}
-          </span>
+const RequestCard = ({ request: r, canRetry, canBuy, busy, onRetry, onOrder, onRetryOrder }) => {
+  const o = r.order;
+  return (
+    <div className="card p-5">
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mono text-xs text-slate-500">{r.id}</span>
+            <span className={`badge ${STATUS_STYLE[r.status] || "badge-slate"}`}>
+              {r.status === "Queued" ? "Queued for SAP" : r.status}
+            </span>
+          </div>
+
+          <div className="mt-2 grid sm:grid-cols-2 lg:grid-cols-5 gap-x-6 gap-y-2">
+            <KV label="Company" value={r.companyName || r.company} />
+            <KV label="SAP purchase request" value={r.sapDocNumber ? `PR ${r.sapDocNumber}` : ""} />
+            <KV label="Purchase order" value={r.poNumbers ? `PO ${r.poNumbers}` : ""} />
+            <KV label="Required by" value={day(r.requiredBy)} />
+            <KV label="Raised by" value={`${r.raisedBy || "—"} · ${when(r.raisedAt)}`} />
+          </div>
+
+          {r.reason && <p className="mt-2 text-xs text-slate-600 italic">“{r.reason}”</p>}
+
+          <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-100">
+            {(r.lines || []).map((l, i) => (
+              <li
+                key={`${l.itemCode}-${i}`}
+                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-3 py-2 text-[13px]"
+              >
+                <span className="min-w-0 text-slate-800">
+                  {l.name}{" "}
+                  <span className="mono text-[11px] text-slate-500">{l.sapItemCode || l.itemCode}</span>
+                  {l.remarks && <span className="ml-2 text-[12px] text-slate-500">· {l.remarks}</span>}
+                </span>
+                <span className="whitespace-nowrap text-slate-700">
+                  × {l.qty} {l.unit}
+                  {/* What the PO made here takes of it, and at what price. */}
+                  {o &&
+                    (l.orderQty > 0 ? (
+                      <span className="ml-2 text-[12px] text-slate-500">
+                        · PO {l.orderQty} @ {formatCurrency(l.price)}
+                        {l.taxCode ? ` · ${l.taxCode}` : ""}
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-[12px] text-slate-400">· not on the PO</span>
+                    ))}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          {o && <OrderState order={o} />}
+
+          {r.status === "Ordered" && (
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-emerald-700">
+              <Truck className="h-3.5 w-3.5 shrink-0" />
+              Receive it with Goods receipt when the goods arrive.
+            </p>
+          )}
+
+          {r.status === "Failed" && r.error && (
+            <p className="mt-2 text-xs text-rose-700">SAP said: {r.error}</p>
+          )}
         </div>
 
-        <div className="mt-2 grid sm:grid-cols-2 lg:grid-cols-5 gap-x-6 gap-y-2">
-          <KV label="Company" value={r.companyName || r.company} />
-          <KV label="SAP purchase request" value={r.sapDocNumber ? `PR ${r.sapDocNumber}` : ""} />
-          <KV label="Purchase order" value={r.poNumbers ? `PO ${r.poNumbers}` : ""} />
-          <KV label="Required by" value={day(r.requiredBy)} />
-          <KV label="Raised by" value={`${r.raisedBy || "—"} · ${when(r.raisedAt)}`} />
-        </div>
-
-        {r.reason && <p className="mt-2 text-xs text-slate-600 italic">“{r.reason}”</p>}
-
-        <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-100">
-          {(r.lines || []).map((l, i) => (
-            <li
-              key={`${l.itemCode}-${i}`}
-              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-3 py-2 text-[13px]"
-            >
-              <span className="min-w-0 text-slate-800">
-                {l.name}{" "}
-                <span className="mono text-[11px] text-slate-500">{l.sapItemCode || l.itemCode}</span>
-                {l.remarks && <span className="ml-2 text-[12px] text-slate-500">· {l.remarks}</span>}
-              </span>
-              <span className="whitespace-nowrap text-slate-700">
-                × {l.qty} {l.unit}
-              </span>
-            </li>
-          ))}
-        </ul>
-
-        {r.status === "Ordered" && (
-          <p className="mt-2 flex items-center gap-1.5 text-xs text-emerald-700">
-            <Truck className="h-3.5 w-3.5 shrink-0" />
-            Receive it with Goods receipt when the goods arrive.
-          </p>
-        )}
-
-        {r.status === "Failed" && r.error && (
-          <p className="mt-2 text-xs text-rose-700">SAP said: {r.error}</p>
+        {((canRetry && r.status === "Failed") || (canBuy && (r.mayOrder || o?.status === "Failed"))) && (
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {canRetry && r.status === "Failed" && (
+              <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetry}>
+                <Send className="h-4 w-4" />
+                {busy ? "…" : "Send again"}
+              </button>
+            )}
+            {/* A refused PO can go back as it was, or be changed first. */}
+            {canBuy && o?.status === "Failed" && (
+              <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetryOrder}>
+                <Send className="h-4 w-4" />
+                {busy ? "…" : "Send again"}
+              </button>
+            )}
+            {canBuy && r.mayOrder && (
+              <button
+                className={`btn btn-sm ${o?.status === "Failed" ? "btn-neutral" : "btn-primary"}`}
+                disabled={busy}
+                onClick={onOrder}
+              >
+                <FileText className="h-4 w-4" />
+                {o?.status === "Failed" ? "Change PO" : "Make PO"}
+              </button>
+            )}
+          </div>
         )}
       </div>
-
-      {canRetry && r.status === "Failed" && (
-        <div className="flex shrink-0 gap-2">
-          <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetry}>
-            <Send className="h-4 w-4" />
-            {busy ? "…" : "Send again"}
-          </button>
-        </div>
-      )}
     </div>
+  );
+};
+
+/** The PO made in the app: waiting for the sync, posted, or refused by SAP. */
+const OrderState = ({ order: o }) => (
+  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+    <div className="flex flex-wrap items-center gap-2">
+      <span className={`badge ${ORDER_STYLE[o.status] || "badge-slate"}`}>
+        {o.status === "Queued"
+          ? "PO waiting for the SAP sync"
+          : o.status === "Posted"
+            ? `SAP PO ${o.sapDocNumber || "posted"}`
+            : "PO refused by SAP"}
+      </span>
+      <span className="text-[13px] text-slate-800">
+        {o.vendorName || o.vendorCode}
+        {o.vendorCode && o.vendorName && (
+          <span className="mono ml-1 text-[11px] text-slate-500">{o.vendorCode}</span>
+        )}
+      </span>
+      <span className="ml-auto text-[13px] font-semibold tabular-nums text-slate-900">
+        {formatCurrency(o.value)}
+      </span>
+    </div>
+    <p className="mt-1 text-[12px] text-slate-500">
+      PO date {day(o.date) || "—"} · delivery {day(o.dueDate) || "—"} · made by {o.raisedBy || "—"}{" "}
+      {when(o.raisedAt)}
+    </p>
+    {o.remarks && <p className="mt-1 text-[12px] text-slate-600 italic">“{o.remarks}”</p>}
+    {o.status === "Failed" && o.error && (
+      <p className="mt-1 text-xs text-rose-700">SAP said: {o.error}</p>
+    )}
   </div>
 );
 
