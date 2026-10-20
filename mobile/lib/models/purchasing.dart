@@ -1,269 +1,328 @@
 import '../core/formatters.dart';
-import 'maintenance.dart' show PlantOption;
 
-/// Low value purchase requests, as `/low-value-purchases` sends them.
+/// The Purchase Request Sheet, as `/low-value-purchases` sends it.
 ///
-/// Small buys made locally and kept in ERPNext only - nothing here ever goes to
-/// SAP. A manager or plant head asks, the purchase manager buys it or turns it
-/// down, and whoever asked records it received.
+/// Since 20 Oct 2026 this is the business's own Google Sheet ("Purchase
+/// Request Sheet", tab "Purchase") moved into ERPNext: one row per request,
+/// the same columns in the same order, and a row turns green once the purchase
+/// status reads Received or Delivered. It replaced an earlier multi-item
+/// request with its own order and receive steps; none of that survives.
 ///
-/// Who may take which step is the server's to say, per record, in `may`. The
-/// screens read that and nothing else; deciding it again here from the role
-/// would drift the first time the rule changes on the server.
-
-double _asDouble(dynamic value, [double fallback = 0]) {
-  if (value is num) return value.toDouble();
-  if (value is String) return double.tryParse(value) ?? fallback;
-  return fallback;
-}
+/// Which columns of a row the signed-in person may change is the server's to
+/// say, per row, in `editable`. The screens read that and nothing else -
+/// deciding it again here from the role would drift the first time the rule
+/// changes on the server.
 
 List<String> _asStrings(dynamic value) =>
     (value as List? ?? []).map((e) => asString(e)).where((e) => e.isNotEmpty).toList();
 
-Map<String, dynamic>? _asMap(dynamic value) => value is Map<String, dynamic> ? value : null;
+/// How a column is changed: picked from the options, a day, or typed.
+enum SheetColumnKind { pick, date, text }
 
-/// One item on the request: what was guessed it would cost, and - once bought -
-/// what it did.
-class LowValueLine {
-  const LowValueLine({
-    required this.idx,
-    required this.description,
-    required this.specification,
-    required this.qty,
-    required this.unit,
-    required this.estRate,
-    required this.estAmount,
-    required this.rate,
-    required this.amount,
-    required this.remarks,
-  });
+/// One column of the sheet, by the name the API uses for it.
+class SheetColumn {
+  const SheetColumn(this.key, this.label, this.kind, {this.multiline = false, this.clearable = false});
 
-  /// The row number on the record. The order step names lines by this.
-  final int idx;
-  final String description;
-  final String specification;
-  final double qty;
-  final String unit;
-  final double estRate;
-  final double estAmount;
+  /// The API's name - the key a `PUT` carries and `editable` lists.
+  final String key;
 
-  /// Zero until the purchase manager records what was paid.
-  final double rate;
-  final double amount;
-  final String remarks;
+  /// The sheet's own heading.
+  final String label;
+  final SheetColumnKind kind;
 
-  bool get isPriced => rate > 0;
+  /// Text that is often a list, one item a line.
+  final bool multiline;
 
-  factory LowValueLine.fromJson(Map<String, dynamic> json) => LowValueLine(
-        idx: asInt(json['idx']),
-        description: asString(json['description']),
-        specification: asString(json['specification']),
-        qty: _asDouble(json['qty']),
-        unit: asString(json['unit']),
-        estRate: _asDouble(json['estRate']),
-        estAmount: _asDouble(json['estAmount']),
-        rate: _asDouble(json['rate']),
-        amount: _asDouble(json['amount']),
-        remarks: asString(json['remarks']),
-      );
+  /// A date that may be emptied again (the server takes "" as no date).
+  final bool clearable;
 }
 
-/// The purchase: who it was bought from, and when it should arrive.
-class LowValueOrder {
-  const LowValueOrder({
-    required this.vendorName,
-    required this.vendorContact,
-    required this.expectedOn,
-    required this.remarks,
-    required this.by,
-    required this.at,
-  });
+/// Not a column the API edits: images go up and come off through `/files`.
+/// Kept in [sheetColumns] so the detail reads in the sheet's order.
+const imageSamplesColumn = 'images';
 
-  final String vendorName;
-  final String vendorContact;
-  final DateTime? expectedOn;
-  final String remarks;
-  final String by;
-  final DateTime? at;
+/// The sheet's columns, left to right, as the "Purchase" tab has them.
+const sheetColumns = [
+  SheetColumn('date', 'Date', SheetColumnKind.date),
+  SheetColumn('type', 'Type of Request', SheetColumnKind.pick),
+  SheetColumn('company', 'Company', SheetColumnKind.pick),
+  SheetColumn('raisedByName', 'Raised By', SheetColumnKind.text),
+  SheetColumn('description', 'Description', SheetColumnKind.text, multiline: true),
+  SheetColumn('purpose', 'Purpose of Purchase/Repair', SheetColumnKind.text, multiline: true),
+  SheetColumn(imageSamplesColumn, 'Image samples', SheetColumnKind.text),
+  SheetColumn('links', 'Links/Brands or vendor contact', SheetColumnKind.text, multiline: true),
+  SheetColumn('priority', 'Priority', SheetColumnKind.pick),
+  SheetColumn('approvalStatus', 'Status of Approval', SheetColumnKind.pick),
+  SheetColumn('purchaseStatus', 'Status of Purchase/Repair', SheetColumnKind.pick),
+  SheetColumn('expectedOn', 'Expected Date of Arrival', SheetColumnKind.date, clearable: true),
+  SheetColumn('receivedOn', 'Received date', SheetColumnKind.date, clearable: true),
+  SheetColumn('remarks', 'Remarks', SheetColumnKind.text, multiline: true),
+];
 
-  factory LowValueOrder.fromJson(Map<String, dynamic> json) => LowValueOrder(
-        vendorName: asString(json['vendorName']),
-        vendorContact: asString(json['vendorContact']),
-        expectedOn: parseDate(json['expectedOn']),
-        remarks: asString(json['remarks']),
-        by: asString(json['by']),
-        at: parseDate(json['at']),
-      );
-}
-
-/// It arrived, against which bill.
-class LowValueReceipt {
-  const LowValueReceipt({
-    required this.billNo,
-    required this.billDate,
-    required this.remarks,
-    required this.by,
-    required this.at,
-  });
-
-  final String billNo;
-  final DateTime? billDate;
-  final String remarks;
-  final String by;
-  final DateTime? at;
-
-  factory LowValueReceipt.fromJson(Map<String, dynamic> json) => LowValueReceipt(
-        billNo: asString(json['billNo']),
-        billDate: parseDate(json['billDate']),
-        remarks: asString(json['remarks']),
-        by: asString(json['by']),
-        at: parseDate(json['at']),
-      );
-}
-
-/// Rejected or withdrawn - the status says which - and why.
-class LowValueClosure {
-  const LowValueClosure({required this.reason, required this.by, required this.at});
-
-  final String reason;
-  final String by;
-  final DateTime? at;
-
-  factory LowValueClosure.fromJson(Map<String, dynamic> json) => LowValueClosure(
-        reason: asString(json['reason']),
-        by: asString(json['by']),
-        at: parseDate(json['at']),
-      );
-}
-
-/// The steps the signed-in person may take on this record now.
-class LowValueSteps {
-  const LowValueSteps({
-    this.order = false,
-    this.receive = false,
-    this.reject = false,
-    this.withdraw = false,
-  });
-
-  final bool order;
-  final bool receive;
-  final bool reject;
-  final bool withdraw;
-
-  bool get any => order || receive || reject || withdraw;
-
-  factory LowValueSteps.fromJson(Map<String, dynamic> json) => LowValueSteps(
-        order: json['order'] == true,
-        receive: json['receive'] == true,
-        reject: json['reject'] == true,
-        withdraw: json['withdraw'] == true,
-      );
-}
-
-class LowValuePurchase {
-  const LowValuePurchase({
+/// An image of the item - the sheet's "Image samples" column.
+class PurchaseImage {
+  const PurchaseImage({
     required this.id,
-    required this.plant,
-    required this.department,
-    required this.status,
-    required this.waitingOn,
-    required this.urgency,
-    required this.requiredBy,
-    required this.purpose,
-    required this.raisedBy,
-    required this.raisedAt,
-    required this.estTotal,
-    required this.total,
-    required this.lines,
-    required this.order,
-    required this.received,
-    required this.closed,
-    required this.may,
-    required this.updatedAt,
+    required this.fileName,
+    required this.url,
+    required this.size,
+    required this.isPrivate,
+    required this.addedAt,
   });
 
   final String id;
-  final String plant;
-  final String department;
-  final String status;
+  final String fileName;
 
-  /// Who or what it is sitting with, as the server words it. Empty once done.
-  final String waitingOn;
-  final String urgency;
-  final DateTime? requiredBy;
-  final String purpose;
-  final String raisedBy;
-  final DateTime? raisedAt;
-  final double estTotal;
+  /// ERPNext's own path. Uploads are private, so this does not open without an
+  /// ERPNext session - see the detail screen.
+  final String url;
+  final int size;
+  final bool isPrivate;
+  final DateTime? addedAt;
 
-  /// What was actually paid. Zero until it is ordered.
-  final double total;
-  final List<LowValueLine> lines;
-  final LowValueOrder? order;
-  final LowValueReceipt? received;
-  final LowValueClosure? closed;
-  final LowValueSteps may;
-  final DateTime? updatedAt;
-
-  bool get isUrgent => urgency == 'Urgent';
-  bool get isOpen => status == 'Requested' || status == 'Ordered';
-
-  /// Bought, so [total] is what was paid rather than nothing yet.
-  bool get hasActual => order != null && total > 0;
-
-  factory LowValuePurchase.fromJson(Map<String, dynamic> json) {
-    final order = _asMap(json['order']);
-    final received = _asMap(json['received']);
-    final closed = _asMap(json['closed']);
-    return LowValuePurchase(
-      id: asString(json['id']),
-      plant: asString(json['plant']),
-      department: asString(json['department']),
-      status: asString(json['status'], 'Requested'),
-      waitingOn: asString(json['waitingOn']),
-      urgency: asString(json['urgency'], 'Normal'),
-      requiredBy: parseDate(json['requiredBy']),
-      purpose: asString(json['purpose']),
-      raisedBy: asString(json['raisedBy']),
-      raisedAt: parseDate(json['raisedAt']),
-      estTotal: _asDouble(json['estTotal']),
-      total: _asDouble(json['total']),
-      lines: (json['lines'] as List? ?? [])
-          .whereType<Map<String, dynamic>>()
-          .map(LowValueLine.fromJson)
-          .toList(growable: false),
-      order: order == null ? null : LowValueOrder.fromJson(order),
-      received: received == null ? null : LowValueReceipt.fromJson(received),
-      closed: closed == null ? null : LowValueClosure.fromJson(closed),
-      may: LowValueSteps.fromJson(_asMap(json['may']) ?? const {}),
-      updatedAt: parseDate(json['updatedAt']),
-    );
-  }
+  factory PurchaseImage.fromJson(Map<String, dynamic> json) => PurchaseImage(
+        id: asString(json['id']),
+        fileName: asString(json['fileName']),
+        url: asString(json['url']),
+        size: asInt(json['size']),
+        isPrivate: json['isPrivate'] == true,
+        addedAt: parseDate(json['addedAt']),
+      );
 }
 
-/// What the raise form offers, from `/low-value-purchases/options`.
-class LowValueOptions {
-  const LowValueOptions({
-    required this.units,
-    required this.statuses,
-    required this.maxLines,
-    required this.plants,
+/// One row of the sheet.
+class PurchaseRequest {
+  const PurchaseRequest({
+    required this.id,
+    required this.date,
+    required this.type,
+    required this.company,
+    required this.raisedByName,
+    required this.description,
+    required this.purpose,
+    required this.links,
+    required this.priority,
+    required this.approvalStatus,
+    required this.purchaseStatus,
+    required this.expectedOn,
+    required this.receivedOn,
+    required this.remarks,
+    required this.done,
+    required this.raisedBy,
+    required this.raisedAt,
+    required this.updatedBy,
+    required this.updatedAt,
+    required this.files,
+    required this.editable,
+    this.images = const [],
   });
 
-  final List<String> units;
-  final List<String> statuses;
-  final int maxLines;
+  final String id;
+  final DateTime? date;
+  final String type;
+  final String company;
 
-  /// Already narrowed by the server to the plants this person may raise for.
-  final List<PlantOption> plants;
+  /// The name written in the sheet's "Raised By" - free text, as it was there.
+  final String raisedByName;
+  final String description;
+  final String purpose;
+  final String links;
+  final String priority;
+  final String approvalStatus;
+  final String purchaseStatus;
+  final DateTime? expectedOn;
+  final DateTime? receivedOn;
+  final String remarks;
 
-  factory LowValueOptions.fromJson(Map<String, dynamic> json) => LowValueOptions(
-        units: _asStrings(json['units']),
-        statuses: _asStrings(json['statuses']),
-        maxLines: asInt(json['maxLines'], 30),
-        plants: (json['plants'] as List? ?? [])
+  /// Received or Delivered: the sheet's green row.
+  final bool done;
+
+  /// The account that added the row (an email), which is not always the person
+  /// named in [raisedByName].
+  final String raisedBy;
+  final DateTime? raisedAt;
+  final String updatedBy;
+  final DateTime? updatedAt;
+
+  /// How many images, in the list. The detail carries the [images] themselves.
+  final int files;
+
+  /// The columns this person may change on this row, by [SheetColumn.key].
+  final Set<String> editable;
+  final List<PurchaseImage> images;
+
+  bool canEdit(String column) => editable.contains(column);
+
+  /// This row with [images] - a `PUT` answers without them, and the ones
+  /// already on screen have not changed.
+  PurchaseRequest withImages(List<PurchaseImage> images) => PurchaseRequest(
+        id: id,
+        date: date,
+        type: type,
+        company: company,
+        raisedByName: raisedByName,
+        description: description,
+        purpose: purpose,
+        links: links,
+        priority: priority,
+        approvalStatus: approvalStatus,
+        purchaseStatus: purchaseStatus,
+        expectedOn: expectedOn,
+        receivedOn: receivedOn,
+        remarks: remarks,
+        done: done,
+        raisedBy: raisedBy,
+        raisedAt: raisedAt,
+        updatedBy: updatedBy,
+        updatedAt: updatedAt,
+        files: files,
+        editable: editable,
+        images: images,
+      );
+
+  /// The server lets anyone who may change any column add or remove images.
+  bool get canAttach => editable.isNotEmpty;
+
+  /// The number of images, from whichever of the two was sent.
+  int get imageCount => images.isNotEmpty ? images.length : files;
+
+  /// A column's value as the sheet would show it; empty when blank.
+  String textOf(String column) => switch (column) {
+        'date' => date == null ? '' : formatDate(date),
+        'type' => type,
+        'company' => company,
+        'raisedByName' => raisedByName,
+        'description' => description,
+        'purpose' => purpose,
+        imageSamplesColumn => imageCount == 0 ? '' : (imageCount == 1 ? '1 image' : '$imageCount images'),
+        'links' => links,
+        'priority' => priority,
+        'approvalStatus' => approvalStatus,
+        'purchaseStatus' => purchaseStatus,
+        'expectedOn' => expectedOn == null ? '' : formatDate(expectedOn),
+        'receivedOn' => receivedOn == null ? '' : formatDate(receivedOn),
+        'remarks' => remarks,
+        _ => '',
+      };
+
+  /// The search box: every typed column, the row number and who added it.
+  bool matches(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return [
+      id, type, company, raisedByName, description, purpose, links, priority,
+      approvalStatus, purchaseStatus, remarks, raisedBy,
+    ].any((v) => v.toLowerCase().contains(q));
+  }
+
+  factory PurchaseRequest.fromJson(Map<String, dynamic> json) => PurchaseRequest(
+        id: asString(json['id']),
+        date: parseDate(json['date']),
+        type: asString(json['type'], 'Purchase Request'),
+        company: asString(json['company']),
+        raisedByName: asString(json['raisedByName']),
+        description: asString(json['description']),
+        purpose: asString(json['purpose']),
+        links: asString(json['links']),
+        priority: asString(json['priority']),
+        approvalStatus: asString(json['approvalStatus'], 'Pending'),
+        purchaseStatus: asString(json['purchaseStatus'], 'Not Ordered'),
+        expectedOn: parseDate(json['expectedOn']),
+        receivedOn: parseDate(json['receivedOn']),
+        remarks: asString(json['remarks']),
+        done: json['done'] == true,
+        raisedBy: asString(json['raisedBy']),
+        raisedAt: parseDate(json['raisedAt']),
+        updatedBy: asString(json['updatedBy']),
+        updatedAt: parseDate(json['updatedAt']),
+        files: asInt(json['files']),
+        editable: _asStrings(json['editable']).toSet(),
+        images: (json['images'] as List? ?? [])
             .whereType<Map<String, dynamic>>()
-            .map(PlantOption.fromJson)
+            .map(PurchaseImage.fromJson)
             .toList(growable: false),
       );
+}
+
+/// The sheet's dropdowns, from `/low-value-purchases/options`.
+class PurchaseSheetOptions {
+  const PurchaseSheetOptions({
+    required this.types,
+    required this.companies,
+    required this.priorities,
+    required this.approvalStatuses,
+    required this.purchaseStatuses,
+    required this.doneStatuses,
+  });
+
+  /// Used until the server answers, so the filters and the form are never
+  /// empty on a slow connection. Kept in step with lowValuePurchaseDoctype.js;
+  /// the server's own lists replace these as soon as they arrive.
+  static const fallback = PurchaseSheetOptions(
+    types: ['Purchase Request', 'Repair Request'],
+    companies: [
+      'Manna Rubber Products',
+      'Hi-tech Rubber Industries',
+      'Hi-tech Pretreads',
+      'Manna Tyre Retreading',
+      'Soorya Rubbers',
+    ],
+    priorities: ['Emergency', 'High', 'Medium', 'Low'],
+    approvalStatuses: [
+      'Pending',
+      'Pending MD Approval',
+      'Approved',
+      'Limited Quantity Approved',
+      'On Hold',
+      'Rejected',
+    ],
+    purchaseStatuses: [
+      'Not Ordered',
+      'Finding Vendors',
+      'Gathering Quotations',
+      'Bidding Stage',
+      'Order Placed',
+      'Order Dispatched',
+      'Sent for repair',
+      'Received',
+      'Delivered',
+    ],
+    doneStatuses: ['Received', 'Delivered'],
+  );
+
+  final List<String> types;
+  final List<String> companies;
+  final List<String> priorities;
+  final List<String> approvalStatuses;
+  final List<String> purchaseStatuses;
+  final List<String> doneStatuses;
+
+  /// The choices for a [SheetColumnKind.pick] column; empty for any other.
+  List<String> choicesFor(String column) => switch (column) {
+        'type' => types,
+        'company' => companies,
+        'priority' => priorities,
+        'approvalStatus' => approvalStatuses,
+        'purchaseStatus' => purchaseStatuses,
+        _ => const [],
+      };
+
+  /// A list the server left out falls back to the built-in one rather than
+  /// leaving a dropdown with nothing in it.
+  factory PurchaseSheetOptions.fromJson(Map<String, dynamic> json) {
+    List<String> or(String key, List<String> fallback) {
+      final list = _asStrings(json[key]);
+      return list.isEmpty ? fallback : list;
+    }
+
+    const f = PurchaseSheetOptions.fallback;
+    return PurchaseSheetOptions(
+      types: or('types', f.types),
+      companies: or('companies', f.companies),
+      priorities: or('priorities', f.priorities),
+      approvalStatuses: or('approvalStatuses', f.approvalStatuses),
+      purchaseStatuses: or('purchaseStatuses', f.purchaseStatuses),
+      doneStatuses: or('doneStatuses', f.doneStatuses),
+    );
+  }
 }

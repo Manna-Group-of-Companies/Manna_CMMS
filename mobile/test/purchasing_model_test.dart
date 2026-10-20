@@ -2,89 +2,131 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stockmaster/models/purchasing.dart';
 
 void main() {
-  group('Low value purchase', () {
-    test('parses an ordered request with its lines and steps', () {
-      final record = LowValuePurchase.fromJson(const {
-        'id': 'LVP-2026-00012',
-        'plant': 'Manna Rubber Unit 1',
-        'department': 'Maintenance',
-        'status': 'Ordered',
-        'waitingOn': 'Delivery',
-        'urgency': 'Urgent',
-        'requiredBy': '2026-10-24',
-        'purpose': 'Belts for the mixer',
+  group('Purchase Request Sheet row', () {
+    test('parses a delivered row with its images and editable columns', () {
+      final row = PurchaseRequest.fromJson(const {
+        'id': 'PRS-00012',
+        'date': '2026-10-18',
+        'type': 'Repair Request',
+        'company': 'Hi-tech Pretreads',
+        'raisedByName': 'Anoop',
+        'description': 'Gearbox for the buffing machine\nOil seal',
+        'purpose': 'Buffing line stopped',
+        'links': 'Kottayam Traders 98470 00000',
+        'priority': 'Emergency',
+        'approvalStatus': 'Approved',
+        'purchaseStatus': 'Delivered',
+        'expectedOn': '2026-10-22',
+        'receivedOn': '2026-10-21',
+        'remarks': '',
+        'done': true,
         'raisedBy': 'manager@mannarubber.com',
-        'raisedAt': '2026-10-20 09:15:00',
-        'estTotal': 2400,
-        'total': '2350.5',
-        'lines': [
+        'raisedAt': '2026-10-18 09:15:00',
+        'updatedBy': 'shantu@mannarubber.com',
+        'updatedAt': '2026-10-21 11:00:00',
+        'files': '2',
+        'editable': ['purchaseStatus', 'remarks', 'expectedOn'],
+        'images': [
           {
-            'idx': 1,
-            'description': 'V-belt B42',
-            'specification': 'Fenner',
-            'qty': 2,
-            'unit': 'Nos',
-            'estRate': 1200,
-            'estAmount': 2400,
-            'rate': 1175.25,
-            'amount': 2350.5,
-            'remarks': '',
+            'id': 'f1',
+            'fileName': 'gearbox.jpg',
+            'url': '/private/files/gearbox.jpg',
+            'size': 20480,
+            'isPrivate': true,
+            'addedAt': '2026-10-18 09:16:00',
           },
         ],
-        'order': {
-          'vendorName': 'Kottayam Traders',
-          'vendorContact': '98470 00000',
-          'expectedOn': '2026-10-22',
-          'remarks': '',
-          'by': 'shantu@mannarubber.com',
-          'at': '2026-10-20 11:00:00',
-        },
-        'received': null,
-        'closed': null,
-        'may': {'order': false, 'receive': true, 'reject': false, 'withdraw': false},
-        'updatedAt': '2026-10-20 11:00:00',
       });
 
-      expect(record.id, 'LVP-2026-00012');
-      expect(record.isUrgent, isTrue);
-      expect(record.isOpen, isTrue);
-      expect(record.requiredBy, DateTime(2026, 10, 24));
-      expect(record.total, 2350.5, reason: 'a numeric string still reads as a number');
-      expect(record.hasActual, isTrue);
-      expect(record.lines.single.unit, 'Nos');
-      expect(record.lines.single.isPriced, isTrue);
-      expect(record.order?.vendorName, 'Kottayam Traders');
-      expect(record.received, isNull);
-      expect(record.may.receive, isTrue);
-      expect(record.may.order, isFalse);
-      expect(record.may.any, isTrue);
+      expect(row.id, 'PRS-00012');
+      expect(row.date, DateTime(2026, 10, 18));
+      expect(row.receivedOn, DateTime(2026, 10, 21));
+      expect(row.done, isTrue);
+      expect(row.files, 2, reason: 'a numeric string still reads as a number');
+      expect(row.imageCount, 1, reason: 'the images themselves win over the list count');
+      expect(row.images.single.isPrivate, isTrue);
+      expect(row.canEdit('purchaseStatus'), isTrue);
+      expect(row.canEdit('approvalStatus'), isFalse);
+      expect(row.canAttach, isTrue);
+      expect(row.textOf('description'), contains('\n'), reason: 'line breaks are kept');
+      expect(row.textOf('images'), '1 image');
+      expect(row.withImages(const []).imageCount, 2, reason: 'falls back to the count');
     });
 
-    test('a bare record defaults to a requested one nobody may move', () {
-      final record = LowValuePurchase.fromJson(const {'id': 'LVP-1'});
+    test('a bare row defaults to a pending, unordered request nobody may change', () {
+      final row = PurchaseRequest.fromJson(const {'id': 'PRS-1'});
 
-      expect(record.status, 'Requested');
-      expect(record.urgency, 'Normal');
-      expect(record.lines, isEmpty);
-      expect(record.order, isNull);
-      expect(record.hasActual, isFalse);
-      expect(record.may.any, isFalse);
+      expect(row.type, 'Purchase Request');
+      expect(row.approvalStatus, 'Pending');
+      expect(row.purchaseStatus, 'Not Ordered');
+      expect(row.done, isFalse);
+      expect(row.date, isNull);
+      expect(row.textOf('expectedOn'), '');
+      expect(row.editable, isEmpty);
+      expect(row.canAttach, isFalse);
+      expect(row.images, isEmpty);
     });
 
-    test('options carry the units, statuses, line limit and plants', () {
-      final options = LowValueOptions.fromJson(const {
-        'units': ['Nos', 'Kg'],
-        'statuses': ['Requested', 'Ordered', 'Received', 'Rejected', 'Withdrawn'],
-        'maxLines': 30,
-        'plants': [
-          {'name': 'Manna Rubber Unit 1', 'code': 'MR1'},
-        ],
+    test('search looks across the typed columns, ignoring case', () {
+      final row = PurchaseRequest.fromJson(const {
+        'id': 'PRS-7',
+        'company': 'Soorya Rubbers',
+        'raisedByName': 'Bincy',
+        'description': 'V-belt B42',
+        'links': 'Fenner',
       });
 
-      expect(options.units, ['Nos', 'Kg']);
-      expect(options.statuses, hasLength(5));
-      expect(options.maxLines, 30);
-      expect(options.plants.single.code, 'MR1');
+      expect(row.matches(''), isTrue);
+      expect(row.matches('fenner'), isTrue);
+      expect(row.matches('BINCY'), isTrue);
+      expect(row.matches('soorya'), isTrue);
+      expect(row.matches('gearbox'), isFalse);
+    });
+  });
+
+  group('Sheet columns', () {
+    test('run in the Google Sheet order, with the images in their place', () {
+      expect(sheetColumns.map((c) => c.label), [
+        'Date',
+        'Type of Request',
+        'Company',
+        'Raised By',
+        'Description',
+        'Purpose of Purchase/Repair',
+        'Image samples',
+        'Links/Brands or vendor contact',
+        'Priority',
+        'Status of Approval',
+        'Status of Purchase/Repair',
+        'Expected Date of Arrival',
+        'Received date',
+        'Remarks',
+      ]);
+    });
+  });
+
+  group('Sheet options', () {
+    test('carry the server lists and pick by column', () {
+      final options = PurchaseSheetOptions.fromJson(const {
+        'types': ['Purchase Request', 'Repair Request'],
+        'companies': ['Manna Rubber Products'],
+        'priorities': ['Emergency', 'High', 'Medium', 'Low'],
+        'approvalStatuses': ['Pending', 'Approved'],
+        'purchaseStatuses': ['Not Ordered', 'Received'],
+        'doneStatuses': ['Received'],
+      });
+
+      expect(options.companies, ['Manna Rubber Products']);
+      expect(options.choicesFor('approvalStatus'), ['Pending', 'Approved']);
+      expect(options.choicesFor('priority'), hasLength(4));
+      expect(options.choicesFor('remarks'), isEmpty);
+    });
+
+    test('a list left out falls back to the built-in one', () {
+      final options = PurchaseSheetOptions.fromJson(const {'companies': []});
+
+      expect(options.companies, PurchaseSheetOptions.fallback.companies);
+      expect(options.doneStatuses, ['Received', 'Delivered']);
     });
   });
 }

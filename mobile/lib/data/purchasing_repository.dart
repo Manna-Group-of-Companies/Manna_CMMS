@@ -1,98 +1,96 @@
 import '../core/api_client.dart';
 import '../models/purchasing.dart';
 
-/// Low value purchase requests, one method per endpoint.
+/// The Purchase Request Sheet, one method per endpoint.
 ///
 /// Kept apart from `MaintenanceRepository` for the same reason that one is
 /// apart from the stock catalog: a different half of the API, kept in ERPNext
 /// only, and a screen reading it should not have to wonder whether SAP is
 /// involved. It never is.
 ///
-/// Every step goes to `/:id/<step>`, and the server decides whether the
-/// signed-in person may take it - the record's `may` is how the screens know
-/// beforehand.
+/// A row is changed one column at a time with a `PUT` of just that column, and
+/// the server decides whether the signed-in person may - the row's `editable`
+/// is how the screens know beforehand.
 class PurchasingRepository {
   PurchasingRepository(this._api);
 
   final ApiClient _api;
 
-  LowValuePurchase _record(dynamic data) =>
-      LowValuePurchase.fromJson(data as Map<String, dynamic>);
+  PurchaseRequest _row(dynamic data) => PurchaseRequest.fromJson(data as Map<String, dynamic>);
 
-  /// Newest first. A plant head is sent their own plants' only.
-  Future<List<LowValuePurchase>> lowValuePurchases({String? status, String? plant}) async {
+  /// Newest first, every company's. Each filter is optional; [openOnly] leaves
+  /// out the rows already Received or Delivered.
+  Future<List<PurchaseRequest>> sheet({
+    String company = '',
+    String approval = '',
+    String purchase = '',
+    String type = '',
+    bool openOnly = false,
+  }) async {
     final data = await _api.get('/low-value-purchases', query: {
-      if (status != null && status.isNotEmpty) 'status': status,
-      if (plant != null && plant.isNotEmpty) 'plant': plant,
+      if (company.isNotEmpty) 'company': company,
+      if (approval.isNotEmpty) 'approval': approval,
+      if (purchase.isNotEmpty) 'purchase': purchase,
+      if (type.isNotEmpty) 'type': type,
+      if (openOnly) 'open': '1',
     });
     return (data as List? ?? [])
         .whereType<Map<String, dynamic>>()
-        .map(LowValuePurchase.fromJson)
+        .map(PurchaseRequest.fromJson)
         .toList(growable: false);
   }
 
-  Future<LowValueOptions> lowValueOptions() async {
+  Future<PurchaseSheetOptions> options() async {
     final data = await _api.get('/low-value-purchases/options');
-    return LowValueOptions.fromJson(data as Map<String, dynamic>);
+    return PurchaseSheetOptions.fromJson(data as Map<String, dynamic>);
   }
 
-  Future<LowValuePurchase> lowValuePurchase(String id) async =>
-      _record(await _api.get('/low-value-purchases/$id'));
+  /// The row with its images.
+  Future<PurchaseRequest> request(String id) async =>
+      _row(await _api.get('/low-value-purchases/$id'));
 
-  /// [lines] carries `description`, `specification`, `qty`, `unit`, `estRate`
-  /// and `remarks` per item.
-  Future<LowValuePurchase> raiseLowValue({
-    required String plant,
-    required String department,
-    required String urgency,
-    required String requiredBy,
-    required String purpose,
-    required List<Map<String, dynamic>> lines,
+  /// A new row. A blank [date] is today and a blank [raisedByName] is the
+  /// account's own name, both filled in by the server.
+  Future<PurchaseRequest> add({
+    String date = '',
+    required String type,
+    required String company,
+    String raisedByName = '',
+    required String description,
+    String purpose = '',
+    String links = '',
+    required String priority,
   }) async =>
-      _record(await _api.post('/low-value-purchases', {
-        'plant': plant,
-        'department': department,
-        'urgency': urgency,
-        'requiredBy': requiredBy,
+      _row(await _api.post('/low-value-purchases', {
+        if (date.isNotEmpty) 'date': date,
+        'type': type,
+        'company': company,
+        if (raisedByName.isNotEmpty) 'raisedByName': raisedByName,
+        'description': description,
         'purpose': purpose,
-        'lines': lines,
+        'links': links,
+        'priority': priority,
       }));
 
-  /// The purchase manager bought it. [rates] maps a line's `idx` to the rate
-  /// paid; a line left out keeps its estimate.
-  Future<LowValuePurchase> orderLowValue(
+  /// Changes one column. Dates go as "YYYY-MM-DD", or "" to empty one.
+  Future<PurchaseRequest> change(String id, String column, String value) async =>
+      _row(await _api.put('/low-value-purchases/$id', {column: value}));
+
+  /// Attaches an image already read into memory. Mirrors the breakdown photo.
+  Future<void> attachImage(
     String id, {
-    required String vendorName,
-    String vendorContact = '',
-    String expectedOn = '',
-    String remarks = '',
-    Map<int, double> rates = const {},
-  }) async =>
-      _record(await _api.post('/low-value-purchases/$id/order', {
-        'vendorName': vendorName,
-        'vendorContact': vendorContact,
-        'expectedOn': expectedOn,
-        'remarks': remarks,
-        'lines': [
-          for (final entry in rates.entries) {'idx': entry.key, 'rate': entry.value},
-        ],
-      }));
+    required String fileName,
+    required String contentType,
+    required String dataBase64,
+  }) async {
+    await _api.post('/low-value-purchases/$id/files', {
+      'fileName': fileName,
+      'contentType': contentType,
+      'dataBase64': dataBase64,
+    });
+  }
 
-  Future<LowValuePurchase> receiveLowValue(
-    String id, {
-    String billNo = '',
-    String billDate = '',
-    String remarks = '',
-  }) async =>
-      _record(await _api.post('/low-value-purchases/$id/receive', {
-        'billNo': billNo,
-        'billDate': billDate,
-        'remarks': remarks,
-      }));
-
-  Future<LowValuePurchase> rejectLowValue(String id, String reason) async =>
-      _record(await _api.post('/low-value-purchases/$id/reject', {'reason': reason}));
-
-  Future<LowValuePurchase> withdrawLowValue(String id, String reason) async =>
-      _record(await _api.post('/low-value-purchases/$id/withdraw', {'reason': reason}));
+  Future<void> removeImage(String id, String fileId) async {
+    await _api.delete('/low-value-purchases/$id/files/$fileId');
+  }
 }
