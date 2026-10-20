@@ -159,7 +159,7 @@ if ($newSeries.Count -gt 0) {
     Write-Host '-- Updating ERPNext item_master_options --' -ForegroundColor Cyan
 
     $envFile = Join-Path $PSScriptRoot '..\server\.env'
-    if (-not (Test-Path $envFile)) { throw "server/.env not found — cannot read ERPNext credentials" }
+    if (-not (Test-Path $envFile)) { throw "server/.env not found - cannot read ERPNext credentials" }
     $envLines = Get-Content $envFile
     $erpUrl    = ($envLines | Where-Object { $_ -match '^ERPNEXT_URL=' })    -replace '^ERPNEXT_URL=',''
     $erpKey    = ($envLines | Where-Object { $_ -match '^ERPNEXT_API_KEY=' }) -replace '^ERPNEXT_API_KEY=',''
