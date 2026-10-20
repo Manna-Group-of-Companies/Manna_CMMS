@@ -22,6 +22,7 @@ Read `C:\Users\eldhose\sap-tools\BRIEFING.md` before changing anything here.
 | `setup-goods-receipt.js` | 9 Oct: *CMMS Goods Receipt* (+ *Line*), *CMMS SAP Item Group Request*, `opening_qty` on the naming request, `open_po_lines` on the Single. Applied 9 Oct. |
 | `setup-purchase-request.js` | 9 Oct: *CMMS Purchase Request* (+ *Line*). Applied 9 Oct. |
 | `setup-goods-issue.js` | 10 Oct: *CMMS Goods Issue* (+ *Line*) - spares issued to breakdowns. Applied 12 Oct 2026. |
+| `setup-hsn-request.js` | 20 Oct: *CMMS SAP HSN Request* - new HSN codes typed on a goods receipt (PASS H). Applied 20 Oct 2026. |
 | `setup-erpnext.js` | Created the Item fields and the `SAP Item Category Sync Control` Single. Idempotent. |
 | `backfill-categories.js` | Filled the three category fields on the 567 items from SAP and published `engineering_groups`. |
 | `Sync-SapItemCategories.ps1` | **The item master sync** (name kept from day one). Creates item groups and items in SAP, pushes pending edits, posts receipts, publishes open PO lines, refreshes the options. |
@@ -130,6 +131,31 @@ Failed. Found 9 Oct: Manna Rubber had never used SAP Purchase Requests - every P
 then publishes it in `engineering_groups` / `item_master_options`. Renaming a group stays in the SAP client.
 Sub-category A / B are free text in SAP: a new value goes across with the first item filed under it.
 
+## New HSN codes from goods receipts (20 Oct 2026)
+
+On a goods receipt, an item with no HSN must get one from the bill. When the code typed is not in the
+company's SAP HSN list (`item_master_options.<abbr>.hsn`), the CMMS raises a **CMMS SAP HSN Request**
+(`setup-hsn-request.js`: company, HSN digits, goods receipt, item; status Queued → Created / Failed) besides
+setting the item's HSN and pending flag as it does for any bill HSN. Goods receipts only.
+
+- **PASS H** (`create_hsn`), right after login, before PASS 0: checks the code (4, 6 or 8 digits, chapter
+  01-98), adopts it if SAP already has it, else `POST /IndiaHsn` with Chapter / Heading / SubHeading split
+  2 / 2 / rest (as every existing row: `25` / `03` / `0010`) and Description "Added from CMMS goods receipt
+  GR-...". SAP derives `ChapterID` (`73.18.1500`) itself. Read back, request marked Created with
+  `sap_abs_entry` / `sap_chapter_id`, and the code joins this run's HSN list - PASS B puts it on the item in
+  the same run, and the next options refresh adds it to the CMMS dropdown.
+- **GST relevance.** SAP keeps an HSN only on a GST-relevant item: with `GSTRelevnt = tNO` it accepts the
+  PATCH and silently drops `ChapterID` (ENG-932, 19-20 Oct; reproduced in the demo company). PASS A sets
+  GST relevance on items it creates since 19 Oct; older items may lack it. `mark_gst_relevant` makes PASS B
+  send `GSTRelevnt = tYES`, `GSTTaxCategory = gtc_Regular` with the HSN; off, such an edit fails with
+  that reason.
+- **Receipts wait for their HSN.** A goods receipt with a line whose HSN request is not Created (Queued,
+  `create_hsn` off, or Failed), or whose item's HSN edit failed in the run, is **held**: left Queued, the
+  reason in its `error`, posted by a later run once the HSN is in SAP. A Failed request holds its receipt
+  until the CMMS sends it again (status back to Queued).
+- Tested 20 Oct 2026 in the demo company `HITECH_PRETREADS_DB`: POST 73/18/1500 → AbsEntry 19,
+  ChapterID `73.18.1500`; and the GST-relevance behaviour above (item I-10249, restored afterwards).
+
 ## How an edit reaches SAP (a flagged sync, BRIEFING §5)
 
 1. CMMS (catalog folder button, or Categories → rename) writes the new values on the ERPNext Item,
@@ -143,8 +169,10 @@ Sub-category A / B are free text in SAP: a new value goes across with the first 
 + editing engineering items (25 Sep 2026). It only creates items in a company's engineering groups, only
 PATCHes `ItemName, ForeignName, ChapterID, U_TaxRate, MinInventory, ItemsGroupCode, U_SubTypeA, U_SubTypeB`,
 and on 9 Oct 2026 engineering goods receipts (GRPO against the PO), nil-value stock additions, revaluing
-nil-valued engineering stock, and new engineering item groups. It never renames item groups or creates HSN
-codes, and only posts receipts for engineering items mirrored in the CMMS. Item groups drive nothing financially here: every
+nil-valued engineering stock, and new engineering item groups. On 20 Oct 2026 (approved by
+melvinmathew@mannarubber.com, an exception to rule 3 too): new HSN codes typed on a goods receipt (PASS H,
+`create_hsn`) and GST relevance on an item whose HSN is set (`mark_gst_relevant`). It never renames item
+groups, creates HSN codes only through PASS H, and only posts receipts for engineering items mirrored in the CMMS. Item groups drive nothing financially here: every
 engineering item uses G/L by warehouse (`glm_WH`), and the groups within a company carry identical accounts
 (checked 24 Sep).
 

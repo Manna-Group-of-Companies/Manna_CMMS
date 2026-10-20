@@ -22,6 +22,8 @@
   "post_issues": false,
   "post_purchase_orders": false,
   "pull_from_sap": false,
+  "create_hsn": false,
+  "mark_gst_relevant": false,
   "pr_requester": "",
   "skip_companies": []
 }

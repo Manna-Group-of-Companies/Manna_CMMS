@@ -19,7 +19,8 @@
       prefix (Manna Treads) - SAP's automatic series assigns it;
     * POST /Items with ItemName (the SOP name), ForeignName, ItemsGroupCode, U_SubTypeA/B, one unit as
       inventory/purchasing/sales UoM, ChapterID (the HSN code looked up in that company's IndiaHsn; none
-      for an item with no bill yet), U_TaxRate, MinInventory, and SWW = "IR<year>-<n>" (the request
+      for an item with no bill yet), U_TaxRate, MinInventory, GSTRelevnt = tYES and GSTTaxCategory = Regular
+      (fixed, user 19 Oct 2026), and SWW = "IR<year>-<n>" (the request
       number: an idempotency stamp - a request whose stamp is already in SAP is adopted, never twice);
     * creates the ERPNext copy "<abbr>-<SAP code>" on the Maintenance Store root with the mirrored fields
       and the company's store as default warehouse;
@@ -61,7 +62,7 @@
 
   PASS D - PURCHASE REQUESTS (post_purchase_requests). Every "CMMS Purchase Request" Queued: a SAP
   Purchase Request (PurchaseRequests) with its lines, RequriedDate = required by, raised under pr_requester
-  (ReqType 12; default the SAP login), the CMMS raiser and reason in Comments, Reference2 = "PR<yy>-<n>".
+  (ReqType 171 = employee), the CMMS raiser and reason in Comments, Reference2 = "PR<yy>-<n>".
   The purchase manager converts it to a PO in SAP; the open PO read below finds that PO (its lines carry
   BaseType 1470000113) and the CMMS request goes Ordered with the PO number - or Closed if SAP closed the
   request with no PO.
@@ -85,8 +86,23 @@
   used on breakdowns; on 20 Oct 2026 purchase orders for engineering purchase requests, made by the purchase
   manager in the CMMS. Every engineering goods receipt is made from the CMMS from then on; raw materials and
   consumables stay in SAP. It only creates items in a company's engineering item groups, only PATCHes the
-  fields above, only posts receipts for engineering items mirrored in the CMMS, never renames item groups
-  or creates HSN codes (SAP configuration, rule 3).
+  fields above, only posts receipts for engineering items mirrored in the CMMS, never renames item groups.
+  On 20 Oct 2026 (approved by melvinmathew@mannarubber.com, an exception to rule 3 as well): new HSN codes
+  typed on a CMMS goods receipt (PASS H), and - mark_gst_relevant - GST relevance on an item whose HSN is
+  being set. Apart from PASS H it never creates HSN codes (SAP configuration, rule 3).
+
+  PASS H - NEW HSN CODES (create_hsn). Every "CMMS SAP HSN Request" Queued for this company (raised by the
+  CMMS when a goods receipt line gives an item with no HSN a code that is not in the company's SAP HSN list):
+  POST /IndiaHsn with Chapter / Heading / SubHeading split 2 / 2 / rest, as every existing row is, and a
+  Description ("Added from CMMS goods receipt <receipt>" when the request has none); SAP derives ChapterID
+  ("73.18.1500") itself. A code already in SAP is adopted, never added twice. Read back to verify, added to
+  this run's HSN list so PASS A / B can use it, request marked Created (or Failed with SAP's message).
+  Runs right after login, before PASS 0. A goods receipt with a line whose HSN request is not Created, or
+  whose item's HSN edit failed in this run, is held (left Queued with the reason) rather than posted
+  without the HSN.
+  Verified 20 Oct 2026 in the demo company (HITECH_PRETREADS_DB): POST /IndiaHsn 73/18/1500 -> AbsEntry 19,
+  ChapterID "73.18.1500". And: SAP silently drops ChapterID on an item with GSTRelevnt = tNO (ENG-932,
+  created before 19 Oct) - it sticks only when GSTRelevnt = tYES is sent with it (mark_gst_relevant).
 
   Built per BRIEFING §2: curl.exe with "-H Expect:" (PowerShell 5.1 sends Expect: 100-continue and this
   Service Layer answers it with an empty 500); MANNA_TYRE_LIVE's own password from sap.password_overrides.
@@ -144,6 +160,10 @@ try {
     #   "create_groups": true      new engineering item groups
     #   "revalue_nil_stock": true  revalue nil-valued stock to a goods receipt's price before receiving it
     #   "post_issues": true        spares used on breakdowns (SAP Goods Issue + ERPNext Material Issue)
+    #   "create_hsn": true         new HSN codes typed on a goods receipt (PASS H, IndiaHsn)
+    #   "mark_gst_relevant": true  when an edit sets an HSN on an item with GSTRelevnt = tNO, send GSTRelevnt = tYES
+    #                              and GSTTaxCategory = Regular with it (as PASS A creates items); off: such an edit
+    #                              fails with that reason, because SAP would drop the HSN
     #   "edit_fields": [...]       any of $allEditFields, to narrow or widen what edits send
     $allEditFields = @('ItemName', 'ForeignName', 'ChapterID', 'U_TaxRate', 'MinInventory', 'ItemsGroupCode', 'U_SubTypeA', 'U_SubTypeB')
     $editFields = @('ItemName', 'ItemsGroupCode', 'U_SubTypeA', 'U_SubTypeB', 'ChapterID', 'U_TaxRate')
@@ -156,24 +176,52 @@ try {
     $revalueNil = Cfg-On 'revalue_nil_stock'
     $postPrs = Cfg-On 'post_purchase_requests'
     $postIssues = Cfg-On 'post_issues'
+    $createHsn = Cfg-On 'create_hsn'
+    $markGst = Cfg-On 'mark_gst_relevant'
     # The purchase manager's POs from purchase requests (20 Oct 2026), and the supplier / tax code lists for them.
     $postPos = Cfg-On 'post_purchase_orders'
     # Fetch from SAP: the engineering item groups' items (new ones, SAP-side changes) and their on-hand
     # quantity into the CMMS. Writes ERPNext only - SAP is read.
     $pullFromSap = Cfg-On 'pull_from_sap'
-    # The SAP user a purchase request is raised under (ReqType 12 = user); the CMMS raiser goes in its remarks.
+    # The SAP employee a purchase request is raised under (ReqType 171 = employee); the CMMS raiser goes in its remarks.
     $prRequester = if ($cfg.PSObject.Properties['pr_requester'] -and "$($cfg.pr_requester)".Trim()) { "$($cfg.pr_requester)".Trim() } else { "$($cfg.sap.username)" }
     # Companies left out entirely - no SAP login, their CMMS work stays Queued (13 Oct 2026: MANNA_TYRE_LIVE refused
     # its password twice, and SAP locks a user after 3 wrong passwords, so the watcher must not keep trying it).
     $skipDbs = @(@($SkipCompany) + @(if ($cfg.PSObject.Properties['skip_companies']) { @($cfg.skip_companies) }) | ForEach-Object { "$_".Trim().ToUpper() } | Where-Object { $_ })
 
-    # ------------------------------------------------------------------ ERPNext
+    # ------------------------------------------------------------------ curl + TLS
+    $curl = (Get-Command curl.exe).Source
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $erp = "$($cfg.erpnext.url)".TrimEnd('/')
-    $erpHdr = @{ Authorization = ('token {0}:{1}' -f $cfg.erpnext.api_key, $cfg.erpnext.api_secret) }
-    function Erp-Get([string] $Path) { Invoke-RestMethod -Method Get -Uri "$erp$Path" -Headers $erpHdr -TimeoutSec 60 }
+    $erpAuth = 'token {0}:{1}' -f $cfg.erpnext.api_key, $cfg.erpnext.api_secret
+    function Erp-Get([string] $Path) {
+        $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $resp = Join-Path $env:TEMP "erp-$tag.txt"
+        try {
+            $url = "$erp$Path" -replace ' ', '%20'
+            $code = & $curl -k -s --globoff --connect-timeout 15 --max-time 60 -H "Expect:" -H "Authorization: $erpAuth" -o $resp -w "%{http_code}" -X GET $url
+            if ($code -ne '200') { throw "ERPNext GET $Path HTTP $code" }
+            [IO.File]::ReadAllText($resp) | ConvertFrom-Json
+        } finally { if (Test-Path -LiteralPath $resp) { [IO.File]::Delete($resp) } }
+    }
     function Erp-Send([string] $Method, [string] $Path, $Body) {
-        Invoke-RestMethod -Method $Method -Uri "$erp$Path" -Headers $erpHdr -ContentType 'application/json; charset=utf-8' -Body $utf8.GetBytes(($Body | ConvertTo-Json -Compress -Depth 10)) -TimeoutSec 60
+        $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $resp = Join-Path $env:TEMP "erp-$tag.txt"
+        $bodyFile = Join-Path $env:TEMP "erp-$tag-body.json"
+        $json = $Body | ConvertTo-Json -Compress -Depth 10
+        [IO.File]::WriteAllText($bodyFile, $json, $utf8)
+        try {
+            $url = "$erp$Path" -replace ' ', '%20'
+            $code = & $curl -k -s --globoff --connect-timeout 15 --max-time 60 -H "Expect:" -H "Authorization: $erpAuth" -H "Content-Type: application/json; charset=utf-8" -o $resp -w "%{http_code}" -X $Method --data-binary "@$bodyFile" $url
+            if ($code -lt '200' -or $code -ge '300') {
+                $errText = if (Test-Path -LiteralPath $resp) { [IO.File]::ReadAllText($resp) } else { '' }
+                throw "ERPNext $Method $Path HTTP $code`: $errText"
+            }
+            [IO.File]::ReadAllText($resp) | ConvertFrom-Json
+        } finally {
+            if (Test-Path -LiteralPath $resp) { [IO.File]::Delete($resp) }
+            if (Test-Path -LiteralPath $bodyFile) { [IO.File]::Delete($bodyFile) }
+        }
     }
     function Res([string] $Doctype, [string] $Name) { "/api/resource/$([uri]::EscapeDataString($Doctype))" + $(if ($Name) { "/$([uri]::EscapeDataString($Name))" } else { '' }) }
     # Filters are passed as Frappe JSON text: nested arrays built in PowerShell collapse or double-wrap.
@@ -214,11 +262,21 @@ try {
     try { $issues = @(Erp-List 'CMMS Goods Issue' @('name') '[["status","=","Queued"]]' | ForEach-Object { (Erp-Get (Res 'CMMS Goods Issue' $_.name)).data }) }
     catch { if ($postIssues) { Log WARN ("goods issues not read (run setup-goods-issue.js --apply?): {0}" -f $_.Exception.Message) } }
     if (-not $postIssues -and $issues.Count) { Log INFO ("{0} spares issue(s) left Queued - posting them is off (post_issues)." -f $issues.Count); $issues = @() }
+    # New HSN codes from goods receipts (PASS H). Failed ones are read too: their receipts stay held until the
+    # CMMS sends the request again. Read in a try: the doctype exists only once setup-hsn-request.js is applied.
+    $hsnReqs = @()
+    try { $hsnReqs = @(Erp-List 'CMMS SAP HSN Request' @('name', 'company', 'hsn_code', 'description', 'goods_receipt', 'item', 'status', 'error') '[["status","in",["Queued","Failed"]]]') }
+    catch { if ($createHsn) { Log WARN ("HSN requests not read (run setup-hsn-request.js --apply?): {0}" -f $_.Exception.Message) } }
+    $hsnState = @{}; foreach ($hq in $hsnReqs) { $hsnState["$($hq.name)"] = "$($hq.status)" }
+    $hsnQueued = @($hsnReqs | Where-Object { "$($_.status)" -eq 'Queued' })
+    if (-not $createHsn -and $hsnQueued.Count) { Log INFO ("{0} HSN request(s) left Queued - creating HSN codes is off (create_hsn); their goods receipts are held." -f $hsnQueued.Count); $hsnQueued = @() }
+    # Items whose HSN edit (PASS B) failed in this run: their goods receipts are held as well.
+    $hsnEditFailed = @{}
     if (-not $createItems -and $creates.Count) { Log INFO ("{0} approved request(s) left Queued - creating items in SAP is off (create_items)." -f $creates.Count); $creates = @() }
     if (-not $postReceipts -and $receipts.Count) { Log INFO ("{0} receipt(s) left Queued - posting receipts is off (post_receipts)." -f $receipts.Count); $receipts = @() }
     if (-not $createGroups -and $groupReqs.Count) { Log INFO ("{0} item group request(s) left Queued - creating groups is off (create_groups)." -f $groupReqs.Count); $groupReqs = @() }
     if ($Limit -gt 0) { $creates = @($creates | Select-Object -First $Limit); $edits = @($edits | Select-Object -First $Limit); $receipts = @($receipts | Select-Object -First $Limit); $issues = @($issues | Select-Object -First $Limit) }
-    Log INFO ("{0} item(s) to create, {1} with pending edits, {2} receipt(s), {3} spares issue(s), {4} new item group(s); edits send {5}{6}." -f $creates.Count, $edits.Count, $receipts.Count, $issues.Count, $groupReqs.Count, ($editFields -join ', '), $(if ($DryRun) { ' - DRY RUN, nothing will be written' } else { '' }))
+    Log INFO ("{0} item(s) to create, {1} with pending edits, {2} receipt(s), {3} spares issue(s), {4} new item group(s), {5} new HSN code(s); edits send {6}{7}." -f $creates.Count, $edits.Count, $receipts.Count, $issues.Count, $groupReqs.Count, $hsnQueued.Count, ($editFields -join ', '), $(if ($DryRun) { ' - DRY RUN, nothing will be written' } else { '' }))
     # No early exit: every run also re-reads each company's open PO lines for the goods receipt form.
 
     # The engineering items ERPNext mirrors, per company: SAP code -> ERPNext item (for the open PO lines).
@@ -241,7 +299,6 @@ try {
     $result['receipts'] = 0; $result['groups'] = 0; $result['prs'] = 0; $result['fetched'] = 0; $result['issues'] = 0; $result['pos'] = 0
 
     # ------------------------------------------------------------------ SAP (curl.exe, BRIEFING §2)
-    $curl = (Get-Command curl.exe).Source
     $slBase = "$($cfg.sap.url)".TrimEnd('/')
     $slRoot = ([Uri]$slBase).GetLeftPart([UriPartial]::Authority)
     $US = [string][char]0x1F
@@ -347,7 +404,7 @@ try {
 
             # This company's HSN list: digits -> AbsEntry (ChapterID). Only read when HSN is written.
             $hsn = @{}; $hsnList = New-Object System.Collections.ArrayList
-            $needHsn = $w.creates.Count -gt 0 -or $editFields -contains 'ChapterID' -or $pullFromSap
+            $needHsn = $w.creates.Count -gt 0 -or $editFields -contains 'ChapterID' -or $pullFromSap -or $w.hsnReqs.Count -gt 0
             if ($needHsn) {
                 foreach ($h in (Sl-All 'IndiaHsn?$select=AbsEntry,Chapter,Heading,SubHeading' $jar)) {
                     $d = Digits ("{0}{1}{2}" -f $h.Chapter, $h.Heading, $h.SubHeading)
@@ -360,6 +417,55 @@ try {
                 if (-not $hsn.ContainsKey($d)) { throw "HSN $d is not in $db's HSN list in SAP" }
                 $hsn[$d]
             }
+
+            # ---------------- PASS H: new HSN codes typed on a goods receipt (create_hsn)
+            # Split 2 / 2 / rest, as every IndiaHsn row is (25 / 03 / 0010, 32 / 09 / -); SAP derives ChapterID
+            # ("73.18.1500") itself. A code SAP already has is adopted. Before PASS 0, so PASS A / B can use it.
+            # In a dry run the new code gets the placeholder entry -2, so PASS B shows the edit it would make.
+            foreach ($hq in $w.hsnReqs) {
+                $d = Digits $hq.hsn_code
+                $entry = [ordered]@{ kind = 'hsn'; request = "$($hq.name)"; sap_db = $db; hsn = $d; action = ''; sap_hsn = $null; error = '' }
+                $payload = $null
+                try {
+                    if (@(4, 6, 8) -notcontains $d.Length) { throw "HSN '$($hq.hsn_code)' must be 4, 6 or 8 digits" }
+                    $chap = [int]$d.Substring(0, 2)
+                    if ($chap -lt 1 -or $chap -gt 98 -or $chap -eq 77) { throw "HSN $d has no valid chapter ($($d.Substring(0, 2)))" }
+                    if ($hsn.ContainsKey($d)) { $abs = $hsn[$d]; $entry.action = 'adopted (already in SAP)' }
+                    else {
+                        $desc = Norm $hq.description
+                        if (-not $desc) { $desc = ('Added from CMMS goods receipt {0}' -f "$($hq.goods_receipt)").Trim() }
+                        if ($desc.Length -gt 100) { $desc = $desc.Substring(0, 100) }
+                        $payload = [ordered]@{ Chapter = $d.Substring(0, 2); Heading = $d.Substring(2, 2); SubHeading = $d.Substring(4); Description = $desc }
+                        if ($DryRun) { $abs = -2; $entry.action = 'would create' }
+                        else {
+                            $pr = Invoke-Sl -Method POST -Url "$slBase/IndiaHsn" -Body ($payload | ConvertTo-Json -Compress) -Jar $jar
+                            if ($pr.Http -ne '201' -and $pr.Http -ne '200') { Sl-Fail $pr 'create HSN code' }
+                            $abs = [int](($pr.Body | ConvertFrom-Json).AbsEntry)
+                            $entry.action = 'created in SAP'; $result['hsn']++
+                        }
+                        $hsn[$d] = $abs; [void]$hsnList.Add($d)
+                    }
+                    $entry.sap_hsn = $abs
+                    if (-not $DryRun) {
+                        # Read back: the row SAP holds under that entry must carry the same digits.
+                        $v = Invoke-Sl -Method GET -Url ("$slBase/IndiaHsn({0})?`$select=AbsEntry,Chapter,Heading,SubHeading,ChapterID" -f $abs) -Jar $jar
+                        if ($v.Http -ne '200') { Sl-Fail $v "read back HSN entry $abs" }
+                        $vb = $v.Body | ConvertFrom-Json
+                        $back = Digits ("{0}{1}{2}" -f $vb.Chapter, $vb.Heading, $vb.SubHeading)
+                        if ($back -ne $d) { throw "SAP HSN entry $abs reads back $back, not $d" }
+                        $null = Erp-Send PUT (Res 'CMMS SAP HSN Request' $hq.name) @{ status = 'Created'; sap_abs_entry = $abs; sap_chapter_id = "$($vb.ChapterID)"; created_at = (Now-Ist); error = '' }
+                        $hsnState["$($hq.name)"] = 'Created'
+                    }
+                    Log INFO ("{0} [{1}]: HSN {2} {3} {4}" -f $hq.name, $db, $d, $entry.action, $(if ($DryRun -and $payload) { ($payload | ConvertTo-Json -Compress) } else { "(entry $abs)" }))
+                } catch {
+                    $entry.action = 'failed'; $entry.error = $_.Exception.Message; $result.failures++
+                    $hsnState["$($hq.name)"] = 'Failed'; $hq.error = $entry.error
+                    Log ERROR ("{0} [{1}]: {2}" -f $hq.name, $db, $entry.error)
+                    if (-not $DryRun) { try { $null = Erp-Send PUT (Res 'CMMS SAP HSN Request' $hq.name) @{ status = 'Failed'; error = $entry.error.Substring(0, [Math]::Min(500, $entry.error.Length)) } } catch { Log WARN "could not record the failure on $($hq.name): $($_.Exception.Message)" } }
+                }
+                $result.items += [pscustomobject]$entry
+            }
+
             # ---------------- PASS 0: new engineering item groups (create_groups)
             # Every account and setting is copied from the company's existing engineering group the CMMS chose,
             # so the new group posts exactly as that one does. The warehouse default-bin rows are not copied.
@@ -438,6 +544,9 @@ try {
                             InventoryItem = 'tYES'; SalesItem = 'tYES'; PurchaseItem = 'tYES'; ProcurementMethod = 'bom_Buy'
                             UoMGroupEntry = -1; InventoryUOM = $unit; PurchaseUnit = $unit; SalesUnit = $unit
                             SWW = $stamp; Series = [int]$opt.series
+                            # India GST (user, 19 Oct 2026): every engineering item the CMMS creates is GST relevant with
+                            # tax category Regular - fixed values, no CMMS input. GSTTaxCategoryEnum: gtc_Regular / gtc_NilRated / gtc_Exempt.
+                            GSTRelevnt = 'tYES'; GSTTaxCategory = 'gtc_Regular'
                         }
                         if ((Norm $c.foreign_name)) { $payload.ForeignName = Norm $c.foreign_name }
                         if ((Norm $c.sap_sub_type_a)) { $payload.U_SubTypeA = Norm $c.sap_sub_type_a }
@@ -548,15 +657,23 @@ try {
                     $want = [ordered]@{}; foreach ($k in $editFields) { $want[$k] = & $spec[$k].want $it }
                     if ($want.Contains('ItemName') -and (-not $want.ItemName -or $want.ItemName.Length -gt 100)) { throw 'the description is empty or longer than SAP allows (100)' }
                     if (($want.Contains('U_SubTypeA') -and $want.U_SubTypeA.Length -gt 50) -or ($want.Contains('U_SubTypeB') -and $want.U_SubTypeB.Length -gt 50)) { throw 'SubType A/B is longer than SAP allows (50)' }
-                    $r = Invoke-Sl -Method GET -Url ((Key-Url $code) + '?$select=ItemCode,' + ($editFields -join ',') + $(if ($editFields -contains 'MinInventory') { ',ManageStockByWarehouse' } else { '' })) -Jar $jar
+                    $r = Invoke-Sl -Method GET -Url ((Key-Url $code) + '?$select=ItemCode,' + ($editFields -join ',') + $(if ($editFields -contains 'MinInventory') { ',ManageStockByWarehouse' } else { '' }) + $(if ($editFields -contains 'ChapterID') { ',GSTRelevnt' } else { '' })) -Jar $jar
                     if ($r.Http -ne '200') { Sl-Fail $r 'read item' }
                     $cur = $r.Body | ConvertFrom-Json
                     $patch = [ordered]@{}
                     foreach ($k in $want.Keys) {
                         $a = $cur.$k; $b = $want[$k]
-                        $same = if ($b -is [int] -or $b -is [double]) { [double]("0$a") -eq [double]$b -or ("$a" -eq "$b") } else { (Norm $a) -ceq $b }
-                        if ($k -eq 'ChapterID' -and [int]$b -eq -1 -and ([int]("0$a") -le 0)) { $same = $true }
+                        $same = if ($b -is [int] -or $b -is [double]) { $da = if ("$a" -match '^\s*$') { 0 } else { [double]$a }; $da -eq [double]$b -or ("$a" -eq "$b") } else { (Norm $a) -ceq $b }
+                        if ($k -eq 'ChapterID' -and [int]$b -eq -1 -and ($(if ("$a" -match '^\s*$') { 0 } else { [int]$a }) -le 0)) { $same = $true }
                         if (-not $same) { $patch[$k] = $b; $entry.changes[$k] = @{ from = "$a"; to = "$b" } }
+                    }
+                    # SAP keeps an HSN only on a GST-relevant item: with GSTRelevnt = tNO it accepts the PATCH and drops
+                    # ChapterID (ENG-932, 19-20 Oct 2026; reproduced in the demo company). mark_gst_relevant sends the
+                    # values PASS A creates items with; otherwise say why, instead of the read-back mismatch.
+                    if ($patch.Contains('ChapterID') -and [int]$patch.ChapterID -ne -1 -and "$($cur.GSTRelevnt)" -ne 'tYES') {
+                        if (-not $markGst) { throw ("SAP item {0} is not GST-relevant (GSTRelevnt = {1}), so SAP would drop its HSN - turn on mark_gst_relevant, or tick GST on the item in SAP" -f $code, $cur.GSTRelevnt) }
+                        $patch['GSTRelevnt'] = 'tYES'; $patch['GSTTaxCategory'] = 'gtc_Regular'
+                        $entry.changes['GSTRelevnt'] = @{ from = "$($cur.GSTRelevnt)"; to = 'tYES' }
                     }
                     if ($patch.Count -eq 0) { $entry.action = 'already in SAP' }
                     elseif ($DryRun) { $entry.action = 'would patch' }
@@ -574,7 +691,7 @@ try {
                         $pr = Invoke-Sl -Method PATCH -Url (Key-Url $code) -Body ($body | ConvertTo-Json -Compress -Depth 5) -Jar $jar
                         if ($pr.Http -ne '204' -and $pr.Http -ne '200') { Sl-Fail $pr 'PATCH' }
                         $v = (Invoke-Sl -Method GET -Url ((Key-Url $code) + '?$select=' + (($patch.Keys) -join ',')) -Jar $jar).Body | ConvertFrom-Json
-                        foreach ($k in $patch.Keys) { if ("$($v.$k)" -ne "$($patch[$k])" -and [double]("0$($v.$k)") -ne [double]("0$($patch[$k])")) { throw "SAP accepted the PATCH but reads back $k = '$($v.$k)'" } }
+                        foreach ($k in $patch.Keys) { $vk = "$($v.$k)"; $pk = "$($patch[$k])"; if ($vk -ne $pk -and ([double]$(if ($vk.Trim()) { $vk } else { '0' })) -ne ([double]$(if ("$pk".Trim()) { "$pk" } else { '0' }))) { throw "SAP accepted the PATCH but reads back $k = '$vk'" } }
                         $entry.action = 'patched'; $result.changed++
                     }
                     if (-not $DryRun) {
@@ -588,6 +705,8 @@ try {
                 } catch {
                     $entry.action = 'failed'; $entry.error = $_.Exception.Message; $result.failures++
                     Log ERROR ("{0} [{1}]: {2}" -f $it.name, $db, $entry.error)
+                    # The item carries an HSN that may not have reached SAP: hold its goods receipts (PASS C).
+                    if ($editFields -contains 'ChapterID' -and (Digits $it.custom_sap_hsn_code)) { $hsnEditFailed["$($it.name)"] = $entry.error }
                     if (-not $DryRun) { try { $null = Erp-Send PUT (Res 'Item' $it.name) @{ custom_sap_category_error = $entry.error.Substring(0, [Math]::Min(500, $entry.error.Length)) } } catch { Log WARN "could not record the error on $($it.name): $($_.Exception.Message)" } }
                 }
                 $result.items += [pscustomobject]$entry
@@ -604,6 +723,24 @@ try {
             foreach ($rc in $w.receipts) {
                 $entry = [ordered]@{ kind = 'receipt'; receipt = "$($rc.name)"; type = "$($rc.kind)"; sap_db = $db; action = ''; sap_doc = ''; revaluation = ''; erp = ''; error = '' }
                 $sapDone = $false; $docEntry = $null; $docNum = ''
+                # Held, not posted, while an HSN its lines brought is not in SAP yet (PASS H request not Created, or
+                # the item's HSN edit failed in this run): left Queued with the reason, posted on a later run.
+                if ("$($rc.kind)" -eq 'Goods Receipt') {
+                    $waits = @()
+                    foreach ($hq in @($hsnReqs | Where-Object { "$($_.goods_receipt)" -eq "$($rc.name)" })) {
+                        $st = $hsnState["$($hq.name)"]
+                        if ($st -ne 'Created') { $waits += ("HSN {0} ({1}) is {2}{3}" -f (Digits $hq.hsn_code), $hq.name, $st, $(if ($st -eq 'Failed' -and "$($hq.error)".Trim()) { ': ' + "$($hq.error)".Trim() } else { '' })) }
+                    }
+                    foreach ($l in @($rc.lines)) { if ($hsnEditFailed.ContainsKey("$($l.item)")) { $waits += ("HSN of {0} not set in SAP: {1}" -f $l.item, $hsnEditFailed["$($l.item)"]) } }
+                    if ($waits.Count) {
+                        $why = 'waiting for HSN in SAP - ' + ($waits -join ' | ')
+                        $entry.action = 'held'; $entry.error = $why
+                        Log WARN ("{0} [{1}]: held, not posted - {2}" -f $rc.name, $db, $why)
+                        if (-not $DryRun) { try { $null = Erp-Send PUT (Res 'CMMS Goods Receipt' $rc.name) @{ error = $why.Substring(0, [Math]::Min(500, $why.Length)) } } catch { Log WARN "could not record the hold on $($rc.name): $($_.Exception.Message)" } }
+                        $result.items += [pscustomobject]$entry
+                        continue
+                    }
+                }
                 try {
                     $lines = @($rc.lines)
                     if (-not $lines.Count) { throw 'the receipt has no lines' }
@@ -784,7 +921,7 @@ try {
             }
 
             # ---------------- PASS D: purchase requests (post_purchase_requests)
-            # A SAP Purchase Request (PurchaseRequests) per CMMS request, raised under $prRequester (ReqType 12),
+            # A SAP Purchase Request (PurchaseRequests) per CMMS request, raised under $prRequester (ReqType 171 = employee),
             # the CMMS raiser and reason in Comments; Reference2 = "PR<yy>-<n>" makes a re-run adopt it.
             foreach ($pq in $w.prs) {
                 $entry = [ordered]@{ kind = 'purchase request'; request = "$($pq.name)"; sap_db = $db; action = ''; sap_doc = ''; error = '' }
@@ -800,7 +937,7 @@ try {
                         $comments = ("CMMS {0} by {1}: {2}" -f $pq.name, $pq.raised_by, (Norm $pq.reason))
                         if ($comments.Length -gt 254) { $comments = $comments.Substring(0, 254) }
                         $payload = [ordered]@{
-                            DocDate = $today; RequriedDate = "$($pq.required_by)"; ReqType = 12; ReqCode = $prRequester
+                            DocDate = $today; RequriedDate = "$($pq.required_by)"; ReqType = 171; ReqCode = $prRequester
                             RequesterEmail = "$($pq.raised_by)"; Reference2 = $stamp; Comments = $comments
                             DocumentLines = @(foreach ($l in $lines) {
                                 $ln = [ordered]@{ ItemCode = "$($l.sap_item_code)"; Quantity = [double]$l.qty; RequiredDate = "$($pq.required_by)"; WarehouseCode = $whOf }
@@ -808,6 +945,7 @@ try {
                                 $ln
                             })
                         }
+                        if ($opt.PSObject.Properties['pr_series'] -and [int]$opt.pr_series) { $payload['Series'] = [int]$opt.pr_series }
                         if ($DryRun) { $entry.action = 'would post PurchaseRequests'; $entry.payload = $payload }
                         else {
                             $pr = Invoke-Sl -Method POST -Url "$slBase/PurchaseRequests" -Body ($payload | ConvertTo-Json -Compress -Depth 6) -Jar $jar
@@ -922,12 +1060,14 @@ try {
                         # ERPNext's item_name holds 140 characters, SAP's ItemName 200 (MRPPL-ENG-141 has ~170): cut it,
                         # and keep the full name in the description, as the 24 Sep import did.
                         $fullName = Norm $si.ItemName
+                        $sapUom = $uomOf["$($si.InventoryUOM)".Trim().ToUpper()]; if (-not $sapUom) { $sapUom = 'Nos' }
                         $want = [ordered]@{
                             item_name = (Norm $(if ($fullName.Length -gt 140) { $fullName.Substring(0, 140) } else { $fullName })); custom_sap_item_group = $groupName[[int]$si.ItemsGroupCode]
                             custom_sap_sub_type_a = (Norm $si.U_SubTypeA); custom_sap_sub_type_b = (Norm $si.U_SubTypeB)
                             custom_sap_foreign_name = (Norm $si.ForeignName)
                             custom_sap_hsn_code = $(if ($ch -gt 0 -and $chapterDigits.ContainsKey($ch)) { $chapterDigits[$ch] } else { '' })
                             custom_sap_tax_rate = (Norm $si.U_TaxRate); safety_stock = [double]("0$($si.MinInventory)")
+                            stock_uom = $sapUom
                             disabled = $(if ($active) { 0 } else { 1 })
                         }
                         $it = $mine[$code]
@@ -958,7 +1098,20 @@ try {
                         }
                         if ($diff.Count) {
                             if ($diff.Contains('item_name')) { $diff.description = $fullName }
-                            if (-not $DryRun) { $null = Erp-Send PUT (Res 'Item' "$($it.name)") $diff }
+                            if ($diff.Contains('stock_uom')) {
+                                $newUom = $diff['stock_uom']
+                                $diff['uoms'] = @(@{ doctype = 'UOM Conversion Detail'; uom = $newUom; conversion_factor = 1 })
+                            }
+                            if (-not $DryRun) {
+                                try { $null = Erp-Send PUT (Res 'Item' "$($it.name)") $diff }
+                                catch {
+                                    if ($diff.Contains('stock_uom')) {
+                                        Log WARN ("{0}: UOM change to {1} failed ({2}), retrying without UOM" -f $it.name, $diff['stock_uom'], $_.Exception.Message)
+                                        $diff.Remove('stock_uom'); $diff.Remove('uoms')
+                                        if ($diff.Count) { $null = Erp-Send PUT (Res 'Item' "$($it.name)") $diff }
+                                    } else { throw }
+                                }
+                            }
                             if ($diff.Contains('disabled')) { if ($diff.disabled -eq 0) { $mirror[$abbr][$code] = $it } else { $mirror[$abbr].Remove($code) } }
                             $nUpd++
                             Log INFO ("{0} [{1}]: {2} from SAP - {3}" -f $it.name, $db, $(if ($DryRun) { 'would update' } else { 'updated' }), (($diff.Keys | Where-Object { $_ -ne 'description' }) -join ', '))
