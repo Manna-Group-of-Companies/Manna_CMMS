@@ -2,15 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
-  CheckCircle2,
   ChevronDown,
-  Clock,
   FileSpreadsheet,
   Filter,
-  Flame,
-  Truck,
   Image as ImageIcon,
   Loader2,
+  Maximize2,
+  Minimize2,
   Paperclip,
   Plus,
   Printer,
@@ -99,40 +97,6 @@ const CHIP = {
 };
 
 const OPEN = (r) => !r.done && !["Rejected"].includes(r.approvalStatus);
-
-/** The tiles above the sheet, and what each narrows it to. */
-const QUICK = {
-  waiting: {
-    label: "Awaiting approval",
-    icon: Clock,
-    tone: "bg-amber-100 text-amber-700",
-    test: (r) => ["Pending", "Pending MD Approval", "On Hold"].includes(r.approvalStatus),
-  },
-  buying: {
-    label: "Approved, not received",
-    icon: Truck,
-    tone: "bg-blue-100 text-blue-700",
-    test: (r) => ["Approved", "Limited Quantity Approved"].includes(r.approvalStatus) && !r.done,
-  },
-  emergency: {
-    label: "Emergency, open",
-    icon: Flame,
-    tone: "bg-rose-100 text-rose-700",
-    test: (r) => r.priority === "Emergency" && OPEN(r),
-  },
-  done: {
-    label: "Received / delivered",
-    icon: CheckCircle2,
-    tone: "bg-emerald-100 text-emerald-700",
-    test: (r) => r.done,
-  },
-  rejected: {
-    label: "Rejected",
-    icon: X,
-    tone: "bg-slate-200 text-slate-600",
-    test: (r) => r.approvalStatus === "Rejected",
-  },
-};
 
 const EMPTY_OPTIONS = {
   types: [],
@@ -227,10 +191,17 @@ const LowValuePurchases = () => {
   const [filters, setFilters] = useState({ company: "", type: "", approval: "", purchase: "" });
   const [openOnly, setOpenOnly] = useState(false);
   const [search, setSearch] = useState("");
-  // A tile pressed above the sheet; narrows what is already loaded.
-  const [quick, setQuick] = useState("");
   // The filters fold away on a phone, where they would take the whole screen.
   const [showFilters, setShowFilters] = useState(false);
+  // The sheet over the whole window, menus and all hidden; Esc brings them back.
+  const [fullScreen, setFullScreen] = useState(false);
+
+  useEffect(() => {
+    if (!fullScreen) return undefined;
+    const onKey = (e) => e.key === "Escape" && !editing && setFullScreen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullScreen, editing]);
   const [editing, setEditing] = useState(null); // { id, key }
   const [imagesFor, setImagesFor] = useState(null); // a row
   const [raising, setRaising] = useState(false);
@@ -262,21 +233,14 @@ const LowValuePurchases = () => {
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const test = QUICK[quick]?.test;
     return rows.filter(
       (r) =>
-        (!test || test(r)) &&
-        (!q ||
-          [r.description, r.purpose, r.remarks, r.raisedByName, r.company].some((v) =>
-            String(v || "").toLowerCase().includes(q)
-          ))
+        !q ||
+        [r.description, r.purpose, r.remarks, r.raisedByName, r.company].some((v) =>
+          String(v || "").toLowerCase().includes(q)
+        )
     );
-  }, [rows, search, quick]);
-
-  const tally = useMemo(
-    () => Object.fromEntries(Object.entries(QUICK).map(([k, q]) => [k, rows.filter(q.test).length])),
-    [rows]
-  );
+  }, [rows, search]);
   const activeFilters = Object.values(filters).filter(Boolean).length + (openOnly ? 1 : 0);
 
   const doneStatuses = options?.doneStatuses || EMPTY_OPTIONS.doneStatuses;
@@ -312,39 +276,12 @@ const LowValuePurchases = () => {
 
   return (
     <div className="space-y-4">
-      {/* What needs attention, at a glance. Each tile also narrows the sheet. */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-        {Object.entries(QUICK).map(([key, q]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setQuick((k) => (k === key ? "" : key))}
-            className={`card flex cursor-pointer items-center gap-3 p-3 text-left transition hover:-translate-y-px hover:shadow-md ${
-              quick === key ? "ring-2 ring-brand-500" : ""
-            }`}
-            aria-pressed={quick === key}
-          >
-            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${q.tone}`}>
-              <q.icon className="h-[18px] w-[18px]" />
-            </span>
-            <span className="min-w-0">
-              <span className="block text-xl font-bold leading-6 text-slate-900">{tally[key] ?? 0}</span>
-              <span className="block truncate text-[12px] text-slate-500">{q.label}</span>
-            </span>
-          </button>
-        ))}
-      </div>
-
-      <div className="card overflow-hidden">
-        <div className="flex items-center gap-3 border-b border-slate-200 px-4 py-2.5">
-          <FileSpreadsheet className="h-5 w-5 shrink-0 text-brand-600" />
-          <h2 className="text-base font-bold text-slate-900 sm:text-lg">Purchase Request Sheet</h2>
-          <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[12px] font-semibold text-slate-700">
-            {shown.length} {shown.length === 1 ? "row" : "rows"}
-          </span>
-        </div>
-
-        <div className="space-y-2 border-b border-slate-200 bg-slate-50/60 p-3">
+      <div
+        className={`card flex flex-col overflow-hidden ${
+          fullScreen ? "fixed inset-0 z-50 rounded-none" : "md:h-[calc(100dvh-7.5rem)]"
+        }`}
+      >
+        <div className="shrink-0 space-y-2 border-b border-slate-200 bg-slate-50/60 p-3">
           <div className="flex items-center gap-2">
             <div className="relative min-w-0 flex-1 sm:max-w-sm">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -366,7 +303,18 @@ const LowValuePurchases = () => {
               <Filter className="h-4 w-4" />
               {activeFilters ? <span className="font-bold">{activeFilters}</span> : null}
             </button>
+            <span className="hidden whitespace-nowrap text-[12px] font-semibold text-slate-600 sm:inline">
+              {shown.length} {shown.length === 1 ? "row" : "rows"}
+            </span>
             <div className="ml-auto flex shrink-0 gap-2">
+              <button
+                className="btn btn-sm btn-neutral hidden md:inline-flex"
+                onClick={() => setFullScreen((v) => !v)}
+                aria-label={fullScreen ? "Leave full screen" : "Full screen"}
+                title={fullScreen ? "Leave full screen (Esc)" : "Full screen"}
+              >
+                {fullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </button>
               <button className="btn btn-sm btn-neutral" onClick={load} disabled={loading} aria-label="Refresh">
                 <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
               </button>
@@ -405,14 +353,13 @@ const LowValuePurchases = () => {
               />
               Open only
             </label>
-            {(activeFilters > 0 || quick) && (
+            {activeFilters > 0 && (
               <button
                 type="button"
                 className="text-[13px] font-medium text-brand-700 hover:underline md:ml-1"
                 onClick={() => {
                   setFilters({ company: "", type: "", approval: "", purchase: "" });
                   setOpenOnly(false);
-                  setQuick("");
                 }}
               >
                 Clear filters
@@ -446,7 +393,7 @@ const LowValuePurchases = () => {
 
         {/* Wider screens: the sheet. It scrolls both ways inside itself, so the
             header row and the Date column stay put. */}
-        <div className="hidden max-h-[calc(100vh-19rem)] min-h-[16rem] overflow-auto md:block">
+        <div className="hidden min-h-[16rem] flex-1 overflow-auto md:block">
           <table
             className="table-fixed border-separate border-spacing-0 text-[13px] text-slate-900"
             style={{ width: SHEET_WIDTH, fontFamily: "Arial, Helvetica, sans-serif" }}
