@@ -7,6 +7,7 @@ import TaxonomySelect, {
 } from "./TaxonomySelect";
 import CategorySyncNote from "./CategorySyncNote";
 import { FolderTree, Loader2, X } from "lucide-react";
+import Select from "./Select";
 
 /**
  * Re-files one SAP-mirrored item: SAP item group > Sub-category A > Sub-category B.
@@ -118,19 +119,13 @@ const CategoryEditModal = ({ product, onClose, onSaved }) => {
                 <label className="field-label" htmlFor="cat-l1">
                   Item group <span className="text-slate-400 font-normal">(SAP item group)</span>
                 </label>
-                <select
+                <Select
                   id="cat-l1"
                   value={form.category}
                   onChange={(e) => set("category", e.target.value)}
-                  className="field cursor-pointer"
+                  options={options.groups}
                   required
-                >
-                  {options.groups.map((g) => (
-                    <option key={g} value={g}>
-                      {g}
-                    </option>
-                  ))}
-                </select>
+                />
                 <p className="mt-1 text-[11px] text-slate-500">
                   Only {options.company}'s engineering groups. A new item group is created in the SAP client.
                 </p>

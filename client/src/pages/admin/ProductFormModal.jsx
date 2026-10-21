@@ -9,6 +9,7 @@ import TaxonomySelect, {
 import CategorySyncNote from "../../components/CategorySyncNote";
 import ItemNameBuilder, { EMPTY_NAMING, isNamingBlank } from "../../components/ItemNameBuilder";
 import { useFormDraft, describeWhen } from "../../hooks/useFormDraft";
+import Select from "../../components/Select";
 
 /**
  * Add or edit an engineering item - as a SAP item master record.
@@ -274,33 +275,27 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                   {locked ? (
                     <LockedValue value={company ? `${company.company} (${company.sapDb})` : form.company} />
                   ) : (
-                    <select id="sap-company" className="field cursor-pointer" value={form.company} onChange={bind("company")} required>
-                      <option value="">Choose…</option>
-                      {companies.map((c) => (
-                        <option key={c.abbr} value={c.abbr}>
-                          {c.company}
-                        </option>
-                      ))}
-                    </select>
+                    <Select
+                      id="sap-company"
+                      value={form.company}
+                      onChange={bind("company")}
+                      options={companies.map((c) => ({ value: c.abbr, label: c.company }))}
+                      placeholder="Choose…"
+                      required
+                    />
                   )}
                 </div>
                 <div>
                   <label className={label} htmlFor="sap-group">Item group *</label>
-                  <select
+                  <Select
                     id="sap-group"
-                    className="field cursor-pointer"
                     value={form.itemGroup}
                     onChange={bind("itemGroup")}
                     disabled={!company}
+                    options={(company?.groups || []).map((g) => g.name)}
+                    placeholder={company ? "Choose…" : "Choose the company first"}
                     required
-                  >
-                    <option value="">{company ? "Choose…" : "Choose the company first"}</option>
-                    {(company?.groups || []).map((g) => (
-                      <option key={g.code} value={g.name}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div>
                   <label className={label} htmlFor="sap-sub-a">Sub-category A</label>
@@ -378,13 +373,14 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                   {locked ? (
                     <LockedValue value={form.unit} note="Fixed once the item exists" />
                   ) : (
-                    <select id="sap-unit" className="field cursor-pointer" value={form.unit} onChange={bind("unit")} disabled={!company} required>
-                      {(company?.units || [form.unit]).map((u) => (
-                        <option key={u} value={u}>
-                          {u}
-                        </option>
-                      ))}
-                    </select>
+                    <Select
+                      id="sap-unit"
+                      value={form.unit}
+                      onChange={bind("unit")}
+                      disabled={!company}
+                      options={company?.units || [form.unit]}
+                      required
+                    />
                   )}
                 </div>
                 {/*
@@ -413,14 +409,14 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                     </div>
                     <div>
                       <label className={label} htmlFor="sap-tax">Tax rate</label>
-                      <select id="sap-tax" className="field cursor-pointer" value={form.taxRate} onChange={bind("taxRate")} disabled={!company}>
-                        <option value="">None</option>
-                        {(company?.taxRates || []).map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </select>
+                      <Select
+                        id="sap-tax"
+                        value={form.taxRate}
+                        onChange={bind("taxRate")}
+                        disabled={!company}
+                        options={company?.taxRates || []}
+                        placeholder="None"
+                      />
                     </div>
                   </>
                 )}
