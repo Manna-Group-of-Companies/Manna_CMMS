@@ -1,3 +1,4 @@
+import { plainQuotes } from "../utils/quotes.js";
 import { createDoc, getDoc, listDocs, updateDoc } from "../integrations/erpnext/client.js";
 import { erpNow } from "../integrations/erpnext/time.js";
 import { catalogProducts, forgetCatalog, levelKey } from "./catalog.js";
@@ -315,7 +316,8 @@ export const updateSapItem = async (code, body = {}, user, { resolveName, ensure
 
   if (body.name !== undefined || body.naming) {
     const resolved = resolveName({ name: body.name, naming: body.naming || null });
-    const name = tidy(resolved.name);
+    // Plain quotes, as a new item's name has them - see utils/quotes.js.
+    const name = tidy(plainQuotes(resolved.name));
     if (!name) throw badRequest("The description (item name) cannot be empty.");
     if (name.length > SAP_NAME_MAX) throw badRequest(`The description can be at most ${SAP_NAME_MAX} characters - that is SAP's limit.`);
     set("item_name", name, product.name);
