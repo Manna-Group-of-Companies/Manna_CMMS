@@ -10,6 +10,7 @@ import CategorySyncNote from "../../components/CategorySyncNote";
 import ItemNameBuilder, { EMPTY_NAMING, isNamingBlank } from "../../components/ItemNameBuilder";
 import { useFormDraft, describeWhen } from "../../hooks/useFormDraft";
 import Select from "../../components/Select";
+import Combobox from "../../components/Combobox";
 
 /**
  * Add or edit an engineering item - as a SAP item master record.
@@ -393,19 +394,15 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                   <>
                     <div>
                       <label className={label} htmlFor="sap-hsn">HSN code</label>
-                      <input
+                      <Combobox
                         id="sap-hsn"
-                        className="field mono"
-                        list="sap-hsn-list"
                         value={form.hsnCode}
-                        onChange={(e) => set("hsnCode", e.target.value.replace(/[^\d.]/g, ""))}
+                        onChange={(v) => set("hsnCode", v.replace(/[^\d.]/g, ""))}
+                        suggestions={company?.hsn || []}
                         disabled={!company}
+                        className="field mono"
+                        aria-label="HSN code"
                       />
-                      <datalist id="sap-hsn-list">
-                        {(company?.hsn || []).map((h) => (
-                          <option key={h} value={h} />
-                        ))}
-                      </datalist>
                     </div>
                     <div>
                       <label className={label} htmlFor="sap-tax">Tax rate</label>
