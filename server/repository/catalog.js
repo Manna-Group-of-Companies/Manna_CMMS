@@ -1,3 +1,4 @@
+import { plainQuotes } from "../utils/quotes.js";
 import {
   cancelDoc,
   createDoc,
@@ -385,13 +386,14 @@ export const listCatalog = async ({
   // tell them what to order would be the one screen that could not.
   if (onlyRooms) products = confineToRooms(products, onlyRooms);
 
-  const term = String(search).trim().toLowerCase();
+  // Quotes compared as plain ones, so 6MM*8" finds 6MM*8” - see utils/quotes.js.
+  const term = plainQuotes(String(search).trim().toLowerCase());
   if (term) {
     // The rack is in here because "what is on A-1?" is how somebody standing
     // in front of the shelving looks something up.
     products = products.filter((p) =>
       [p.name, p.code, p.category, p.subCategory, p.subCategoryB, p.rackNumber, p.sap?.code].some(
-        (field) => String(field ?? "").toLowerCase().includes(term)
+        (field) => plainQuotes(String(field ?? "").toLowerCase()).includes(term)
       )
     );
   }

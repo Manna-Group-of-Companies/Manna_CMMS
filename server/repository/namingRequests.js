@@ -7,6 +7,7 @@ import {
 } from "../integrations/erpnext/client.js";
 import { ensureBrand } from "./catalog.js";
 import { resolveItemName } from "../utils/itemNaming.js";
+import { plainQuotes } from "../utils/quotes.js";
 import { resolveUom } from "../integrations/erpnext/uom.js";
 import { erpNow } from "../integrations/erpnext/time.js";
 import { storeForCompany } from "../integrations/erpnext/stores.js";
@@ -246,7 +247,8 @@ const checkSapFields = async ({ company, itemGroup, subCategory, subCategoryB, f
 
 const checkName = ({ proposedName, naming }) => {
   const resolved = resolveItemName({ name: proposedName, naming });
-  const name = tidy(resolved.name);
+  // Plain quotes, so the item can be found whatever quote is typed in a search.
+  const name = tidy(plainQuotes(resolved.name));
   if (!name) throw badRequest("A description is required - build it with the SOP naming builder.");
   if (name.length > SAP_NAME_MAX) throw badRequest(`The description can be at most ${SAP_NAME_MAX} characters - that is SAP's limit.`);
   return {
