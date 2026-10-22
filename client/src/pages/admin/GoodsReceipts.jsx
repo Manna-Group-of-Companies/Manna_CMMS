@@ -314,6 +314,11 @@ const ReceiptCard = ({ receipt: r, canRetry, canFix, busy, onRetry, onDelete, on
                 </span>
                 <span className="whitespace-nowrap text-slate-700">
                   × {l.qty} {l.unit} @ {Number(l.rate) > 0 ? formatCurrency(l.rate) : "nil"}
+                  {l.billUnit && (
+                    <span className="ml-2 text-[11px] text-slate-500">
+                      ({l.billQty} {l.billUnit} on the bill)
+                    </span>
+                  )}
                   {(l.hsnCode || l.taxRate) && (
                     <span className="ml-2 mono text-[11px] text-slate-500">
                       {[l.hsnCode, l.taxRate].filter(Boolean).join(" · ")}

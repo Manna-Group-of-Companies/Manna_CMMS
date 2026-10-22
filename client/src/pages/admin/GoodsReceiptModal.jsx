@@ -18,7 +18,15 @@ import { hsnDigits, hsnProblem } from "../../utils/hsn";
  *
  * The open POs are a snapshot the SAP server writes; "Refresh from SAP" asks it
  * for a new one and waits for it to land.
+ *
+ * An item billed in another unit than it is stocked in (its bill unit - flex
+ * billed in KGS, stocked in MTR) also takes the quantity on the bill. The
+ * quantity received stays in the stock unit, as on every other line.
  */
+
+/** Units counted in whole things, in SAP's and ERPNext's spellings. */
+const COUNTED = new Set(["nos", "no", "pcs", "pc", "pair", "pairs", "prs", "set", "sets", "box", "boxes", "roll", "rolls", "rol", "pkt", "packet", "unit", "units"]);
+const isCountUnit = (unit) => COUNTED.has(String(unit || "").trim().toLowerCase());
 
 /** Today as YYYY-MM-DD in local time; toISOString would give yesterday's date
     for the first five and a half hours of an Indian day. */
@@ -39,7 +47,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
   const [snapshot, setSnapshot] = useState(null);
   const [poLoading, setPoLoading] = useState(false);
   const [poEntry, setPoEntry] = useState("");
-  // Per PO line: { qty, hsnCode, taxRate }, keyed by line number.
+  // Per PO line: { qty, billQty, hsnCode, taxRate }, keyed by line number.
   const [entries, setEntries] = useState({});
   const [billNo, setBillNo] = useState("");
   const [billDate, setBillDate] = useState(today());
@@ -104,6 +112,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
       for (const l of po.lines) {
         next[l.line] = prev[l.line] || {
           qty: "",
+          billQty: "",
           hsnCode: l.hsnCode || "",
           taxRate: l.taxRate || "",
         };
@@ -193,6 +202,12 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
       if (Number(e.qty) > Number(l.receivableQty)) {
         return `${l.name}: only ${l.receivableQty} ${l.unit || ""} is still open on this PO.`;
       }
+      if (l.billUnit) {
+        if (!(Number(e.billQty) > 0)) return `${l.name}: enter the quantity on the bill, in ${l.billUnit}.`;
+        if (isCountUnit(l.unit) && !Number.isInteger(Number(e.qty))) {
+          return `${l.name}: ${l.unit} is counted in whole numbers.`;
+        }
+      }
       const hsn = hsnCheck(l, e);
       if (hsn.error) return `${l.name}: ${hsn.error}`;
       if (!e.taxRate) return `${l.name}: pick the tax rate from the bill.`;
@@ -216,6 +231,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
         lines: entered.map((l) => ({
           poLine: l.line,
           qty: Number(entries[l.line].qty),
+          ...(l.billUnit ? { billQty: Number(entries[l.line].billQty) } : {}),
           hsnCode: hsnDigits(entries[l.line].hsnCode),
           taxRate: entries[l.line].taxRate,
         })),
@@ -250,6 +266,8 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
 
   const pos = snapshot?.pos || [];
   const taxRates = companyOptions?.taxRates || [];
+  // The bill column only when this PO has an item billed in another unit.
+  const anyBillUnit = Boolean(po?.lines.some((l) => l.billUnit));
 
   return (
     <div className="modal max-w-6xl">
@@ -372,13 +390,14 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                         <th className="text-right">PO price</th>
                         <th>Tax code</th>
                         <th>Qty received</th>
+                        {anyBillUnit && <th>Qty on bill</th>}
                         <th>HSN</th>
                         <th>Tax rate</th>
                       </tr>
                     </thead>
                     <tbody>
                       {po.lines.map((l) => {
-                        const e = entries[l.line] || { qty: "", hsnCode: "", taxRate: "" };
+                        const e = entries[l.line] || { qty: "", billQty: "", hsnCode: "", taxRate: "" };
                         const closed = Number(l.receivableQty) <= 0;
                         // Said as it is typed, but only once there is something to say.
                         const hsnShown = String(e.hsnCode || "").trim() ? hsnCheck(l, e) : {};
@@ -428,7 +447,28 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                                 className="field field-sm w-28 disabled:cursor-not-allowed disabled:opacity-60"
                                 aria-label={`Quantity received of ${l.name}`}
                               />
+                              {l.billUnit && <div className="mt-0.5 text-[11px] text-slate-500">{l.unit} received</div>}
                             </td>
+                            {anyBillUnit && (
+                              <td>
+                                {l.billUnit && (
+                                  <>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      inputMode="decimal"
+                                      value={e.billQty}
+                                      onChange={(ev) => setEntry(l.line, "billQty", ev.target.value)}
+                                      disabled={closed}
+                                      className="field field-sm w-28 disabled:cursor-not-allowed disabled:opacity-60"
+                                      aria-label={`Quantity on the bill of ${l.name}, in ${l.billUnit}`}
+                                    />
+                                    <div className="mt-0.5 text-[11px] text-slate-500">{l.billUnit} on the bill</div>
+                                  </>
+                                )}
+                              </td>
+                            )}
                             <td>
                               <input
                                 type="text"

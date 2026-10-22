@@ -62,6 +62,15 @@ export const resolveUom = (unit) => {
   return { uom: DEFAULT_UOM, exact: false, input: raw };
 };
 
+/** ERPNext UOMs that count whole things: half a bearing is not received. */
+const COUNTED = new Set(["Nos", "Pair", "Set", "Box", "Roll", "Packet", "Unit"]);
+
+/** True for a unit known to count whole things ("NOS", "Pcs", "PAIR"); false for lengths, weights and the unknown. */
+export const isCountUnit = (unit) => {
+  const { uom, exact } = resolveUom(unit);
+  return exact && COUNTED.has(uom);
+};
+
 /** Groups a catalog's units into what will be sent and what was guessed. */
 export const summariseUoms = (units) => {
   const resolved = new Map();
