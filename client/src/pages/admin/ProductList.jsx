@@ -23,6 +23,7 @@ import {
   HelpCircle,
   FolderTree,
 } from "lucide-react";
+import Select from "../../components/Select";
 
 /** The two intake flags. Only shown when they say something: a null
     nameCompliant means "never checked", which is not a finding. */
@@ -346,66 +347,50 @@ const ProductList = () => {
           {/* Filters */}
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3 2xl:flex">
             {/* Category Select */}
-            <select
+            <Select
               value={selectedCategory}
               onChange={(e) => handleCategoryChange(e.target.value)}
-              className="field field-sm w-full 2xl:w-auto cursor-pointer"
+              options={categories}
+              placeholder="All Categories"
+              className="field field-sm"
+              wrapClassName="w-full 2xl:w-48"
               aria-label="Filter by category"
-            >
-              <option value="">All Categories</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            />
 
             {/* Sub-category A Select (SAP SubTypeA) */}
-            <select
+            <Select
               value={selectedSubCategory}
               onChange={(e) => handleSubCategoryChange(e.target.value)}
               disabled={subCategories.length === 0}
-              className="field field-sm w-full 2xl:w-auto cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+              options={subCategories}
+              placeholder="All Sub-category A"
+              className="field field-sm"
+              wrapClassName="w-full 2xl:w-48"
               aria-label="Filter by sub-category A"
-            >
-              <option value="">All Sub-category A</option>
-              {subCategories.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+            />
 
             {/* Sub-category B Select (SAP SubTypeB) */}
-            <select
+            <Select
               value={selectedSubCategoryB}
               onChange={(e) => setSelectedSubCategoryB(e.target.value)}
               disabled={!selectedSubCategory || subCategoriesB.length === 0}
-              className="field field-sm w-full 2xl:w-auto cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+              options={subCategoriesB}
+              placeholder="All Sub-category B"
+              className="field field-sm"
+              wrapClassName="w-full 2xl:w-48"
               aria-label="Filter by sub-category B"
-            >
-              <option value="">All Sub-category B</option>
-              {subCategoriesB.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+            />
 
             {/* Company Select */}
-            <select
+            <Select
               value={selectedStoreRoom}
               onChange={(e) => setSelectedStoreRoom(e.target.value)}
-              className="field field-sm w-full 2xl:w-auto cursor-pointer col-span-2 md:col-span-1"
+              options={rooms.map((room) => room.name)}
+              placeholder="All Companies"
+              className="field field-sm"
+              wrapClassName="w-full 2xl:w-48 col-span-2 md:col-span-1"
               aria-label="Filter by company"
-            >
-              <option value="">All Companies</option>
-              {rooms.map((room) => (
-                <option key={room._id} value={room.name}>
-                  {room.name}
-                </option>
-              ))}
-            </select>
+            />
           </div>
         </div>
 

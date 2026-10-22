@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import API from "../services/api";
+import Select from "./Select";
 
 /**
  * Category and sub-category pickers, backed by the classifications already in
@@ -162,22 +163,15 @@ const TaxonomySelect = ({
   }
 
   return (
-    <select
+    <Select
       id={id}
       value={options.includes(value) ? value : ""}
       onChange={handleSelect}
       disabled={disabled}
       required={required}
-      className="field cursor-pointer"
-    >
-      <option value="">{placeholder}</option>
-      {options.map((option) => (
-        <option key={option} value={option}>
-          {option}
-        </option>
-      ))}
-      <option value={OTHER}>{newLabel}</option>
-    </select>
+      options={[...options, { value: OTHER, label: newLabel }]}
+      placeholder={placeholder}
+    />
   );
 };
 

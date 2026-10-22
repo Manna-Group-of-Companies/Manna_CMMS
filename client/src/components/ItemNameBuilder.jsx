@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import API from "../services/api";
 import { Plus, Trash2, Wand2, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
+import Combobox from "./Combobox";
 
 /**
  * The SOI1/SOP1 item naming convention, as a form (ST-09, ST-10).
@@ -12,8 +13,17 @@ import { Plus, Trash2, Wand2, CheckCircle2, AlertTriangle, Loader2 } from "lucid
  * the store and the app to disagree about what an item is called.
  */
 
-/** Offered as a datalist rather than a fixed list — the store meets new ones. */
-const COMMON_UOMS = ["MM", "CM", "M", "”", "’", "SQMM", "KG", "G", "L", "NOS", "SET", "MTR"];
+/**
+ * Suggested rather than a fixed list - the store meets new ones. Inches and
+ * feet are the plain " and ' a keyboard types (21 Oct 2026): the curly ” and ’
+ * they were made a name a search typed with " could not find.
+ */
+const COMMON_UOMS = [
+  "MM", "CM", "M",
+  { value: '"', label: '" (inch)' },
+  { value: "'", label: "' (foot)" },
+  "SQMM", "KG", "G", "L", "NOS", "SET", "MTR",
+];
 const ELECTRICAL_UOMS = ["V", "A", "W", "KW", "HP", "HZ", "MA", "KVA"];
 
 export const EMPTY_NAMING = {
@@ -176,17 +186,6 @@ const ItemNameBuilder = ({ value, onChange, onApply, disabled = false }) => {
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-4">
-      <datalist id="uom-options">
-        {COMMON_UOMS.map((uom) => (
-          <option key={uom} value={uom} />
-        ))}
-      </datalist>
-      <datalist id="electrical-uom-options">
-        {ELECTRICAL_UOMS.map((uom) => (
-          <option key={uom} value={uom} />
-        ))}
-      </datalist>
-
       <div>
         <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
           <Wand2 className="h-4 w-4 text-brand-700" /> Standard Name Builder
@@ -211,14 +210,15 @@ const ItemNameBuilder = ({ value, onChange, onApply, disabled = false }) => {
                 placeholder={index === 0 ? "e.g. 50" : "e.g. 10"}
                 className={`${field} flex-1`}
               />
-              <input
-                type="text"
-                list="uom-options"
+              <Combobox
                 value={dimension.uom}
-                onChange={(e) => setDimension(index, { uom: e.target.value })}
+                onChange={(uom) => setDimension(index, { uom })}
+                suggestions={COMMON_UOMS}
                 disabled={disabled}
                 placeholder="UOM"
-                className={`${field} w-24 uppercase`}
+                className={`${field} uppercase`}
+                wrapClassName="w-28 shrink-0"
+                aria-label="Unit of the dimension"
               />
               <button
                 type="button"
@@ -254,14 +254,15 @@ const ItemNameBuilder = ({ value, onChange, onApply, disabled = false }) => {
               placeholder="e.g. 415"
               className={`${field} flex-1`}
             />
-            <input
-              type="text"
-              list="electrical-uom-options"
+            <Combobox
               value={naming.electricalUom}
-              onChange={(e) => patch({ electricalUom: e.target.value })}
+              onChange={(electricalUom) => patch({ electricalUom })}
+              suggestions={ELECTRICAL_UOMS}
               disabled={disabled}
               placeholder="V"
-              className={`${field} w-20 uppercase`}
+              className={`${field} uppercase`}
+              wrapClassName="w-24 shrink-0"
+              aria-label="Unit of the electrical rating"
             />
           </div>
         </div>
