@@ -7,6 +7,7 @@ import {
   updateDoc,
 } from "../integrations/erpnext/client.js";
 import { erpNow, erpToday } from "../integrations/erpnext/time.js";
+import { isCountUnit } from "../integrations/erpnext/uom.js";
 import { storeForCompany } from "../integrations/erpnext/stores.js";
 import { catalogProducts, forgetCatalog } from "./catalog.js";
 import { CONTROL, hsnDigits, hsnProblem, itemMasterOptions, pickFrom, pickHsn, raiseSapFlag } from "./sapCategories.js";
@@ -30,6 +31,12 @@ import { dropQueuedRequests, raiseHsnRequests, requestsForReceipts } from "./hsn
  *   Stock Addition  - stock on the shelf with no bill: no value, no HSN. The
  *                     sync posts a SAP Goods Receipt at price 0 and an ERPNext
  *                     receipt at zero value.
+ *
+ * An item billed in another unit than it is stocked in (its bill unit, 22 Oct
+ * 2026 - flex billed in KGS, stocked in MTR) takes the bill's quantity as well
+ * as the quantity received. `qty` stays the stock unit, so the PO's open
+ * quantity, the bill value and the ERPNext receipt work as for any item; the
+ * sync posts the GRPO line in the bill unit with the ratio between the two.
  *
  * An item still at nil value takes the price of its first goods receipt: the
  * sync revalues what is already on the shelf to that price before receiving,
@@ -72,7 +79,7 @@ const FIELDS = [
   "error",
   "modified",
 ];
-const LINE_FIELDS = ["parent", "idx", "item", "item_name", "sap_item_code", "po_line", "qty", "rate", "uom", "tax_code", "hsn_code", "tax_rate", "warehouse"];
+const LINE_FIELDS = ["parent", "idx", "item", "item_name", "sap_item_code", "po_line", "qty", "bill_qty", "bill_uom", "rate", "uom", "tax_code", "hsn_code", "tax_rate", "warehouse"];
 
 const tidy = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
 const badRequest = (message) => Object.assign(new Error(message), { status: 400 });
@@ -87,6 +94,8 @@ const toLine = (row) => ({
   sapItemCode: row.sap_item_code || "",
   poLine: row.po_line ?? null,
   qty: Number(row.qty || 0),
+  billQty: Number(row.bill_qty || 0),
+  billUnit: row.bill_uom || "",
   rate: Number(row.rate || 0),
   unit: row.uom || "",
   taxCode: row.tax_code || "",
@@ -245,6 +254,7 @@ export const openPurchaseOrders = async (company) => {
             taxCode: l.tax_code || "",
             warehouse: l.warehouse || "",
             unit: l.uom || product?.unit || "",
+            billUnit: product?.billUnit || "",
             hsnCode: product?.hsnCode || "",
             taxRate: product?.taxRate || "",
             itemValue: product?.unitCost || 0,
@@ -284,7 +294,8 @@ const followBill = async (product, hsn, tax) => {
 /**
  * A goods receipt from a supplier's bill, against one open SAP PO.
  *
- * @param body { company, poEntry, billNo, billDate, remarks, lines: [{ poLine, qty, hsnCode, taxRate }] }
+ * @param body { company, poEntry, billNo, billDate, remarks, lines: [{ poLine, qty, billQty, hsnCode, taxRate }] }
+ *             billQty only for an item with a bill unit: the quantity on the bill in that unit.
  */
 export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null } = {}) => {
   const company = tidy(body.company).toUpperCase();
@@ -330,6 +341,16 @@ export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null
           ").",
       );
     }
+    let billQty = 0;
+    if (line.billUnit) {
+      billQty = Number(w.billQty);
+      if (!Number.isFinite(billQty) || billQty <= 0) {
+        throw badRequest(`${line.name}: enter the quantity on the bill, in ${line.billUnit}.`);
+      }
+      if (isCountUnit(line.unit) && !Number.isInteger(qty)) {
+        throw badRequest(`${line.name}: ${line.unit} is counted in whole numbers - ${qty} cannot be received.`);
+      }
+    }
     const product = products.get(line.itemCode);
     const hsn = hsnDigits(w.hsnCode);
     if (!hsn) throw badRequest(`The HSN code for ${line.name} is required - it is on the bill.`);
@@ -352,6 +373,8 @@ export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null
       sap_item_code: line.sapItemCode,
       po_line: line.line,
       qty,
+      // Only on a line billed in another unit, so every other line is saved as before.
+      ...(line.billUnit ? { bill_qty: billQty, bill_uom: line.billUnit } : {}),
       rate: line.price,
       uom: line.unit,
       tax_code: line.taxCode,

@@ -1,6 +1,7 @@
 import { plainQuotes } from "../utils/quotes.js";
 import { createDoc, getDoc, listDocs, updateDoc } from "../integrations/erpnext/client.js";
 import { erpNow } from "../integrations/erpnext/time.js";
+import { resolveUom } from "../integrations/erpnext/uom.js";
 import { catalogProducts, forgetCatalog, levelKey } from "./catalog.js";
 
 /**
@@ -127,6 +128,29 @@ export const pickFrom = (list, value, what, company) => {
     throw badRequest(`"${clean}" is not a ${what} set up in SAP for ${company}. Pick one from the list, or have it added in the SAP client first.`);
   }
   return hit;
+};
+
+/** Two spellings of one unit: "MTR" and the Item's ERPNext "Meter", say. */
+const sameUnit = (a, b) => {
+  if (levelKey(a) === levelKey(b)) return true;
+  const x = resolveUom(a);
+  const y = resolveUom(b);
+  return x.exact && y.exact && x.uom === y.uom;
+};
+
+/**
+ * The unit a supplier bills an item in when it is not the item's own unit -
+ * flex billed in KGS and stocked in MTR (22 Oct 2026). From the company's SAP
+ * unit list; "" = billed in the item's own unit, as every item was until now.
+ * CMMS only: the item keeps its one unit in SAP, and each goods receipt line
+ * carries the bill's quantity and the ratio to the stock unit.
+ */
+export const pickBillUnit = (list, value, stockUnit, company) => {
+  const unit = pickFrom(list, value, "unit", company);
+  if (unit && sameUnit(unit, stockUnit)) {
+    throw badRequest(`The bill unit ${unit} is the item's own unit. Leave it empty unless the supplier bills in a different unit.`);
+  }
+  return unit;
 };
 
 /** HSN codes are compared as digits: "8481.90.90" = "84819090". */
@@ -291,13 +315,13 @@ export const renameCategoryValue = async ({ level, category, subCategory, from, 
 
 /**
  * Edits a SAP-mirrored item: description (the SOP name), foreign name, HSN,
- * tax rate, minimum stock, brand, and the three category levels.
+ * tax rate, minimum stock, brand, bill unit, and the three category levels.
  *
- * Every field but brand is a SAP field, so a change marks the item pending and
- * raises the flag; the sync patches SAP (ItemName, ForeignName, ChapterID,
- * U_TaxRate, MinInventory, ItemsGroupCode, U_SubTypeA/B). Brand is the CMMS's
- * own. The unit is not editable: SAP refuses a new inventory unit once an item
- * has transactions.
+ * Every field but brand and bill unit is a SAP field, so a change marks the
+ * item pending and raises the flag; the sync patches SAP (ItemName,
+ * ForeignName, ChapterID, U_TaxRate, MinInventory, ItemsGroupCode,
+ * U_SubTypeA/B). Brand and bill unit are the CMMS's own. The unit is not
+ * editable: SAP refuses a new inventory unit once an item has transactions.
  */
 export const updateSapItem = async (code, body = {}, user, { resolveName, ensureBrand } = {}) => {
   const product = await findProduct(code);
@@ -339,6 +363,9 @@ export const updateSapItem = async (code, body = {}, user, { resolveName, ensure
     const brand = tidy(body.brand);
     if (brand && brand !== product.brand) await ensureBrand(brand);
     set("brand", brand, product.brand, false);
+  }
+  if (body.billUnit !== undefined) {
+    set("custom_bill_uom", pickBillUnit(options.units, body.billUnit, product.unit, company), product.billUnit, false);
   }
 
   const levels = ["category", "subCategory", "subCategoryB"].some((k) => body[k] !== undefined);

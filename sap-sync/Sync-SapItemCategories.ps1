@@ -39,6 +39,9 @@
       against the PO in SAP first; NumAtCard = bill no., TaxDate = bill date, DocDate = today; vendor,
       price and tax code come from the PO, so accounts make the A/P invoice from it as before;
     * Stock Addition -> Goods Receipt (InventoryGenEntries) at price 0 - stock with no bill;
+    * a line billed in another unit (bill_uom / bill_qty, 22 Oct 2026) goes to the GRPO in the bill unit with
+      the ratio to the stock unit and the price per bill unit (BillUnitLine.ps1); after posting, SAP's stock
+      quantity is checked against what was received, and a mismatch fails the receipt without ERPNext;
     * Reference2 = "GR<yy>-<n>" (the CMMS receipt number) - a receipt already in SAP is adopted;
     * revalue_nil_stock: stock of the item already on the shelf at zero cost is revalued to the GR price
       first (MaterialRevaluation, price change; in ERPNext a Stock Reconciliation), so the receipt
@@ -132,6 +135,8 @@ Set-StrictMode -Version 1.0
 $ErrorActionPreference = 'Stop'
 $scriptDir = $PSScriptRoot; if (-not $scriptDir) { $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 if (-not $ConfigPath) { $ConfigPath = Join-Path $scriptDir 'config.json' }
+# GRPO lines for an item billed in another unit than it is stocked in (PASS C, 22 Oct 2026).
+. (Join-Path $scriptDir 'BillUnitLine.ps1')
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $result = [ordered]@{ exitCode = 0; changed = 0; created = 0; failures = 0; summary = ''; error = ''; dryRun = $false; items = @() }
 function Save-Result { if ($ResultJsonPath) { [IO.File]::WriteAllText($ResultJsonPath, ($result | ConvertTo-Json -Depth 8), $utf8) } }
@@ -245,7 +250,7 @@ try {
     if (-not $groupsByAbbr -or -not $options) { throw "$control has no engineering_groups / item_master_options - run backfill-categories.js and backfill-item-master.js" }
 
     # @() because a PowerShell function hands back a lone row as a scalar, not a one-row list.
-    $creates = @(Erp-List 'CMMS Item Naming Request' @('name', 'proposed_name', 'sap_company', 'sap_item_group', 'sap_sub_type_a', 'sap_sub_type_b', 'foreign_name', 'sap_uom', 'hsn_code', 'tax_rate', 'min_stock', 'brand', 'uom', 'opening_qty', 'raised_by') '[["workflow_state","=","Approved"],["sap_create_status","=","Queued"]]')
+    $creates = @(Erp-List 'CMMS Item Naming Request' @('name', 'proposed_name', 'sap_company', 'sap_item_group', 'sap_sub_type_a', 'sap_sub_type_b', 'foreign_name', 'sap_uom', 'bill_uom', 'hsn_code', 'tax_rate', 'min_stock', 'brand', 'uom', 'opening_qty', 'raised_by') '[["workflow_state","=","Approved"],["sap_create_status","=","Queued"]]')
     $edits = @(Erp-List 'Item' @('name', 'item_name', 'safety_stock', 'custom_sap_item_code', 'custom_sap_item_group', 'custom_sap_sub_type_a', 'custom_sap_sub_type_b', 'custom_sap_foreign_name', 'custom_sap_hsn_code', 'custom_sap_tax_rate') '[["custom_sap_category_pending","=",1]]')
     # Receipts with their lines (one GET each: the list endpoint does not return child tables).
     $receipts = @(Erp-List 'CMMS Goods Receipt' @('name') '[["status","=","Queued"]]' | ForEach-Object { (Erp-Get (Res 'CMMS Goods Receipt' $_.name)).data })
@@ -611,6 +616,8 @@ try {
                                 item_defaults = @(@{ doctype = 'Item Default'; company = $companyByAbbr[$abbr]; default_warehouse = $storeByAbbr[$abbr] })
                             }
                             if ((Norm $c.brand)) { $doc.brand = Norm $c.brand }
+                            # CMMS only (22 Oct 2026): the unit the supplier bills in, when not the stock unit.
+                            if ((Norm $c.bill_uom)) { $doc.custom_bill_uom = Norm $c.bill_uom }
                             $null = Erp-Send POST (Res 'Item' '') $doc
                         }
                         $null = Erp-Send PUT (Res 'CMMS Item Naming Request' $c.name) @{ erp_item = $erpCode; sap_item_code = (Norm $sapCode); sap_create_status = 'Created'; sap_create_error = ''; pushed_at = (Now-Ist); sap_response = ("{0} in {1} by the item master sync" -f $entry.action, $db) }
@@ -726,7 +733,7 @@ try {
             # receipt replaces the nil value rather than averaging into it.
             foreach ($rc in $w.receipts) {
                 $entry = [ordered]@{ kind = 'receipt'; receipt = "$($rc.name)"; type = "$($rc.kind)"; sap_db = $db; action = ''; sap_doc = ''; revaluation = ''; erp = ''; error = '' }
-                $sapDone = $false; $docEntry = $null; $docNum = ''
+                $sapDone = $false; $docEntry = $null; $docNum = ''; $billUnitWrong = $false
                 # Held, not posted, while an HSN its lines brought is not in SAP yet (PASS H request not Created, or
                 # the item's HSN edit failed in this run): left Queued with the reason, posted on a later run.
                 if ("$($rc.kind)" -eq 'Goods Receipt') {
@@ -773,7 +780,12 @@ try {
                                 if ("$($pl.LineStatus)" -ne 'bost_Open' -or [double]$pl.RemainingOpenQuantity -lt [double]$l.qty) {
                                     throw ("PO {0} line {1} ({2}) has {3} open in SAP; the receipt is for {4}" -f $po.DocNum, $l.po_line, $pl.ItemCode, $pl.RemainingOpenQuantity, $l.qty)
                                 }
-                                $docLines += [ordered]@{ BaseType = 22; BaseEntry = $poEntry; BaseLine = [int]$l.po_line; Quantity = [double]$l.qty; WarehouseCode = (& $lineWh $l "$($pl.WarehouseCode)") }
+                                $docLine = [ordered]@{ BaseType = 22; BaseEntry = $poEntry; BaseLine = [int]$l.po_line; Quantity = [double]$l.qty; WarehouseCode = (& $lineWh $l "$($pl.WarehouseCode)") }
+                                # An item billed in another unit: the bill's quantity in that unit, with the ratio to
+                                # the stock unit and the price per bill unit (BillUnitLine.ps1). Any other line as before.
+                                try { $null = Add-BillUnitFields $docLine $l ([double]$pl.Price) }
+                                catch { throw ("{0} (PO line {1}): {2}" -f $pl.ItemCode, $l.po_line, $_.Exception.Message) }
+                                $docLines += $docLine
                             }
 
                             if ($revalueNil) {
@@ -820,6 +832,18 @@ try {
                     if ($sapDone) {
                         $entry.sap_doc = $docNum
                         $null = Erp-Send PUT (Res 'CMMS Goods Receipt' $rc.name) @{ sap_doc_entry = $docEntry; sap_doc_number = $docNum }
+                        # A line billed in another unit: SAP's stock quantity must be what was received. A GRPO that took
+                        # something else stays as it is - Reference2 adopts it on a retry, so it is never posted twice -
+                        # and nothing goes into ERPNext until it is put right in SAP.
+                        if ($isGr -and @($lines | Where-Object { "$($_.bill_uom)".Trim() }).Count) {
+                            $gq = Invoke-Sl -Method GET -Url ("$slBase/PurchaseDeliveryNotes({0})?`$select=DocumentLines" -f $docEntry) -Jar $jar
+                            if ($gq.Http -ne '200') { Sl-Fail $gq "read back GRPO $docNum" }
+                            $bad = Get-BillUnitMismatch (($gq.Body | ConvertFrom-Json).DocumentLines) $lines
+                            if ($bad.Count) {
+                                $billUnitWrong = $true
+                                throw ("Posted in SAP as GRPO {0}, but its stock quantity is not what was received - {1}. Check GRPO {0} in SAP; sending this receipt again will not post a second one." -f $docNum, ($bad -join ' | '))
+                            }
+                        }
                         if (-not "$($rc.erp_stock_entry)".Trim()) {
                             $store = $storeByAbbr[$abbr]; $company = $companyByAbbr[$abbr]
                             $recoItems = @()
@@ -857,7 +881,7 @@ try {
                     Log INFO ("{0} [{1}] {2}: {3} {4}{5}{6}" -f $rc.name, $db, $rc.kind, $entry.action, $entry.sap_doc, $(if ($entry.revaluation) { " revaluation $($entry.revaluation)" } else { '' }), $(if ($DryRun -and $entry.Contains('payload')) { ' ' + ($entry.payload | ConvertTo-Json -Compress -Depth 6) } elseif ($entry.erp) { " ERPNext $($entry.erp)" } else { '' }))
                 } catch {
                     $msg = $_.Exception.Message
-                    if ($sapDone) { $msg = "Posted in SAP as $docNum, but ERPNext refused: $msg" }
+                    if ($sapDone -and -not $billUnitWrong) { $msg = "Posted in SAP as $docNum, but ERPNext refused: $msg" }
                     $entry.action = 'failed'; $entry.error = $msg; $result.failures++
                     Log ERROR ("{0} [{1}]: {2}" -f $rc.name, $db, $msg)
                     if (-not $DryRun) { try { $null = Erp-Send PUT (Res 'CMMS Goods Receipt' $rc.name) @{ status = 'Failed'; error = $msg.Substring(0, [Math]::Min(500, $msg.Length)) } } catch { Log WARN "could not record the failure on $($rc.name): $($_.Exception.Message)" } }
