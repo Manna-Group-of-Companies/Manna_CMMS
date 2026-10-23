@@ -660,7 +660,8 @@ try {
                         ForeignName    = @{ want = { Norm $args[0].custom_sap_foreign_name } }
                         ChapterID      = @{ want = { [int](Chapter-Of $args[0].custom_sap_hsn_code) } }
                         U_TaxRate      = @{ want = { Norm $args[0].custom_sap_tax_rate } }
-                        MinInventory   = @{ want = { [double]("0$($args[0].safety_stock)") } }
+                        # SAP keeps 3 decimals of a quantity: 2.3456 reads back 2.346 and failed the check (demo, 23 Oct 2026).
+                        MinInventory   = @{ want = { [Math]::Round([double]("0$($args[0].safety_stock)"), 3) } }
                         ItemsGroupCode = @{ want = { $gg = $groupOf[(Norm $args[0].custom_sap_item_group).ToLower()]; if ($gg) { [int]$gg.code } else { -1 } } }
                         U_SubTypeA     = @{ want = { Norm $args[0].custom_sap_sub_type_a } }
                         U_SubTypeB     = @{ want = { Norm $args[0].custom_sap_sub_type_b } }

@@ -71,9 +71,10 @@ one URL; Frappe Cloud refuses request lines over ~4 KB). The new CMMS code uses 
    adopt instead of duplicating. Then the ERPNext copy `<abbr>-<code>` is made and the request goes *In SAP*.
    A failure shows on the request with SAP's message; the Maintenance Manager can *Send to SAP again*.
 
-Edits (CMMS *Edit* button, Maintenance Manager): description, category levels, HSN, tax rate → SAP; foreign
-name, minimum stock and brand stay in the CMMS (`edit_fields` can add the first two); unit and company are
-fixed.
+Edits (CMMS *Edit* button, Maintenance Manager): description, category levels, HSN, tax rate, foreign name
+and minimum stock → SAP (the last two since 23 Oct 2026; before that they were left out of `edit_fields`, and
+PASS E copied SAP's value back over the CMMS edit on the next run); brand stays in the CMMS; unit and company
+are fixed.
 
 ## Engineering store receipts (9 Oct 2026)
 
@@ -192,7 +193,7 @@ The Single starts with **`dry_run = 1`**: the sync reads SAP and reports what it
 | `pull_from_sap` | fetch engineering items and their stock from SAP (writes ERPNext only) | off |
 | `pr_requester` | SAP user code the requests are raised under | the SAP login |
 | `skip_companies` | company databases left out (no SAP login; their CMMS work stays Queued), e.g. `["MANNA_TYRE_LIVE"]` while its password is sorted out - SAP locks a user after 3 wrong passwords, and the watcher would retry on every flag | `[]` |
-| `edit_fields` | what edits send | `ItemName, ItemsGroupCode, U_SubTypeA, U_SubTypeB, ChapterID, U_TaxRate` |
+| `edit_fields` | what edits send | `ItemName, ItemsGroupCode, U_SubTypeA, U_SubTypeB, ChapterID, U_TaxRate, ForeignName, MinInventory` (live, 23 Oct 2026; the script's default leaves out the last two) |
 
 A kind that is off is left `Queued` and goes the run after it is turned on. The 9 Oct session wrote them
 off by default because the agent's edit switching them on was stopped by the auto-mode classifier - turning
@@ -227,7 +228,9 @@ Learned on the way, verified against the live company:
 - Every group-108 item manages stock by warehouse, so the minimum lives on
   `ItemWarehouseInfoCollection[WarehouseCode '01'].MinimalStock`; a PATCH of item-level `MinInventory` is
   accepted and ignored. New items: send `ManageStockByWarehouse: 'tYES'` and the warehouse row in the POST.
-  (The sync's `MinInventory` edit in `edit_fields` has the same blind spot - use the warehouse row.)
+  (The sync's `MinInventory` edit sends the warehouse row for such items; SAP mirrors it to the item-level
+  `MinInventory`, which the read-back checks - tested in the demo company 23 Oct 2026. SAP keeps 3 decimals,
+  so the edit rounds to 3.)
 - `Reference2` on `InventoryGenEntries` holds 11 characters. Item keys with spaces go as `Items('ENG%20-%20399')`.
 - The CMMS / ERPNext mirror did not know about any of this until it was fetched: done 11 Oct 2026 with
   `pull-mrppl-from-sap.js --apply` - 488 items added (the 486 new ones plus ENG-437 and ENG-439, made in SAP on
