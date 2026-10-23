@@ -13,6 +13,7 @@ import '../../models/purchasing.dart';
 import '../../state/auth_provider.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/common.dart';
+import '../../widgets/work_widgets.dart';
 import 'low_value_widgets.dart';
 
 /// The Purchase Request Sheet: the business's shared Google Sheet of things to
@@ -244,7 +245,7 @@ class _LowValuePurchasesScreenState extends State<LowValuePurchasesScreen> {
     final filtered = _company.isNotEmpty || _approval.isNotEmpty || _purchase.isNotEmpty;
 
     return AppShell(
-      title: 'Miscellaneous Requests',
+      title: 'Miscellaneous Purchases',
       actions: [
         IconButton(
           tooltip: _asSheet ? 'Show as cards' : 'Show as the sheet',
@@ -417,7 +418,7 @@ class _FilterChip extends StatelessWidget {
         duration: const Duration(milliseconds: 160),
         padding: EdgeInsets.fromLTRB(14, 8, dropdown ? 8 : 14, 8),
         decoration: BoxDecoration(
-          color: active ? AppColors.primary : AppColors.surfaceMuted,
+          color: active ? AppColors.primary : AppColors.surface,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(color: active ? AppColors.primary : AppColors.border),
         ),
@@ -530,8 +531,18 @@ class _RowCard extends StatelessWidget {
       onLongPress: onHold,
       color: row.done ? sheetDoneFill : null,
       borderColor: row.done ? sheetDoneGreen : null,
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      child: Column(
+      padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          WorkThumb(
+            icon: row.type == 'Repair Request'
+                ? Icons.handyman_outlined
+                : Icons.shopping_bag_outlined,
+            color: row.done ? AppColors.success : AppColors.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -599,6 +610,8 @@ class _RowCard extends StatelessWidget {
               style: muted,
             ),
           ],
+        ],
+      )),
         ],
       ),
     );
@@ -861,7 +874,7 @@ class _NewPurchaseRequestSheetState extends State<NewPurchaseRequestSheet> {
             Text('New purchase request', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 4),
             const Text(
-              'A new miscellaneous request.',
+              'A new line on Miscellaneous Purchases.',
               style: TextStyle(fontSize: 12, color: AppColors.textMuted),
             ),
             const SizedBox(height: 16),
@@ -898,7 +911,9 @@ class _NewPurchaseRequestSheetState extends State<NewPurchaseRequestSheet> {
             TextField(
               controller: _description,
               minLines: 2,
-              maxLines: 5,
+              // Room for a list of 10-15 items before it scrolls.
+              maxLines: 12,
+              keyboardType: TextInputType.multiline,
               maxLength: 1000,
               decoration: _box('What is needed - one item a line'),
             ),

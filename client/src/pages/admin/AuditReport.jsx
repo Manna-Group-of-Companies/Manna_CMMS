@@ -708,9 +708,6 @@ const AuditSheetModal = ({ auditId, onClose, onChanged }) => {
                               </span>
                             )}
                           </div>
-                          <div className="text-[10px] font-mono text-brand-700">
-                            {line.productCode || "—"}
-                          </div>
                         </td>
                         <td className="py-2.5 px-5 text-xs font-mono text-slate-600">
                           {line.rackNumber || "—"}

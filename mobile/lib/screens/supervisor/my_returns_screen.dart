@@ -393,7 +393,7 @@ class _MyReturnsScreenState extends State<MyReturnsScreen>
               Expanded(
                 child: TableTitleCell(
                   title: item.productName,
-                  subtitle: item.productCode,
+                  subtitle: item.restockNumber,
                   imageUrl: item.product?.image ?? '',
                 ),
               ),

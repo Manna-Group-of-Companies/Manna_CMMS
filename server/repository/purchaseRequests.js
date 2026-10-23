@@ -9,6 +9,7 @@ import { erpNow, erpToday } from "../integrations/erpnext/time.js";
 import { storeForCompany } from "../integrations/erpnext/stores.js";
 import { catalogProducts } from "./catalog.js";
 import { itemMasterOptions, raiseSapFlag } from "./sapCategories.js";
+import { COMPLETED, receiptProgress, receiptsAgainst, toReceiptSummary } from "./purchaseCompletion.js";
 
 /**
  * Purchase requests for engineering stock, raised in the CMMS (9 Oct 2026).
@@ -38,6 +39,12 @@ import { itemMasterOptions, raiseSapFlag } from "./sapCategories.js";
  * A request whose every PO was cancelled in SAP ends (20 Oct 2026): the sync
  * closes it, says so in `error`, and closes its SAP purchase request. It is
  * not ordered again; a new need is a new request.
+ *
+ * Since 23 Oct 2026 an Ordered request goes Completed once the goods receipts
+ * posted against its PO cover every line (purchaseCompletion.js). Completed is
+ * the CMMS's own, read only: nothing can be ordered or sent again from it.
+ *
+ *   Ordered -> Completed (every item received), and back if that stops holding
  */
 
 const DOCTYPE = "CMMS Purchase Request";
@@ -59,7 +66,7 @@ const REMARKS_MAX = 100;
 const PO_REMARKS_MAX = 200;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
-const toLine = (row) => ({
+const toLine = (row, received = null) => ({
   itemCode: row.item,
   name: row.item_name || row.item,
   sapItemCode: row.sap_item_code || "",
@@ -69,6 +76,8 @@ const toLine = (row) => ({
   orderQty: Number(row.po_qty || 0),
   price: Number(row.po_price || 0),
   taxCode: row.po_tax_code || "",
+  // What the goods receipts posted against its PO have brought in, once ordered.
+  received: received ? received.get(row.item) || 0 : null,
 });
 
 /** The purchase order made from it in the app, or null. */
@@ -98,7 +107,26 @@ const toOrder = (row, lines) => {
 export const mayOrder = (row) =>
   row.status === "In SAP" && Boolean(row.sap_doc_entry) && ["", null, undefined, "Failed"].includes(row.po_status);
 
-const toRequest = (row, lines = []) => ({
+/** Statuses whose goods can be coming in, so their receipts are looked up. */
+const RECEIVING = ["Ordered", COMPLETED];
+
+/** The posted receipts against each request, by request name. */
+const receiptsOf = async (rows) => {
+  const out = new Map();
+  const open = rows.filter((r) => RECEIVING.includes(r.status));
+  if (!open.length) return out;
+  const receipts = await receiptsAgainst(open);
+  for (const r of open) {
+    const progress = receiptProgress(r, receipts);
+    out.set(r.name, {
+      receipts: progress.receipts.map(toReceiptSummary),
+      received: new Map(progress.lines.map((l) => [l.item, l.received])),
+    });
+  }
+  return out;
+};
+
+const toRequest = (row, lines = [], got = null) => ({
   id: row.name,
   company: row.company,
   companyName: storeForCompany(row.company)?.label || row.company,
@@ -112,7 +140,8 @@ const toRequest = (row, lines = []) => ({
   poNumbers: row.po_numbers || "",
   postedAt: row.posted_at || null,
   error: row.error || "",
-  lines: lines.map(toLine),
+  lines: lines.map((l) => toLine(l, got?.received)),
+  receipts: got?.receipts || [],
   order: toOrder(row, lines),
   mayOrder: mayOrder(row),
   updatedAt: row.modified,
@@ -147,7 +176,13 @@ export const listRequests = async ({ status = "", limit = 100, onlyCompanies = n
       byParent.get(l.parent).push(l);
     }
   }
-  return rows.map((r) => toRequest(r, byParent.get(r.name) || []));
+  for (const r of rows) r.lines = byParent.get(r.name) || [];
+  // The receipts are a nicety on the card; the list stands without them.
+  const got = await receiptsOf(rows).catch((error) => {
+    console.error("Goods receipts for purchase requests not read:", error.message);
+    return new Map();
+  });
+  return rows.map((r) => toRequest(r, r.lines, got.get(r.name)));
 };
 
 export const getRequest = async (id) => {
@@ -155,7 +190,9 @@ export const getRequest = async (id) => {
     if (error?.status === 404) return null;
     throw error;
   });
-  return doc ? toRequest(doc, doc.lines || []) : null;
+  if (!doc) return null;
+  const got = await receiptsOf([doc]).catch(() => new Map());
+  return toRequest(doc, doc.lines || [], got.get(doc.name));
 };
 
 /**

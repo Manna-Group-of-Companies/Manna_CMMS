@@ -64,6 +64,12 @@ export const ROLES = [
  */
 export const VIEWS = {
   /**
+   * The home screen (22 Oct 2026): breakdowns and maintenance requests summed
+   * up, for everyone on either of those two screens. It reads only their two
+   * lists, each still guarded by its own view, so this entry adds no data.
+   */
+  dashboard: [MANAGER, MAINTENANCE_MANAGER, HIGHER_MANAGEMENT, PRODUCTION_MANAGER, SUPERVISOR],
+  /**
    * The catalog. A plant head sees only their own store.
    *
    * Was every role; narrowed on 14 Oct 2026 to the three who run stock day to
@@ -264,6 +270,15 @@ export const rolesFor = (view) => {
 
 /** True when this role may see this screen. */
 export const maySee = (role, view) => rolesFor(view).includes(role);
+
+/**
+ * Whether this role is shown what an item is worth (23 Oct 2026).
+ *
+ * The Maintenance Manager's alone: the plant heads and everybody else see the
+ * item and its stock, not its value. Not a screen, so not in VIEWS - the
+ * catalog strips the field from what it sends anyone else.
+ */
+export const maySeeItemValue = (role) => role === MAINTENANCE_MANAGER;
 
 /**
  * The roles confined to their own plant.

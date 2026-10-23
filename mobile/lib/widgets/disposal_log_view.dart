@@ -150,7 +150,7 @@ class _DisposalLogViewState extends State<DisposalLogView> {
         AppTableColumn('Type', width: 78, center: true),
       ],
       cellsOf: (context, item) => [
-        TableTitleCell(title: item.productName, subtitle: item.productCode),
+        TableTitleCell(title: item.productName, subtitle: item.storeRoom),
         TableNumberCell(
           value: '−${item.quantity}',
           unit: item.unit,

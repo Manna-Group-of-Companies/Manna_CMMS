@@ -13,6 +13,7 @@ import 'state/auth_provider.dart';
 import 'state/incoming_watcher.dart';
 import 'state/notification_provider.dart';
 import 'state/server_provider.dart';
+import 'widgets/cmms_mark.dart';
 import 'widgets/update_dialog.dart';
 
 Future<void> main() async {
@@ -57,6 +58,13 @@ class _StockMasterAppState extends State<StockMasterApp> {
         .whenComplete(_auth.initialize)
         .whenComplete(_openLaunchNotification)
         .whenComplete(_checkForUpdate);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Decoded before the splash asks for it, so the mark is on its first frame.
+    precacheImage(CmmsMark.asset, context);
   }
 
   /// A tapped notification opens the breakdown or request it announced. The

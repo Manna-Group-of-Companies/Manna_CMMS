@@ -162,7 +162,9 @@ void main() {
     await signIn(tester);
 
     // Attendance is decided on the web console since 13 Oct 2026.
-    expect(find.text('Requests'), findsOneWidget);
+    // On the dashboard, which names Requests in both the tab bar and its
+    // shortcuts.
+    expect(find.text('Requests'), findsWidgets);
     expect(find.text('Attendance'), findsNothing);
     expect(find.text('Punch In'), findsNothing);
   });

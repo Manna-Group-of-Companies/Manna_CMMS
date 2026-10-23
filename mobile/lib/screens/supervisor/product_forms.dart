@@ -336,7 +336,6 @@ class _TaxonomyPicker extends StatefulWidget {
     required this.onChanged,
     this.placeholder = 'Select…',
     this.newLabel = '＋ Add a new one…',
-    this.hintText = '',
     this.enabled = true,
     this.loading = false,
   });
@@ -348,7 +347,6 @@ class _TaxonomyPicker extends StatefulWidget {
   final String newLabel;
 
   /// Shown inside the text box once "add a new one" is chosen.
-  final String hintText;
   final bool enabled;
 
   /// The options are still on their way. Shown rather than hidden, so the field
@@ -426,8 +424,7 @@ class _TaxonomyPickerState extends State<_TaxonomyPicker> {
               autofocus: true,
               onChanged: widget.onChanged,
               decoration: InputDecoration(
-                hintText:
-                    widget.hintText.isEmpty ? widget.placeholder : widget.hintText,
+                hintText: widget.placeholder,
               ),
             ),
           ),
@@ -999,7 +996,6 @@ class _ProductFormState extends State<_ProductForm> {
                       ? const TextStyle(color: AppColors.textSecondary)
                       : null,
                   decoration: InputDecoration(
-                    hintText: 'e.g. 25MM Bearing Deep Groove',
                     fillColor: _isEdit ? AppColors.surfaceMuted : null,
                     filled: _isEdit ? true : null,
                   ),
@@ -1040,7 +1036,6 @@ class _ProductFormState extends State<_ProductForm> {
               enabled: !_submitting,
               placeholder: 'Select a category…',
               newLabel: '＋ Add a new category…',
-              hintText: 'e.g. Bearings',
               onChanged: _onCategoryChanged,
             ),
           ),
@@ -1058,7 +1053,6 @@ class _ProductFormState extends State<_ProductForm> {
                   ? 'Pick a category first'
                   : 'Select a sub-category…',
               newLabel: '＋ Add a new sub-category…',
-              hintText: 'e.g. Ring Spanners',
               onChanged: (value) =>
                   setState(() => _draft.subCategory = value.trim()),
             ),
@@ -1081,7 +1075,7 @@ class _ProductFormState extends State<_ProductForm> {
             child: TextFormField(
               controller: _rackNumber,
               textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(hintText: 'e.g. A-1'),
+              decoration: const InputDecoration(),
             ),
           ),
           // Asked for once, when the item is first taken in. An edit does not
@@ -1112,7 +1106,7 @@ class _ProductFormState extends State<_ProductForm> {
                     child: TextFormField(
                       controller: _unit,
                       validator: _requiredValidator,
-                      decoration: const InputDecoration(hintText: 'Pcs, Box, Kg'),
+                      decoration: const InputDecoration(),
                     ),
                   ),
                 ),
@@ -1265,9 +1259,13 @@ class _ProductFormState extends State<_ProductForm> {
             label: 'Description',
             child: TextFormField(
               controller: _description,
-              maxLines: 3,
+              // Grows as lines are added; Enter starts a new line, and the
+              // website shows them as typed.
+              minLines: 3,
+              maxLines: 12,
+              keyboardType: TextInputType.multiline,
               decoration: const InputDecoration(
-                hintText: 'Components, warranty, catalog mapping...',
+                hintText: 'One part a line - components, warranty, catalog mapping...',
               ),
             ),
           ),
@@ -1364,7 +1362,11 @@ class _LockedFacts extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rows = <({String label, String value, String where})>[
-      (label: 'Engineering Stock Code', value: product.code, where: 'fixed identity'),
+      (
+        label: 'SAP Code',
+        value: product.sap.code.isNotEmpty ? product.sap.code : 'No SAP code yet',
+        where: 'set by SAP',
+      ),
       (label: 'Unit of Measure', value: product.unit, where: 'fixed identity'),
       (
         label: 'Current Stock',
@@ -1816,7 +1818,6 @@ class _IssueProductFormState extends State<_IssueProductForm> {
             controller: _purpose,
             maxLines: 2,
             decoration: const InputDecoration(
-              hintText: 'e.g. Quarterly office supply restock',
             ),
           ),
         ),

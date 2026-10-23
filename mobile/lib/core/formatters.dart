@@ -34,6 +34,15 @@ String formatCurrency(num? amount) {
       : _rupees.format(amount);
 }
 
+/// A span of hours the way the maintenance screens say it: minutes under an
+/// hour, hours under three days, days beyond.
+String formatHours(double h) {
+  if (h <= 0) return '0 min';
+  if (h < 1) return '${(h * 60).round()} min';
+  if (h < 72) return '${(h * 10).round() / 10} hr';
+  return '${(h / 24).round()} days';
+}
+
 /// Parsing helpers tolerant of the partially-populated documents the API
 /// returns (e.g. `populate("product", "name code unit")`).
 int asInt(dynamic value, [int fallback = 0]) {

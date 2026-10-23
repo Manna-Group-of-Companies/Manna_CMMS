@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  Eye,
   FileText,
   Loader2,
   Plus,
-  RefreshCw,
   Send,
   ShoppingCart,
   Truck,
+  X,
 } from "lucide-react";
 
 import API from "../../services/api";
@@ -21,9 +22,14 @@ import {
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import { useSapSyncDone } from "../../hooks/useSapSync";
+import { useErpRefresh } from "../../hooks/useErpRefresh";
 import PurchaseRequestModal from "./PurchaseRequestModal";
 import PurchaseOrderModal from "./PurchaseOrderModal";
 import { formatCurrency } from "../../utils/currency";
+import Pagination from "../../components/Pagination";
+import { pageSlice } from "../../utils/pageSlice";
+
+const PAGE_SIZE = 10;
 
 /**
  * Purchase requests raised from the CMMS, and where each stands in SAP.
@@ -32,7 +38,8 @@ import { formatCurrency } from "../../utils/currency";
  * creates the SAP Purchase Request within about a minute, the purchase manager
  * turns it into a Purchase Order, and that PO is received with Goods receipt.
  * Queued -> In SAP -> Ordered -> Closed; a failed one says why, and the
- * Maintenance Manager can send it again.
+ * Maintenance Manager can send it again. Since 23 Oct 2026 an Ordered one goes
+ * Completed once its goods receipts cover every item - the server's check.
  *
  * Since 20 Oct 2026 the purchase manager can make that PO here instead of in
  * SAP; the sync posts it, and the request goes Ordered as for one made in SAP.
@@ -51,11 +58,12 @@ const STATUS_STYLE = {
   // No blue badge in index.css; the same recipe in blue.
   "In SAP": "border-blue-500/20 bg-blue-500/10 text-blue-600",
   Ordered: "badge-emerald",
+  Completed: "badge-cyan",
   Closed: "badge-slate",
   Failed: "badge-rose",
 };
 
-const STATUSES = ["Queued", "In SAP", "Ordered", "Closed", "Failed"];
+const STATUSES = ["Queued", "In SAP", "Ordered", "Completed", "Closed", "Failed"];
 
 const when = (value) => {
   if (!value) return "—";
@@ -87,10 +95,15 @@ const PurchaseRequests = () => {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [company, setCompany] = useState("");
+  const [raisedBy, setRaisedBy] = useState("");
   const [sapCompanies, setSapCompanies] = useState([]);
   const [busy, setBusy] = useState("");
   const [raising, setRaising] = useState(false);
   const [ordering, setOrdering] = useState(null);
+  // The request whose full details are open, by id, so a background reload
+  // shows the fresh copy rather than the one the eye was pressed on.
+  const [viewing, setViewing] = useState("");
+  const [page, setPage] = useState(1);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -114,6 +127,9 @@ const PurchaseRequests = () => {
     load();
   }, [load]);
 
+  // The top bar's Refresh, in place of a button of the page's own.
+  useErpRefresh(() => load(true));
+
   // Every SAP company, so the filter offers one before it has a request. If
   // this fails, the filter still offers the companies on the list.
   useEffect(() => {
@@ -135,7 +151,7 @@ const PurchaseRequests = () => {
     setBusy(id);
     try {
       await API.post(`/purchase-requests/${id}/retry`);
-      showToast(`${id} sent to SAP again`, "success");
+      showToast("Purchase request sent to SAP again", "success");
       load(true);
     } catch (err) {
       showToast(err.response?.data?.message || "That step was refused", "error");
@@ -148,7 +164,7 @@ const PurchaseRequests = () => {
     setBusy(id);
     try {
       await API.post(`/purchase-requests/${id}/order/retry`);
-      showToast(`PO for ${id} sent to SAP again`, "success");
+      showToast("Purchase order sent to SAP again", "success");
       load(true);
     } catch (err) {
       showToast(err.response?.data?.message || "That step was refused", "error");
@@ -167,10 +183,45 @@ const PurchaseRequests = () => {
     return [...byCode].sort((a, b) => a[1].localeCompare(b[1]));
   }, [sapCompanies, rows]);
 
+  // Everybody who has raised a request on the list, for the Raised By filter.
+  // Filtered by the account (email), shown by the person's name.
+  const raisers = useMemo(() => {
+    const byEmail = new Map();
+    for (const r of rows) if (r.raisedBy) byEmail.set(r.raisedBy, r.raisedByName || r.raisedBy);
+    return [...byEmail].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [rows]);
+
   const shown = useMemo(
-    () => rows.filter((r) => (!status || r.status === status) && (!company || r.company === company)),
-    [rows, status, company]
+    () =>
+      rows.filter(
+        (r) =>
+          (!status || r.status === status) &&
+          (!company || r.company === company) &&
+          (!raisedBy || r.raisedBy === raisedBy)
+      ),
+    [rows, status, company, raisedBy]
   );
+
+  // Ten to a page. A filter change starts again from the first (see `filterBy`),
+  // and pageSlice keeps the page in range when a reload leaves fewer rows.
+  const { page: current, rows: pageRows } = pageSlice(shown, page, PAGE_SIZE);
+  const filterBy = (set) => (e) => {
+    set(e.target.value);
+    setPage(1);
+  };
+
+  const open = viewing ? rows.find((r) => r.id === viewing) : null;
+  const actions = (r) => ({
+    canRetry: canRaise,
+    canBuy,
+    busy: busy === r.id,
+    onRetry: () => retry(r.id),
+    onOrder: () => {
+      setViewing("");
+      setOrdering(r);
+    },
+    onRetryOrder: () => retryOrder(r.id),
+  });
 
   return (
     <div className="space-y-5">
@@ -181,16 +232,12 @@ const PurchaseRequests = () => {
           </span>
           <div>
             <h2 className="panel-title">Purchase requests</h2>
-            <p className="panel-sub">
-              SAP gets each one within about a minute; the purchase manager turns it into a
-              purchase order.
-            </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={company}
-            onChange={(e) => setCompany(e.target.value)}
+            onChange={filterBy(setCompany)}
             className="field field-sm w-auto cursor-pointer"
             aria-label="Filter by company"
           >
@@ -202,8 +249,21 @@ const PurchaseRequests = () => {
             ))}
           </select>
           <select
+            value={raisedBy}
+            onChange={filterBy(setRaisedBy)}
+            className="field field-sm w-auto cursor-pointer"
+            aria-label="Filter by raised by"
+          >
+            <option value="">Raised by anyone</option>
+            {raisers.map(([email, name]) => (
+              <option key={email} value={email}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={filterBy(setStatus)}
             className="field field-sm w-auto cursor-pointer"
             aria-label="Filter by status"
           >
@@ -214,10 +274,6 @@ const PurchaseRequests = () => {
               </option>
             ))}
           </select>
-          <button className="btn btn-sm btn-neutral" onClick={() => load()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
           {canRaise && (
             <button className="btn btn-sm btn-primary" onClick={() => setRaising(true)}>
               <Plus className="h-4 w-4" />
@@ -245,25 +301,27 @@ const PurchaseRequests = () => {
             <p className="empty-title">Nothing here</p>
             <p className="empty-sub">
               {rows.length
-                ? "No purchase requests match this filter."
+                ? "No purchase requests match these filters."
                 : "No purchase requests have been raised yet."}
             </p>
           </div>
         </div>
       ) : (
-        <div className="space-y-3">
-          {shown.map((r) => (
-            <RequestCard
-              key={r.id}
-              request={r}
-              canRetry={canRaise}
-              canBuy={canBuy}
-              busy={busy === r.id}
-              onRetry={() => retry(r.id)}
-              onOrder={() => setOrdering(r)}
-              onRetryOrder={() => retryOrder(r.id)}
-            />
-          ))}
+        <>
+          <RequestList rows={pageRows} actions={actions} onView={(r) => setViewing(r.id)} />
+          <Pagination
+            page={current}
+            total={shown.length}
+            pageSize={PAGE_SIZE}
+            onPage={setPage}
+            noun="purchase request"
+          />
+        </>
+      )}
+
+      {open && (
+        <div className="modal-backdrop" onClick={() => setViewing("")}>
+          <RequestDetails request={open} onClose={() => setViewing("")} {...actions(open)} />
         </div>
       )}
 
@@ -293,101 +351,240 @@ const KV = ({ label, value }) => (
   </div>
 );
 
-const RequestCard = ({ request: r, canRetry, canBuy, busy, onRetry, onOrder, onRetryOrder }) => {
+const StatusBadge = ({ status }) => (
+  <span className={`badge whitespace-nowrap ${STATUS_STYLE[status] || "badge-slate"}`}>
+    {status === "Queued" ? "Queued for SAP" : status}
+  </span>
+);
+
+/** The first item, and how many more: all a row has room for. */
+const itemsSummary = (lines = []) => {
+  if (!lines.length) return "—";
+  const first = `${lines[0].name} × ${lines[0].qty} ${lines[0].unit || ""}`.trim();
+  return lines.length > 1 ? `${first}, +${lines.length - 1} more` : first;
+};
+
+/** Send again, change or make the PO - offered on the row and in the popup alike. */
+const RowActions = ({ request: r, canRetry, canBuy, busy, onRetry, onOrder, onRetryOrder }) => {
   const o = r.order;
   return (
-    <div className="card p-5">
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mono text-xs text-slate-500">{r.id}</span>
-            <span className={`badge ${STATUS_STYLE[r.status] || "badge-slate"}`}>
-              {r.status === "Queued" ? "Queued for SAP" : r.status}
-            </span>
+    <>
+      {canRetry && r.status === "Failed" && (
+        <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetry}>
+          <Send className="h-4 w-4" />
+          {busy ? "…" : "Send again"}
+        </button>
+      )}
+      {/* A refused PO can go back as it was, or be changed first. */}
+      {canBuy && o?.status === "Failed" && (
+        <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetryOrder}>
+          <Send className="h-4 w-4" />
+          {busy ? "…" : "Send PO again"}
+        </button>
+      )}
+      {canBuy && r.mayOrder && (
+        <button
+          className={`btn btn-sm ${o?.status === "Failed" ? "btn-neutral" : "btn-primary"}`}
+          disabled={busy}
+          onClick={onOrder}
+        >
+          <FileText className="h-4 w-4" />
+          {o?.status === "Failed" ? "Change PO" : "Make PO"}
+        </button>
+      )}
+    </>
+  );
+};
+
+/** The eye: the way into everything about a request. Outlined so it reads as a button. */
+const ViewButton = ({ request: r, onView }) => (
+  <button
+    className="btn btn-sm btn-neutral btn-icon shrink-0 hover:border-brand-500 hover:text-brand-700"
+    onClick={() => onView(r)}
+    title="View full details"
+    aria-label={`View purchase request for ${r.companyName || r.company}`}
+  >
+    <Eye className="h-4 w-4" aria-hidden="true" />
+  </button>
+);
+
+/**
+ * One short line per request: where it stands, for which company, and what.
+ * Everything else - who raised it and when, the date needed, the SAP numbers,
+ * every line, the PO and the actions (retry, create PO) - is behind the eye,
+ * so the list reads down at a glance.
+ */
+const RequestList = ({ rows, onView }) => (
+  <>
+    {/* Phone: a short card per request. */}
+    <div className="space-y-3 md:hidden">
+      {rows.map((r) => (
+        <div key={r.id} className="card flex items-center gap-4 p-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge status={r.status} />
+              <span className="text-[13px] font-semibold text-slate-900">{r.companyName || r.company}</span>
+            </div>
+            <p className="mt-2 truncate text-[13px] text-slate-700">{itemsSummary(r.lines)}</p>
           </div>
+          <ViewButton request={r} onView={onView} />
+        </div>
+      ))}
+    </div>
 
-          <div className="mt-2 grid sm:grid-cols-2 lg:grid-cols-5 gap-x-6 gap-y-2">
-            <KV label="Company" value={r.companyName || r.company} />
-            <KV label="SAP purchase request" value={r.sapDocNumber ? `PR ${r.sapDocNumber}` : ""} />
-            <KV label="Purchase order" value={r.poNumbers ? `PO ${r.poNumbers}` : ""} />
-            <KV label="Required by" value={day(r.requiredBy)} />
-            <KV label="Raised by" value={`${r.raisedBy || "—"} · ${when(r.raisedAt)}`} />
-          </div>
-
-          {r.reason && <p className="mt-2 text-xs text-slate-600 italic">“{r.reason}”</p>}
-
-          <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-100">
-            {(r.lines || []).map((l, i) => (
-              <li
-                key={`${l.itemCode}-${i}`}
-                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-3 py-2 text-[13px]"
-              >
-                <span className="min-w-0 text-slate-800">
-                  {l.name}{" "}
-                  <span className="mono text-[11px] text-slate-500">{l.sapItemCode || l.itemCode}</span>
-                  {l.remarks && <span className="ml-2 text-[12px] text-slate-500">· {l.remarks}</span>}
-                </span>
-                <span className="whitespace-nowrap text-slate-700">
-                  × {l.qty} {l.unit}
-                  {/* What the PO made here takes of it, and at what price. */}
-                  {o &&
-                    (l.orderQty > 0 ? (
-                      <span className="ml-2 text-[12px] text-slate-500">
-                        · PO {l.orderQty} @ {formatCurrency(l.price)}
-                        {l.taxCode ? ` · ${l.taxCode}` : ""}
-                      </span>
-                    ) : (
-                      <span className="ml-2 text-[12px] text-slate-400">· not on the PO</span>
-                    ))}
-                </span>
-              </li>
+    {/* Tablet and up: a table of three columns and the eye. */}
+    <div className="table-card hidden md:block">
+      <div className="table-scroll">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th className="w-[160px]">Status</th>
+              <th className="w-[260px]">Company</th>
+              <th>Items</th>
+              <th className="w-[80px] text-right">View</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} className="cursor-pointer" onClick={() => onView(r)}>
+                <td className="py-4">
+                  <StatusBadge status={r.status} />
+                </td>
+                <td className="whitespace-nowrap py-4 font-medium text-slate-800">{r.companyName || r.company}</td>
+                <td className="py-4">
+                  <div className="max-w-[480px] truncate text-slate-700" title={itemsSummary(r.lines)}>
+                    {itemsSummary(r.lines)}
+                  </div>
+                </td>
+                {/* The row opens the details too; the eye is the visible way in. */}
+                <td className="py-4" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex justify-end">
+                    <ViewButton request={r} onView={onView} />
+                  </div>
+                </td>
+              </tr>
             ))}
-          </ul>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </>
+);
 
-          {o && <OrderState order={o} />}
+/** Everything about one request: the popup behind the eye. */
+const RequestDetails = ({ request: r, onClose, ...actions }) => {
+  const o = r.order;
+  return (
+    <div className="modal max-w-2xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+      <div className="modal-head">
+        <div className="min-w-0">
+          <h3 className="modal-title">
+            <ShoppingCart className="h-[18px] w-[18px] text-brand-700 shrink-0" />
+            Purchase request
+            <StatusBadge status={r.status} />
+          </h3>
+          <p className="modal-sub">
+            {r.companyName || r.company} · raised by {r.raisedByName || r.raisedBy || "—"} on {when(r.raisedAt)}
+          </p>
+        </div>
+        <button onClick={onClose} className="modal-close" aria-label="Close">
+          <X className="h-5 w-5" />
+        </button>
+      </div>
 
-          {r.status === "Ordered" && (
-            <p className="mt-2 flex items-center gap-1.5 text-xs text-emerald-700">
-              <Truck className="h-3.5 w-3.5 shrink-0" />
-              Receive it with Goods receipt when the goods arrive.
-            </p>
-          )}
-
-          {r.status === "Failed" && r.error && (
-            <p className="mt-2 text-xs text-rose-700">SAP said: {r.error}</p>
-          )}
-
-          {/* Ended by the sync: every PO raised from it was cancelled in SAP. */}
-          {r.status === "Closed" && r.error && <p className="mt-2 text-xs text-slate-600">{r.error}</p>}
+      <div className="modal-body space-y-6">
+        <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+          <KV label="Company" value={r.companyName || r.company} />
+          <KV label="Required by" value={day(r.requiredBy)} />
+          <KV label="SAP purchase request" value={r.sapDocNumber ? `PR ${r.sapDocNumber}` : ""} />
+          <KV label="Purchase order" value={r.poNumbers ? `PO ${r.poNumbers}` : ""} />
+          <KV label="Raised by" value={`${r.raisedByName || r.raisedBy || "—"} · ${when(r.raisedAt)}`} />
         </div>
 
-        {((canRetry && r.status === "Failed") || (canBuy && (r.mayOrder || o?.status === "Failed"))) && (
-          <div className="flex shrink-0 flex-wrap gap-2">
-            {canRetry && r.status === "Failed" && (
-              <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetry}>
-                <Send className="h-4 w-4" />
-                {busy ? "…" : "Send again"}
-              </button>
-            )}
-            {/* A refused PO can go back as it was, or be changed first. */}
-            {canBuy && o?.status === "Failed" && (
-              <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetryOrder}>
-                <Send className="h-4 w-4" />
-                {busy ? "…" : "Send again"}
-              </button>
-            )}
-            {canBuy && r.mayOrder && (
-              <button
-                className={`btn btn-sm ${o?.status === "Failed" ? "btn-neutral" : "btn-primary"}`}
-                disabled={busy}
-                onClick={onOrder}
-              >
-                <FileText className="h-4 w-4" />
-                {o?.status === "Failed" ? "Change PO" : "Make PO"}
-              </button>
-            )}
+        {r.reason && <p className="text-[13px] text-slate-600 italic">“{r.reason}”</p>}
+
+        <div>
+        <p className="mb-2 text-[12px] font-semibold text-slate-500">
+          Items ({(r.lines || []).length})
+        </p>
+        <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+          {(r.lines || []).map((l, i) => (
+            <li
+              key={`${l.itemCode}-${i}`}
+              className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1.5 px-4 py-3 text-[13px]"
+            >
+              <span className="min-w-0 text-slate-800">
+                {l.name}
+                {l.sapItemCode && <span className="mono ml-2 text-[11px] text-slate-500">{l.sapItemCode}</span>}
+                {l.remarks && <span className="ml-2 text-[12px] text-slate-500">· {l.remarks}</span>}
+              </span>
+              <span className="whitespace-nowrap text-slate-700">
+                × {l.qty} {l.unit}
+                {/* What the PO made here takes of it, and at what price. */}
+                {o &&
+                  (l.orderQty > 0 ? (
+                    <span className="ml-2 text-[12px] text-slate-500">
+                      · PO {l.orderQty} @ {formatCurrency(l.price)}
+                      {l.taxCode ? ` · ${l.taxCode}` : ""}
+                    </span>
+                  ) : (
+                    <span className="ml-2 text-[12px] text-slate-400">· Not on the PO</span>
+                  ))}
+                {/* What the goods receipts have brought in so far. */}
+                {l.received !== null && l.received !== undefined && (
+                  <span className={`ml-2 text-[12px] ${l.received >= l.qty ? "text-emerald-700" : "text-slate-500"}`}>
+                    · Received {l.received}
+                  </span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+        </div>
+
+        {o && <OrderState order={o} />}
+
+        {r.status === "Ordered" && (
+          <p className="flex items-center gap-1.5 text-xs text-emerald-700">
+            <Truck className="h-3.5 w-3.5 shrink-0" />
+            Receive it with Goods receipt when the goods arrive.
+          </p>
+        )}
+
+        {r.receipts?.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-[12px] font-medium text-slate-500">Goods receipts</p>
+            <ul className="space-y-1 text-[13px] text-slate-700">
+              {r.receipts.map((g) => (
+                <li key={g.id} className="flex flex-wrap gap-x-2">
+                  <span className="mono">{g.sapDocNumber ? `GRPO ${g.sapDocNumber}` : g.id}</span>
+                  {g.poNumber && <span className="text-slate-500">· PO {g.poNumber}</span>}
+                  {g.billNo && <span className="text-slate-500">· Bill {g.billNo}</span>}
+                  <span className="text-slate-500">· {when(g.postedAt)}</span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
+
+        {r.status === "Completed" && (
+          <p className="flex items-center gap-1.5 text-xs text-cyan-700">
+            <Truck className="h-3.5 w-3.5 shrink-0" />
+            Every item has been received. Nothing more can be done on this request.
+          </p>
+        )}
+
+        {r.status === "Failed" && r.error && <p className="text-xs text-rose-700">SAP said: {r.error}</p>}
+
+        {/* Ended by the sync: every PO raised from it was cancelled in SAP. */}
+        {r.status === "Closed" && r.error && <p className="text-xs text-slate-600">{r.error}</p>}
+      </div>
+
+      <div className="modal-foot">
+        <button type="button" onClick={onClose} className="btn btn-neutral">
+          Close
+        </button>
+        <RowActions request={r} {...actions} />
       </div>
     </div>
   );
@@ -395,7 +592,7 @@ const RequestCard = ({ request: r, canRetry, canBuy, busy, onRetry, onOrder, onR
 
 /** The PO made in the app: waiting for the sync, posted, or refused by SAP. */
 const OrderState = ({ order: o }) => (
-  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
     <div className="flex flex-wrap items-center gap-2">
       <span className={`badge ${ORDER_STYLE[o.status] || "badge-slate"}`}>
         {o.status === "Queued"
@@ -409,7 +606,7 @@ const OrderState = ({ order: o }) => (
       <span className="text-[13px] text-slate-800">
         {o.vendorName || o.vendorCode}
         {o.vendorCode && o.vendorName && (
-          <span className="mono ml-1 text-[11px] text-slate-500">{o.vendorCode}</span>
+          <span className="mono ml-1.5 text-[11px] text-slate-500">{o.vendorCode}</span>
         )}
       </span>
       <span className="ml-auto text-[13px] font-semibold tabular-nums text-slate-900">
@@ -417,7 +614,7 @@ const OrderState = ({ order: o }) => (
       </span>
     </div>
     <p className="mt-1 text-[12px] text-slate-500">
-      PO date {day(o.date) || "—"} · delivery {day(o.dueDate) || "—"} · made by {o.raisedBy || "—"}{" "}
+      PO date: {day(o.date) || "—"} · Delivery: {day(o.dueDate) || "—"} · Made by {o.raisedByName || o.raisedBy || "—"},{" "}
       {when(o.raisedAt)}
     </p>
     {o.remarks && <p className="mt-1 text-[12px] text-slate-600 italic">“{o.remarks}”</p>}

@@ -141,11 +141,17 @@ class Breakdown {
     required this.repeatFailure,
     this.attendedBy = '',
     this.attendedAt,
+    this.responseHours,
   });
 
   /// Who in maintenance marked it seen, and when (20 Oct 2026). Empty before.
   final String attendedBy;
   final DateTime? attendedAt;
+
+  /// Response time: reported until attended, in hours, as the server measures
+  /// it from the two stamps. Null until the breakdown is attended - never an
+  /// estimate.
+  final double? responseHours;
 
   final String id;
   final String machine;
@@ -199,6 +205,9 @@ class Breakdown {
         repeatFailure: _asBool(json['repeatFailure']),
         attendedBy: asString(json['attendedBy']),
         attendedAt: parseDate(json['attendedAt']),
+        responseHours: json['responseHours'] is num
+            ? (json['responseHours'] as num).toDouble()
+            : null,
       );
 }
 

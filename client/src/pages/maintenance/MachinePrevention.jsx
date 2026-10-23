@@ -164,8 +164,7 @@ const MachinePrevention = ({ machineId, canEdit }) => {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-slate-800 truncate">{c.title}</p>
                   <p className="text-xs text-slate-500">
-                    {c.responsibility || "nobody assigned"} · Rev {c.revision}
-                    {c.estimatedMinutes ? ` · about ${c.estimatedMinutes} min` : ""}
+                    Rev {c.revision}
                     {c.isActive ? "" : " · retired"}
                   </p>
                 </div>

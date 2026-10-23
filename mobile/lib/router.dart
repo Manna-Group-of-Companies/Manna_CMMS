@@ -11,6 +11,7 @@ import 'screens/leave/leave_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/maintenance/breakdown_detail_screen.dart';
 import 'screens/maintenance/breakdowns_screen.dart';
+import 'screens/maintenance/dashboard_screen.dart';
 import 'screens/maintenance/request_detail_screen.dart';
 import 'screens/maintenance/requests_screen.dart';
 import 'screens/no_access_screen.dart';
@@ -18,7 +19,7 @@ import 'screens/purchasing/low_value_purchase_detail_screen.dart';
 import 'screens/purchasing/low_value_purchases_screen.dart';
 import 'screens/supervisor/settings_screen.dart';
 import 'state/auth_provider.dart';
-import 'widgets/common.dart';
+import 'widgets/cmms_mark.dart';
 
 /// This app is Breakdowns, Maintenance Requests, - since 12 Oct 2026 - the
 /// maintenance team's Attendance and - since 20 Oct 2026 - Low Value Purchase
@@ -90,6 +91,10 @@ bool canSeeLowValuePurchases(String role) => _lowValueRoles.contains(role);
 bool canApproveAttendance(String role) => _attendanceApproverRoles.contains(role);
 bool isMaintenanceMember(String role) => role == 'Maintenance Member';
 
+/// The dashboard sums up breakdowns and requests, so it is for the roles that
+/// see at least one of them.
+bool hasDashboard(String role) => canSeeBreakdowns(role) || canSeeRequests(role);
+
 /// The Maintenance Manager follows breakdowns and requests on the phone but
 /// moves none of them on from it: Start Repair, Machine Running, rejecting and
 /// the rest are recorded on the computer only. Their detail screens offer no
@@ -106,6 +111,7 @@ bool worksInMaintenance(String role) =>
     canSeeAttendance(role) ||
     canSeeLowValuePurchases(role);
 
+const dashboardHome = '/dashboard';
 const breakdownsHome = '/maintenance/breakdowns';
 const requestsHome = '/maintenance/requests';
 const attendanceHome = '/attendance';
@@ -121,14 +127,14 @@ final rootNavigatorKey = GlobalKey<NavigatorState>();
 /// on, or the no-access page when they are on none.
 ///
 /// A team member's whole app is Attendance, so that is where they land; every
-/// manager lands on Breakdowns, which is the work they open the app for. Low
+/// manager lands on the Dashboard, which sums up the breakdowns and requests
+/// they open the app for. Low
 /// value purchases come after the maintenance screens, so they are home only
 /// for the roles that have nothing else here - VP Operations and the purchase
 /// manager.
 String homePathFor(String role) {
   if (isMaintenanceMember(role)) return attendanceHome;
-  if (canSeeBreakdowns(role)) return breakdownsHome;
-  if (canSeeRequests(role)) return requestsHome;
+  if (hasDashboard(role)) return dashboardHome;
   if (canSeeLowValuePurchases(role)) return lowValueHome;
   if (canSeeAttendance(role)) return attendanceHome;
   return noAccessHome;
@@ -144,6 +150,8 @@ GoRouter buildRouter(AuthProvider auth) {
       GoRoute(path: '/', builder: (_, _) => const _SessionSplash()),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/no-access', builder: (_, _) => const NoAccessScreen()),
+
+      GoRoute(path: dashboardHome, builder: (_, _) => const DashboardScreen()),
 
       // Breakdowns and planned work — the whole app.
       GoRoute(path: breakdownsHome, builder: (_, _) => const BreakdownsScreen()),
@@ -216,6 +224,7 @@ GoRouter buildRouter(AuthProvider auth) {
       // Each of the two screens checks its own role, so a role allowed on one
       // but not the other cannot reach the one that refuses it by typing the
       // URL — the same thing `requireView` does on the server.
+      if (path == dashboardHome && !hasDashboard(user.role)) return home;
       if (path.startsWith('/maintenance/breakdowns') && !canSeeBreakdowns(user.role)) return home;
       if (path.startsWith('/maintenance/requests') && !canSeeRequests(user.role)) return home;
       if (path.startsWith(lowValueHome) && !canSeeLowValuePurchases(user.role)) return home;
@@ -244,12 +253,78 @@ GoRouter buildRouter(AuthProvider auth) {
   );
 }
 
+/// The orange splash held while the session is restored: the mark, the
+/// company and what the app is for.
 class _SessionSplash extends StatelessWidget {
   const _SessionSplash();
 
   @override
-  Widget build(BuildContext context) => const Scaffold(
-        backgroundColor: AppColors.canvas,
-        body: LoadingView(message: 'Restoring your session...'),
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: AppColors.primary,
+        body: DecoratedBox(
+          decoration: const BoxDecoration(gradient: AppGradients.splash),
+          child: SafeArea(
+            child: SizedBox(
+              width: double.infinity,
+              child: Column(
+                children: [
+                  const Spacer(flex: 3),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 2),
+                    ),
+                    child: const CmmsMark(size: 52),
+                  ),
+                  const SizedBox(height: 22),
+                  const Text(
+                    'MANNA RUBBER',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Maintenance Management',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const Spacer(flex: 4),
+                  const Text(
+                    'Keep Your Machines\nRunning, Always',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: 120,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        minHeight: 4,
+                        color: Colors.white,
+                        backgroundColor: Colors.white.withValues(alpha: 0.25),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 44),
+                ],
+              ),
+            ),
+          ),
+        ),
       );
 }

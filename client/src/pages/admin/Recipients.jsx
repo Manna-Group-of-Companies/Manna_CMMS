@@ -268,7 +268,7 @@ const Recipients = () => {
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
                     required
-                    placeholder="e.g. Maintenance Dept, ABC Traders"
+                   
                     className="field"
                   />
                 </div>
@@ -297,7 +297,7 @@ const Recipients = () => {
                     type="text"
                     value={form.description}
                     onChange={(e) => setForm({ ...form, description: e.target.value })}
-                    placeholder="e.g. contact person, site"
+                   
                     className="field"
                   />
                 </div>

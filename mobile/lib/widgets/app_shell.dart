@@ -30,6 +30,8 @@ List<NavLink> _tabsFor(AuthProvider auth) {
   final role = auth.user?.role;
   if (role == null) return const [];
   return [
+    if (hasDashboard(role))
+      const NavLink('Dashboard', dashboardHome, Icons.space_dashboard_outlined),
     if (canSeeBreakdowns(role))
       const NavLink('Breakdowns', breakdownsHome, Icons.build_outlined),
     if (canSeeRequests(role))
@@ -38,15 +40,14 @@ List<NavLink> _tabsFor(AuthProvider auth) {
       const NavLink('Miscellaneous', lowValueHome, Icons.shopping_cart_outlined),
     if (canSeeAttendance(role))
       const NavLink('Attendance', attendanceHome, Icons.how_to_reg_outlined),
+    const NavLink('Profile', '/maintenance/settings', Icons.person_outline),
   ];
 }
 
-/// Where the gear goes. One Settings screen now that there is one portal.
-String _settingsPathFor(AuthProvider auth) => '/maintenance/settings';
-
-/// Chrome shared by every authenticated screen: the app bar with the settings
-/// gear and the notification bell (Navbar.jsx), and the bottom tab bar for the
-/// working screens. Profile and sign-out live behind the gear.
+/// Chrome shared by every authenticated screen: the app bar with the drawer
+/// button and the notification bell (Navbar.jsx), the dark side drawer, and
+/// the bottom tab bar for the working screens. Profile and sign-out are the
+/// last tab, and the foot of the drawer.
 class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
@@ -54,12 +55,17 @@ class AppShell extends StatefulWidget {
     required this.child,
     this.floatingActionButton,
     this.actions,
+    this.showAppBar = true,
   });
 
   final String title;
   final Widget child;
   final Widget? floatingActionButton;
   final List<Widget>? actions;
+
+  /// Off for a screen that draws its own header - the dashboard's dark one.
+  /// It then opens the drawer itself, with `Scaffold.of(context).openDrawer()`.
+  final bool showAppBar;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -97,16 +103,27 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: _TitleWithAccount(title: widget.title),
-        actions: [
-          ...?widget.actions,
-          const _SettingsButton(),
-          const _NotificationBell(),
-          const SizedBox(width: 4),
-        ],
-        shape: const Border(bottom: BorderSide(color: AppColors.border)),
-      ),
+      appBar: widget.showAppBar
+          ? AppBar(
+              title: _TitleWithAccount(title: widget.title),
+              leading: Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu_rounded, size: 24),
+                  color: AppColors.textStrong,
+                  tooltip: 'Menu',
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
+              titleSpacing: 0,
+              actions: [
+                ...?widget.actions,
+                const NotificationBell(),
+                const SizedBox(width: 4),
+              ],
+              shape: const Border(bottom: BorderSide(color: AppColors.border)),
+            )
+          : null,
+      drawer: const AppDrawer(),
       floatingActionButton: widget.floatingActionButton,
       bottomNavigationBar: AppBottomNav(onReselect: _scrollToTop),
       body: PrimaryScrollController(
@@ -277,29 +294,210 @@ class _NavTab extends StatelessWidget {
   }
 }
 
-/// The gear in the app bar, on every authenticated screen. Behind it: the
-/// account card, the request tallies, the server address and sign-out.
-class _SettingsButton extends StatelessWidget {
-  const _SettingsButton();
+/// The dark side drawer: who is signed in, every screen this role has, and
+/// sign-out at the foot.
+class AppDrawer extends StatelessWidget {
+  const AppDrawer({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final path = _settingsPathFor(context.watch<AuthProvider>());
-    final active = GoRouterState.of(context).uri.path == path;
+    final auth = context.watch<AuthProvider>();
+    final user = auth.user;
+    final location = GoRouterState.of(context).uri.path;
 
-    return IconButton(
-      icon: const Icon(Icons.settings_outlined, size: 22),
-      color: active ? AppColors.primaryDeep : AppColors.textSecondary,
-      tooltip: 'Settings',
-      onPressed: () {
-        if (!active) context.go(path);
-      },
+    return Drawer(
+      backgroundColor: AppColors.ink,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.horizontal(right: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
+              child: Row(
+                children: [
+                  const AccountAvatar(size: 48),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user?.name ?? '',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          user?.role ?? '',
+                          style: const TextStyle(
+                            color: AppColors.inkMuted,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          user?.email ?? '',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: AppColors.inkMuted, fontSize: 10.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(color: AppColors.inkRaised, height: 1),
+            const SizedBox(height: 10),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: [
+                  for (final tab in _tabsFor(auth))
+                    _DrawerItem(
+                      icon: tab.icon,
+                      label: tab.name,
+                      active: location == tab.path,
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        if (location != tab.path) context.go(tab.path);
+                      },
+                    ),
+                ],
+              ),
+            ),
+            const Divider(color: AppColors.inkRaised, height: 1),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: _DrawerItem(
+                icon: Icons.logout_rounded,
+                label: 'Logout',
+                color: const Color(0xFFFF7A59),
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  final confirmed = await confirmSignOut(context);
+                  if (confirmed && context.mounted) {
+                    await context.read<AuthProvider>().logout();
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
-class _NotificationBell extends StatelessWidget {
-  const _NotificationBell();
+/// Asks before signing out; shared by the drawer and the Profile screen.
+Future<bool> confirmSignOut(BuildContext context) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Sign out', style: TextStyle(fontSize: 17)),
+      content: const Text(
+        'Are you sure you want to sign out?',
+        style: TextStyle(color: AppColors.textSecondary, fontSize: 13.5),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: AppColors.dangerDeep),
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('Sign Out'),
+        ),
+      ],
+    ),
+  );
+  return confirmed == true;
+}
+
+class _DrawerItem extends StatelessWidget {
+  const _DrawerItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.active = false,
+    this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool active;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = color ?? (active ? Colors.white : const Color(0xFFD5DAE3));
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: active ? AppColors.primary : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Icon(icon, size: 20, color: fg),
+                const SizedBox(width: 14),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 13.5,
+                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The orange disc with a person in it, used in the drawer, the dashboard
+/// header and the Profile screen.
+class AccountAvatar extends StatelessWidget {
+  const AccountAvatar({super.key, this.size = 44});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        height: size,
+        width: size,
+        decoration: BoxDecoration(
+          gradient: AppGradients.primary,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white.withValues(alpha: 0.85), width: 2),
+        ),
+        child: Icon(Icons.person_rounded, size: size * 0.56, color: Colors.white),
+      );
+}
+
+class NotificationBell extends StatelessWidget {
+  const NotificationBell({super.key, this.onDark = false});
+
+  /// Drawn on the dashboard's dark header rather than a white app bar.
+  final bool onDark;
 
   @override
   Widget build(BuildContext context) {
@@ -310,7 +508,7 @@ class _NotificationBell extends StatelessWidget {
       children: [
         IconButton(
           icon: const Icon(Icons.notifications_none, size: 22),
-          color: AppColors.textSecondary,
+          color: onDark ? Colors.white : AppColors.textSecondary,
           tooltip: 'Notifications',
           onPressed: () => _openPanel(context),
         ),
@@ -330,7 +528,7 @@ class _NotificationBell extends StatelessWidget {
                 child: Text(
                   unread > 9 ? '9+' : '$unread',
                   style: const TextStyle(
-                    color: AppColors.textStrong,
+                    color: Colors.white,
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
                   ),

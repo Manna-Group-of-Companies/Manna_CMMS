@@ -9,6 +9,7 @@ import '../../models/maintenance.dart';
 import '../../router.dart';
 import '../../state/auth_provider.dart';
 import '../../widgets/common.dart';
+import '../../widgets/work_widgets.dart';
 import 'stage_form.dart';
 
 /// One maintenance request, and whatever step it is sitting on.
@@ -87,6 +88,14 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
     final next = record == null || record.nextAction.isEmpty ? null : _stages[record.nextAction];
     final mayTakeNext = !viewOnly && next != null && next.allows(role);
 
+    // Attending is the one step the view-only phone still takes: it records
+    // only that maintenance has seen it, and the person who asked is waiting
+    // on exactly that. Who may is still the server's list.
+    final mayAttend = record != null &&
+        record.nextAction == 'Attend' &&
+        next != null &&
+        next.allows(role);
+
     // Withdraw is the requester's own; anyone else with the right role rejects.
     // `mine` already decides which of the two it is, so the role is the only
     // check left - this also asked for "mine or the Admin", which kept Reject
@@ -107,7 +116,7 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(record?.title ?? 'Request'),
+          title: const Text('Request Details'),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => Navigator.of(context).pop(_changed),
@@ -127,7 +136,13 @@ class _RequestDetailScreenState extends State<RequestDetailScreen> {
                     children: [
                       _Summary(record: record!),
                       const SizedBox(height: 12),
-                      if (mayTakeNext)
+                      if (mayAttend)
+                        AttendCard(
+                          stage: next,
+                          busy: _busy,
+                          onAttend: () => _advance('Attend', const {}),
+                        )
+                      else if (mayTakeNext)
                         StageForm(
                           key: ValueKey(record.nextAction),
                           stage: next,
@@ -166,58 +181,76 @@ class _Summary extends StatelessWidget {
   final MaintenanceRequest record;
 
   @override
-  Widget build(BuildContext context) => AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          WorkDetailHeader(
+            icon: Icons.handyman_outlined,
+            title: record.title,
+            code: record.id,
+            priority: record.priority,
+            state: record.state,
+          ),
+          const SizedBox(height: 14),
+          AppCard(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Column(
               children: [
-                Expanded(child: MonoText(record.id, fontSize: 13)),
-                StatusBadge(record.state),
+                InfoRow(
+                  icon: Icons.event_outlined,
+                  label: 'Created on',
+                  value: formatDateTime(record.requestedAt),
+                ),
+                InfoRow(
+                  icon: Icons.person_outline,
+                  label: 'Requested by',
+                  value: record.requestedBy,
+                ),
+                if (record.attendedAt != null)
+                  InfoRow(
+                    icon: Icons.engineering_outlined,
+                    label: 'Attended',
+                    value: '${formatDateTime(record.attendedAt)} · ${record.attendedBy}',
+                  ),
+                InfoRow(
+                  icon: Icons.apartment_outlined,
+                  label: 'Plant',
+                  value: record.plant,
+                ),
+                if (record.machineName.isNotEmpty)
+                  InfoRow(
+                    icon: Icons.location_on_outlined,
+                    label: 'Machine',
+                    value: record.machineName,
+                  ),
+                if (record.neededBy != null)
+                  InfoRow(
+                    icon: Icons.flag_outlined,
+                    label: 'Wanted by',
+                    value: formatDate(record.neededBy),
+                  ),
+                if (record.waitingOn.isNotEmpty)
+                  InfoRow(
+                    icon: Icons.hourglass_empty_rounded,
+                    label: 'Waiting on',
+                    value: record.waitingOn,
+                  ),
               ],
             ),
-            const SizedBox(height: 10),
-            Text(record.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 10),
-            if (record.whatIsNeeded.isNotEmpty) _Line('What is needed', record.whatIsNeeded),
-            if (record.whyNeeded.isNotEmpty) _Line('Why', record.whyNeeded),
-            _Line('Plant', record.plant),
-            if (record.machineName.isNotEmpty) _Line('Machine', record.machineName),
-            if (record.priority.isNotEmpty) _Line('Urgency', record.priority),
-            _Line('Raised by', record.requestedBy),
-            _Line('Raised', formatDateTime(record.requestedAt)),
-            if (record.attendedAt != null)
-              _Line('Attended', '${formatDateTime(record.attendedAt)} · ${record.attendedBy}'),
-            if (record.neededBy != null) _Line('Wanted by', formatDate(record.neededBy)),
-            if (record.workDone.isNotEmpty) _Line('Work done', record.workDone),
-            if (record.waitingOn.isNotEmpty) _Line('Waiting on', record.waitingOn),
+          ),
+          if (record.whatIsNeeded.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            TextSection(title: 'Description', text: record.whatIsNeeded),
           ],
-        ),
-      );
-}
-
-class _Line extends StatelessWidget {
-  const _Line(this.label, this.value);
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 110,
-              child: Text(
-                label,
-                style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
-              ),
-            ),
-            Expanded(child: Text(value, style: const TextStyle(fontSize: 13))),
+          if (record.whyNeeded.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            TextSection(title: 'Why', text: record.whyNeeded),
           ],
-        ),
+          if (record.workDone.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            TextSection(title: 'Work done', text: record.workDone),
+          ],
+        ],
       );
 }
 

@@ -7,17 +7,18 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
+import '../../core/formatters.dart';
 import '../../core/palette.dart';
 import '../../data/maintenance_repository.dart';
 import '../../models/maintenance.dart';
 import '../../state/auth_provider.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/common.dart';
+import '../../widgets/work_widgets.dart';
 
 /// Machines that have stopped.
 ///
-/// The phone half of `Breakdowns.jsx`, and deliberately the same three figures:
-/// open, work not started, and downtime so far. Downtime counts only the
+/// The phone half of `Breakdowns.jsx`. Downtime counts only the
 /// machines that are stopped *now* - a breakdown stays open after the repair
 /// while the root cause is written up, and counting those reports hours against
 /// a machine that is back in production.
@@ -33,8 +34,11 @@ class _BreakdownsScreenState extends State<BreakdownsScreen> {
 
   List<Breakdown> _rows = const [];
   bool _loading = true;
-  bool _openOnly = true;
+  String _filter = 'Open';
+  String _search = '';
   String _error = '';
+
+  static const _filters = ['Open', 'Not Started', 'Under Repair', 'Closed', 'All'];
 
   @override
   void initState() {
@@ -42,10 +46,12 @@ class _BreakdownsScreenState extends State<BreakdownsScreen> {
     _load();
   }
 
+  /// Everything, open or not: the pills choose between them on the phone, so
+  /// switching does not wait on the network.
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final rows = await _repo.breakdowns(openOnly: _openOnly);
+      final rows = await _repo.breakdowns();
       if (!mounted) return;
       setState(() {
         _rows = rows;
@@ -68,14 +74,34 @@ class _BreakdownsScreenState extends State<BreakdownsScreen> {
     if (made == true) _load();
   }
 
+  static bool _notStarted(Breakdown r) => r.state == 'Reported' || r.state == 'Attended';
+
+  List<Breakdown> get _shown {
+    final q = _search.trim().toLowerCase();
+    return _rows.where((r) {
+      final inFilter = switch (_filter) {
+        'Open' => r.isOpen,
+        'Not Started' => _notStarted(r),
+        'Under Repair' => r.isOpen && !_notStarted(r),
+        'Closed' => !r.isOpen,
+        _ => true,
+      };
+      if (!inFilter) return false;
+      if (q.isEmpty) return true;
+      return '${r.machineName} ${r.machine} ${r.id} ${r.plant} ${r.whatHappened}'
+          .toLowerCase()
+          .contains(q);
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final open = _rows.where((r) => r.isOpen).length;
-    final notStarted = _rows.where((r) => r.state == 'Reported' || r.state == 'Attended').length;
     final downtime = _rows.where((r) => r.isDown).fold<double>(
           0,
           (sum, r) => sum + r.stoppedForHours,
         );
+    final down = _rows.where((r) => r.isDown).length;
+    final shown = _shown;
 
     /// Who may report one in the first place.
     ///
@@ -92,7 +118,7 @@ class _BreakdownsScreenState extends State<BreakdownsScreen> {
           ? FloatingActionButton.extended(
               onPressed: _report,
               icon: const Icon(Icons.add),
-              label: const Text('Report'),
+              label: const Text('New breakdown'),
             )
           : null,
       child: RefreshIndicator(
@@ -100,55 +126,23 @@ class _BreakdownsScreenState extends State<BreakdownsScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: MetricCard(
-                    title: 'Open',
-                    value: open,
-                    icon: Icons.build_outlined,
-                    accent: AppColors.primary,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: MetricCard(
-                    title: 'Not started',
-                    value: notStarted,
-                    icon: Icons.pending_outlined,
-                    accent: notStarted > 0 ? AppColors.danger : AppColors.textMuted,
-                  ),
-                ),
-              ],
+            SearchBox(
+              hint: 'Search breakdowns…',
+              onChanged: (v) => setState(() => _search = v),
             ),
-            const SizedBox(height: 10),
-            // Hours are not a count, so this one is the card that takes a
-            // formatted value rather than an integer.
-            HeroStatCard(
-              label: 'Downtime so far',
-              value: _hours(downtime),
-              caption: 'machines stopped right now',
-              icon: Icons.timelapse_outlined,
+            const SizedBox(height: 12),
+            PillFilters(
+              options: _filters,
+              selected: _filter,
+              onChanged: (v) => setState(() => _filter = v),
             ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _openOnly ? 'Showing open' : 'Showing all',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {
-                    setState(() => _openOnly = !_openOnly);
-                    _load();
-                  },
-                  child: Text(_openOnly ? 'Show all' : 'Show open'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 12),
+            // Downtime counts only the machines stopped right now - see the
+            // class comment - so it is the one figure kept above the list.
+            if (down > 0) ...[
+              _DowntimeStrip(machines: down, hours: _hours(downtime)),
+              const SizedBox(height: 12),
+            ],
             if (_loading)
               const Padding(
                 padding: EdgeInsets.only(top: 40),
@@ -161,17 +155,32 @@ class _BreakdownsScreenState extends State<BreakdownsScreen> {
                 icon: Icons.error_outline,
                 iconColor: AppColors.danger,
               )
-            else if (_rows.isEmpty)
+            else if (shown.isEmpty)
               EmptyState(
-                title: 'Nothing stopped',
-                message: canReport
+                title: 'Nothing here',
+                message: canReport && _rows.isEmpty
                     ? 'No breakdowns to show. Report one with the button below.'
-                    : 'No breakdowns to show.',
+                    : 'No breakdowns match.',
                 icon: Icons.check_circle_outline,
               )
             else
-              for (final row in _rows) ...[
-                _BreakdownTile(row: row, onOpen: () => _open(row)),
+              for (final row in shown) ...[
+                WorkListTile(
+                  icon: Icons.precision_manufacturing_outlined,
+                  title: row.machineName.isEmpty ? row.machine : row.machineName,
+                  code: row.id,
+                  date: formatDate(row.stoppedAt),
+                  priority: row.priority,
+                  state: row.state,
+                  subtitle: [
+                    row.plant,
+                    if (row.isDown) 'stopped ${_hours(row.stoppedForHours)}',
+                    if (row.responseHours != null)
+                      'response time ${formatHours(row.responseHours!)}',
+                    if (row.repeatFailure) 'repeat failure',
+                  ].where((s) => s.isNotEmpty).join('  •  '),
+                  onTap: () => _open(row),
+                ),
                 const SizedBox(height: 10),
               ],
           ],
@@ -193,57 +202,42 @@ String _hours(double h) {
   return '${(h / 24).round()} days';
 }
 
-class _BreakdownTile extends StatelessWidget {
-  const _BreakdownTile({required this.row, required this.onOpen});
+class _DowntimeStrip extends StatelessWidget {
+  const _DowntimeStrip({required this.machines, required this.hours});
 
-  final Breakdown row;
-  final VoidCallback onOpen;
+  final int machines;
+  final String hours;
 
   @override
-  Widget build(BuildContext context) => AppCard(
-        onTap: onOpen,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          gradient: AppGradients.primary,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: AppShadows.raised,
+        ),
+        child: Row(
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    row.machineName.isEmpty ? row.machine : row.machineName,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                  ),
+            const Icon(Icons.timelapse_outlined, color: Colors.white, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '$machines machine${machines == 1 ? '' : 's'} stopped right now',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
                 ),
-                StatusBadge(row.state),
-              ],
-            ),
-            const SizedBox(height: 2),
-            MonoText(row.id),
-            const SizedBox(height: 8),
-            Text(
-              row.whatHappened,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, color: AppColors.textBody),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                SoftChip(row.plant),
-                if (row.priority.isNotEmpty) SoftChip(row.priority),
-                SoftChip('Stopped for ${_hours(row.stoppedForHours)}'),
-                if (row.repeatFailure)
-                  const AppBadge('repeat', color: AppColors.danger),
-              ],
-            ),
-            if (row.waitingOn.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Waiting on: ${row.waitingOn}',
-                style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
               ),
-            ],
+            ),
+            Text(
+              hours,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
           ],
         ),
       );

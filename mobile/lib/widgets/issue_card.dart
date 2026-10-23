@@ -108,12 +108,15 @@ class IssueCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        MonoText(product?.code ?? '—', fontSize: 10.5),
-                        if ((product?.storeRoom ?? '').isNotEmpty) ...[
+                        // SAP's code when known; ERPNext's own code is not shown.
+                        if ((product?.sap.code ?? '').isNotEmpty) ...[
+                          MonoText(product!.sap.code, fontSize: 10.5),
                           const SizedBox(width: 6),
+                        ],
+                        if ((product?.storeRoom ?? '').isNotEmpty) ...[
                           Flexible(
                             child: Text(
-                              '• ${product!.storeRoom}',
+                              '${product!.sap.code.isNotEmpty ? '• ' : ''}${product.storeRoom}',
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 color: AppColors.textMuted,

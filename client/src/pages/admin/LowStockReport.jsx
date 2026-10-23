@@ -4,10 +4,16 @@ import API from "../../services/api";
 import { useAuth, MAINTENANCE_MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
+import { useErpRefresh } from "../../hooks/useErpRefresh";
 import useStockRooms from "../../hooks/useStockRooms";
 import { formatCurrency } from "../../utils/currency";
 import { reorderCostOf, severityOf, shortageOf } from "../../utils/lowStock";
+import { maySeeItemValue } from "../../config/access";
 import PurchaseRequestModal from "./PurchaseRequestModal";
+import Pagination from "../../components/Pagination";
+import { pageSlice } from "../../utils/pageSlice";
+
+const PAGE_SIZE = 20;
 import {
   AlertTriangle,
   ArrowDown,
@@ -32,6 +38,12 @@ import {
 const requestable = (product) =>
   Boolean(product?.sap?.code) && Boolean(product?.sapCategory?.company);
 
+/** The distinct non-blank values, trimmed and A-Z - the options of a filter. */
+const sortedUnique = (values) =>
+  [...new Set(values.map((v) => String(v || "").trim()).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b),
+  );
+
 const SEVERITIES = [
   { key: "", label: "All Severities" },
   { key: "out", label: "Out of Stock" },
@@ -42,7 +54,7 @@ const SEVERITIES = [
 /** The columns of the table: header label, alignment, and the value a sort on
     that column reads. Order here is the order on screen. */
 const COLUMNS = [
-  { key: "code", label: "Code", text: true, value: (p) => String(p.code || "").toLowerCase() },
+  { key: "code", label: "SAP Code", text: true, value: (p) => String(p.sap?.code || "").toLowerCase() },
   {
     key: "name",
     label: "Engineering Stock",
@@ -138,6 +150,9 @@ const LowStockReport = () => {
   // Mirrors the server's guard on POST /purchase-requests.
   // Maintenance, and since 14 Oct 2026 the plant heads - mirrors the server's guard.
   const canRequest = user?.role === MAINTENANCE_MANAGER || user?.role === PRODUCTION_MANAGER;
+  // Reorder cost is item value, which is the Maintenance Manager's alone.
+  const showValue = maySeeItemValue(user?.role);
+  const columns = showValue ? COLUMNS : COLUMNS.filter((c) => c.key !== "cost");
 
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -149,6 +164,12 @@ const LowStockReport = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStoreRoom, setSelectedStoreRoom] = useState("");
   const [severity, setSeverity] = useState("");
+  // Every item sits in the one SAP group, Engineering Stocks, so the category
+  // worth filtering on is Sub-category A (U_SubTypeA), then B within it.
+  const [subCategory, setSubCategory] = useState("");
+  const [subCategoryB, setSubCategoryB] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   // Worst first, which is the order the list is read in.
   const [sort, setSort] = useState({ key: "severity", dir: "desc" });
 
@@ -177,6 +198,9 @@ const LowStockReport = () => {
   // in the background like the rest of the console.
   useAutoRefresh(() => fetchLowStock({ silent: true }));
 
+  // The top bar's Refresh: read ERPNext again without leaving the screen.
+  useErpRefresh(() => fetchLowStock({ silent: true }));
+
   const handleSort = (key) => {
     const column = COLUMNS.find((c) => c.key === key);
     setSort((current) =>
@@ -188,7 +212,21 @@ const LowStockReport = () => {
     );
   };
 
-  /** Search and the two selects are applied here rather than re-fetched: the
+  /** The category choices, read off the shortfalls themselves: a category
+      with nothing low in it would only filter to an empty list. B narrows to
+      the values found under the chosen A. */
+  const subCategories = useMemo(() => sortedUnique(products.map((p) => p.subCategory)), [products]);
+  const subCategoriesB = useMemo(
+    () =>
+      subCategory
+        ? sortedUnique(
+            products.filter((p) => String(p.subCategory || "").trim() === subCategory).map((p) => p.subCategoryB),
+          )
+        : [],
+    [products, subCategory],
+  );
+
+  /** Search and the selects are applied here rather than re-fetched: the
       whole low-stock set is already in hand and is small enough to filter. */
   const rows = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -196,9 +234,11 @@ const LowStockReport = () => {
     const filtered = products.filter((product) => {
       if (selectedStoreRoom && product.storeRoom !== selectedStoreRoom) return false;
       if (severity && severityOf(product).key !== severity) return false;
+      if (subCategory && String(product.subCategory || "").trim() !== subCategory) return false;
+      if (subCategoryB && String(product.subCategoryB || "").trim() !== subCategoryB) return false;
       if (!term) return true;
       return [
-        product.code,
+        product.sap?.code,
         product.name,
         product.category,
         product.subCategory,
@@ -218,7 +258,16 @@ const LowStockReport = () => {
       if (left === right) return String(a.code || "").localeCompare(String(b.code || ""));
       return left > right ? direction : -direction;
     });
-  }, [products, searchTerm, selectedStoreRoom, severity, sort]);
+  }, [products, searchTerm, selectedStoreRoom, severity, subCategory, subCategoryB, sort]);
+
+  // Twenty to a page by default, changeable under the list. The CSV export and
+  // "pick all" still work on every matching row, not just the page in view.
+  const { page: current, rows: pageRows } = pageSlice(rows, page, pageSize);
+
+  // A new search, filter, sort or page size starts again from the first page.
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, selectedStoreRoom, severity, subCategory, subCategoryB, sort, pageSize]);
 
   /**
    * The ticked shortfalls, and the one SAP company a request may cover.
@@ -289,7 +338,7 @@ const LowStockReport = () => {
     }
 
     const header = [
-      "Code",
+      "SAP Code",
       "Engineering Stock",
       "Category",
       "Sub-category A",
@@ -300,8 +349,7 @@ const LowStockReport = () => {
       "Minimum",
       "Shortage",
       "Unit",
-      "Unit Cost",
-      "Reorder Cost",
+      ...(showValue ? ["Unit Cost", "Reorder Cost"] : []),
       "Severity",
     ];
 
@@ -310,7 +358,7 @@ const LowStockReport = () => {
 
     const body = rows.map((product) =>
       [
-        product.code,
+        product.sap?.code || "",
         product.name,
         product.category,
         product.subCategory,
@@ -321,8 +369,7 @@ const LowStockReport = () => {
         product.minStock ?? 0,
         shortageOf(product),
         product.unit,
-        product.unitCost ?? 0,
-        reorderCostOf(product),
+        ...(showValue ? [product.unitCost ?? 0, reorderCostOf(product)] : []),
         severityOf(product).label,
       ]
         .map(escape)
@@ -370,14 +417,14 @@ const LowStockReport = () => {
       icon: TrendingDown,
       chip: "bg-orange-50 text-orange-600 border-orange-500/20",
     },
-    {
+    showValue && {
       label: "Reorder Value",
       value: formatCurrency(totals.cost),
       hint: "To refill every shortfall",
       icon: Download,
       chip: "bg-brand-50 text-brand-700 border-brand-500/20",
     },
-  ];
+  ].filter(Boolean);
 
   if (loading) {
     return (
@@ -461,6 +508,41 @@ const LowStockReport = () => {
                 </option>
               ))}
             </select>
+
+            <select
+              value={subCategory}
+              onChange={(e) => {
+                setSubCategory(e.target.value);
+                setSubCategoryB("");
+              }}
+              className="field field-sm w-full 2xl:w-auto cursor-pointer"
+              aria-label="Filter by category"
+              title="Sub-category A"
+            >
+              <option value="">All categories</option>
+              {subCategories.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+
+            {subCategory && subCategoriesB.length > 0 && (
+              <select
+                value={subCategoryB}
+                onChange={(e) => setSubCategoryB(e.target.value)}
+                className="field field-sm w-full 2xl:w-auto cursor-pointer"
+                aria-label="Filter by sub-category"
+                title="Sub-category B"
+              >
+                <option value="">All sub-categories</option>
+                {subCategoriesB.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
 
@@ -510,7 +592,7 @@ const LowStockReport = () => {
               screen is a sideways scroll and nothing else, so each shortfall
               gets a card and every cell keeps its column header as a label. */}
           <div className="space-y-3 md:hidden">
-            {rows.map((product) => {
+            {pageRows.map((product) => {
               const level = severityOf(product);
               const blocked = canRequest ? whyNotPickable(product) : "";
               return (
@@ -532,7 +614,7 @@ const LowStockReport = () => {
                     )}
                     <div className="min-w-0">
                       <div className="cell-title break-words leading-snug">{product.name}</div>
-                      <div className="mono text-brand-700">{product.code}</div>
+                      <div className="mono text-brand-700">{product.sap?.code || "No SAP code yet"}</div>
                     </div>
                     <span className={`badge ${level.badge} shrink-0`}>{level.label}</span>
                   </div>
@@ -555,9 +637,11 @@ const LowStockReport = () => {
                         {shortageOf(product)} {product.unit}
                       </span>
                     </CardRow>
-                    <CardRow label="Reorder Cost">
-                      {product.unitCost ? formatCurrency(reorderCostOf(product)) : "—"}
-                    </CardRow>
+                    {showValue && (
+                      <CardRow label="Reorder Cost">
+                        {product.unitCost ? formatCurrency(reorderCostOf(product)) : "—"}
+                      </CardRow>
+                    )}
                     <CardRow label="Category">{product.category || "—"}</CardRow>
                     <CardRow label="Sub-category A">{product.subCategory || "—"}</CardRow>
                     {product.subCategoryB && (
@@ -601,13 +685,13 @@ const LowStockReport = () => {
                       </th>
                     )}
                     <th className="text-right">#</th>
-                    {COLUMNS.map((column) => (
+                    {columns.map((column) => (
                       <SortHeader key={column.key} column={column} sort={sort} onSort={handleSort} />
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((product, index) => {
+                  {pageRows.map((product, index) => {
                     const level = severityOf(product);
                     const blocked = canRequest ? whyNotPickable(product) : "";
                     return (
@@ -625,8 +709,8 @@ const LowStockReport = () => {
                             />
                           </td>
                         )}
-                        <td className="text-right text-slate-400">{index + 1}</td>
-                        <td className="mono text-brand-700 whitespace-nowrap">{product.code}</td>
+                        <td className="text-right text-slate-400">{(current - 1) * pageSize + index + 1}</td>
+                        <td className="mono text-brand-700 whitespace-nowrap">{product.sap?.code || "—"}</td>
                         <td>
                           <div className="cell-title max-w-[280px] truncate" title={product.name}>
                             {product.name}
@@ -655,9 +739,11 @@ const LowStockReport = () => {
                         <td className="text-right font-semibold text-slate-900 whitespace-nowrap">
                           {shortageOf(product)} {product.unit}
                         </td>
-                        <td className="text-right text-slate-600 whitespace-nowrap">
-                          {product.unitCost ? formatCurrency(reorderCostOf(product)) : "—"}
-                        </td>
+                        {showValue && (
+                          <td className="text-right text-slate-600 whitespace-nowrap">
+                            {product.unitCost ? formatCurrency(reorderCostOf(product)) : "—"}
+                          </td>
+                        )}
                         <td className="text-right">
                           <span className={`badge ${level.badge}`}>{level.label}</span>
                         </td>
@@ -668,6 +754,15 @@ const LowStockReport = () => {
               </table>
             </div>
           </div>
+
+          <Pagination
+            page={current}
+            total={rows.length}
+            pageSize={pageSize}
+            onPage={setPage}
+            onPageSize={setPageSize}
+            noun="item"
+          />
 
           <p className="text-[12px] text-slate-500">
             Showing {rows.length} of {products.length} low stock item

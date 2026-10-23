@@ -190,7 +190,7 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                               ),
                             ),
                             const SizedBox(height: 6),
-                            MonoText('CODE: ${p.code}'),
+                            MonoText(p.sap.code.isNotEmpty ? 'SAP CODE: ${p.sap.code}' : 'No SAP code yet'),
                             const SizedBox(height: 8),
                             Wrap(
                               spacing: 6,
@@ -206,8 +206,6 @@ class _ProductDetailsSheetState extends State<_ProductDetailsSheet> {
                                   SoftChip('Name not SOI1/SOP1', color: AppColors.warning),
                                 if (p.sap.isPending)
                                   SoftChip('SAP stock sync on queue', color: AppColors.accent),
-                                if (p.sap.isCreated && p.sap.code.isNotEmpty)
-                                  SoftChip('SAP ${p.sap.code}', color: AppColors.success),
                               ],
                             ),
                           ],

@@ -1,3 +1,4 @@
+import { withNames } from "../repository/userNames.js";
 import * as maintenance from "../repository/maintenance.js";
 import { describeStages } from "../integrations/erpnext/breakdownStages.js";
 import { buildReport } from "../repository/breakdownMetrics.js";
@@ -72,13 +73,13 @@ export const list = async (req, res) => {
     const { plants } = await scopeFor(req.user);
 
     res.json(
-      await maintenance.listBreakdowns({
+      await withNames(await maintenance.listBreakdowns({
         onlyPlants: plants,
         plant: req.query.plant || "",
         state: req.query.state || "",
         open: req.query.open === "true",
         limit: Math.min(Number(req.query.limit) || 100, 300),
-      })
+      }), ["reportedBy", "attendedBy"])
     );
   } catch (error) {
     fail(res, error, "Could not load breakdowns");
@@ -99,7 +100,7 @@ export const detail = async (req, res) => {
     if (!breakdown || !withinScope(await scopeFor(req.user), breakdown.plant)) {
       return res.status(404).json({ message: "Breakdown not found" });
     }
-    res.json(breakdown);
+    res.json(await withNames(breakdown, ["reportedBy", "attendedBy"]));
   } catch (error) {
     fail(res, error, "Could not load that breakdown");
   }

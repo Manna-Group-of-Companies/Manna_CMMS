@@ -29,7 +29,14 @@ import {
   updateItemCategory,
   updateSapItem,
 } from "../repository/sapCategories.js";
-import { maySee } from "../config/access.js";
+import { maySee, maySeeItemValue } from "../config/access.js";
+
+/** The item as this role may see it: without its value unless they may. */
+const valueFor = (role) => (product) => {
+  if (!product || maySeeItemValue(role)) return product;
+  const { unitCost, ...rest } = product;
+  return rest;
+};
 
 // @desc    Get all products with search and filtering
 // @route   GET /api/products
@@ -58,7 +65,7 @@ export const getProducts = async (req, res) => {
       stockStatus ? [] : pendingItems(),
     ]);
 
-    res.json([...catalog, ...pending]);
+    res.json([...catalog, ...pending].map(valueFor(req.user.role)));
   } catch (error) {
     res.status(error.status === 403 ? 403 : 502).json({
       message: `Could not read the catalog from ERPNext: ${error.message}`,
@@ -75,7 +82,7 @@ export const getProductById = async (req, res) => {
 
     // "Not found" rather than "not allowed" on purpose.
     if (!product) return res.status(404).json({ message: "Engineering Stock not found" });
-    res.json(product);
+    res.json(valueFor(req.user.role)(product));
   } catch (error) {
     res.status(502).json({ message: `Could not read the item from ERPNext: ${error.message}` });
   }

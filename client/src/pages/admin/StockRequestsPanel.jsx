@@ -259,9 +259,6 @@ const StockRequestsPanel = () => {
                           <div className="font-bold text-slate-900">
                             {req.product?.name || "Unknown Engineering Stock"}
                           </div>
-                          <div className="text-[10px] font-mono text-brand-700">
-                            {req.product?.code || "—"}
-                          </div>
                         </div>
                       </div>
                     </td>
@@ -373,9 +370,6 @@ const StockRequestsPanel = () => {
                   <h4 className="text-sm font-bold text-slate-900">
                     {selected.product?.name || "Unknown Engineering Stock"}
                   </h4>
-                  <span className="font-mono text-brand-700 block mt-0.5">
-                    {selected.product?.code || "—"}
-                  </span>
                   <span className="text-slate-600 block mt-0.5">
                     Requested by {selected.supervisor?.name || "System"}
                   </span>

@@ -1,9 +1,12 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { NotificationProvider } from "./context/NotificationContext";
+import { DialogProvider } from "./context/DialogContext";
+import NetworkStatus from "./components/NetworkStatus";
 
 // Layout wrappers
 import Breakdowns from "./pages/maintenance/Breakdowns";
+import Dashboard from "./pages/maintenance/Dashboard";
 import AdminLayout from "./layouts/AdminLayout";
 import SupervisorLayout from "./layouts/SupervisorLayout";
 import BranchLayout from "./layouts/BranchLayout";
@@ -12,9 +15,8 @@ import BranchLayout from "./layouts/BranchLayout";
 import Login from "./pages/auth/Login";
 import ChecklistSheetPreview from "./pages/maintenance/ChecklistSheetPreview";
 import NoAccess from "./pages/auth/NoAccess";
-import Categories from "./pages/admin/Categories";
+import Settings from "./pages/admin/Settings";
 import AssetManagement from "./pages/maintenance/AssetManagement";
-import Technicians from "./pages/maintenance/Technicians";
 import MaintenanceRequests from "./pages/maintenance/MaintenanceRequests";
 import PreventiveMaintenance from "./pages/maintenance/PreventiveMaintenance";
 import BreakdownReport from "./pages/admin/BreakdownReport";
@@ -69,6 +71,8 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <NotificationProvider>
+          {/* Styled confirm/prompt dialogs in place of the browser's own. */}
+          <DialogProvider>
           <Routes>
             {/* Public Access */}
             <Route path="/login" element={<Login />} />
@@ -135,14 +139,17 @@ function App() {
                   </RequireView>
                 }
               />
+              {/* Categories and the maintenance team live in Settings since
+                  23 Oct 2026; the old paths open the matching tab. */}
               <Route
-                path="categories"
+                path="settings"
                 element={
-                  <RequireView view="categories">
-                    <Categories />
+                  <RequireView view="settings">
+                    <Settings />
                   </RequireView>
                 }
               />
+              <Route path="categories" element={<Navigate to="../settings?tab=categories" replace />} />
               <Route
                 path="low-stock"
                 element={
@@ -159,14 +166,7 @@ function App() {
                   </RequireView>
                 }
               />
-              <Route
-                path="technicians"
-                element={
-                  <RequireView view="technicians">
-                    <Technicians />
-                  </RequireView>
-                }
-              />
+              <Route path="technicians" element={<Navigate to="../settings?tab=team" replace />} />
               <Route
                 path="electrical"
                 element={
@@ -258,7 +258,14 @@ function App() {
               <Route path="issues" element={<Home />} />
               {/* The dashboard is gone. A bookmark on it, and the bare console
                   path, both land on the first screen the person can open. */}
-              <Route path="dashboard" element={<Home />} />
+              <Route
+                path="dashboard"
+                element={
+                  <RequireView view="dashboard">
+                    <Dashboard />
+                  </RequireView>
+                }
+              />
               <Route path="" element={<Home />} />
             </Route>
 
@@ -304,14 +311,17 @@ function App() {
                   </RequireView>
                 }
               />
+              {/* Categories and the maintenance team live in Settings since
+                  23 Oct 2026; the old paths open the matching tab. */}
               <Route
-                path="categories"
+                path="settings"
                 element={
-                  <RequireView view="categories">
-                    <Categories />
+                  <RequireView view="settings">
+                    <Settings />
                   </RequireView>
                 }
               />
+              <Route path="categories" element={<Navigate to="../settings?tab=categories" replace />} />
               <Route
                 path="breakdowns"
                 element={
@@ -363,7 +373,14 @@ function App() {
               {/* Issue History went with the issuing system. */}
               <Route path="issues" element={<Home />} />
               {/* The dashboard is gone; see the note in the shared console. */}
-              <Route path="dashboard" element={<Home />} />
+              <Route
+                path="dashboard"
+                element={
+                  <RequireView view="dashboard">
+                    <Dashboard />
+                  </RequireView>
+                }
+              />
               <Route path="" element={<Home />} />
             </Route>
 
@@ -380,6 +397,9 @@ function App() {
             <Route path="/" element={<Home />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          {/* "You're offline" / "Can't reach the server" banner. */}
+          <NetworkStatus />
+          </DialogProvider>
         </NotificationProvider>
       </AuthProvider>
     </BrowserRouter>

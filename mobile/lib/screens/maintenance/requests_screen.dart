@@ -3,12 +3,14 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
+import '../../core/formatters.dart';
 import '../../core/palette.dart';
 import '../../data/maintenance_repository.dart';
 import '../../models/maintenance.dart';
 import '../../state/auth_provider.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/common.dart';
+import '../../widgets/work_widgets.dart';
 
 /// Planned work: everything that is not a breakdown.
 ///
@@ -27,8 +29,11 @@ class _RequestsScreenState extends State<RequestsScreen> {
 
   List<MaintenanceRequest> _rows = const [];
   bool _loading = true;
-  bool _openOnly = true;
+  String _filter = 'Open';
+  String _search = '';
   String _error = '';
+
+  static const _filters = ['Open', 'Not Started', 'In Progress', 'Closed', 'All'];
 
   @override
   void initState() {
@@ -36,10 +41,11 @@ class _RequestsScreenState extends State<RequestsScreen> {
     _load();
   }
 
+  /// Everything, open or not: the pills choose between them on the phone.
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final rows = await _repo.requests(openOnly: _openOnly);
+      final rows = await _repo.requests();
       if (!mounted) return;
       setState(() {
         _rows = rows;
@@ -62,10 +68,31 @@ class _RequestsScreenState extends State<RequestsScreen> {
     if (made == true) _load();
   }
 
+  static bool _notStarted(MaintenanceRequest r) =>
+      r.state == 'Requested' || r.state == 'Attended';
+
+  /// Kept in the API's order - urgency, then age - within whichever pill.
+  List<MaintenanceRequest> get _shown {
+    final q = _search.trim().toLowerCase();
+    return _rows.where((r) {
+      final inFilter = switch (_filter) {
+        'Open' => r.isOpen,
+        'Not Started' => _notStarted(r),
+        'In Progress' => r.isOpen && !_notStarted(r),
+        'Closed' => !r.isOpen,
+        _ => true,
+      };
+      if (!inFilter) return false;
+      if (q.isEmpty) return true;
+      return '${r.title} ${r.id} ${r.plant} ${r.machineName} ${r.whatIsNeeded}'
+          .toLowerCase()
+          .contains(q);
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final open = _rows.where((r) => r.isOpen).length;
-    final waiting = _rows.where((r) => r.state == 'Requested' || r.state == 'Attended').length;
+    final shown = _shown;
 
     /// Who may raise one — the plant's own job, not maintenance's. Mirrors
     /// the server's guard on POST /maintenance-requests.
@@ -78,7 +105,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
           ? FloatingActionButton.extended(
               onPressed: _raise,
               icon: const Icon(Icons.add),
-              label: const Text('Raise'),
+              label: const Text('New request'),
             )
           : null,
       child: RefreshIndicator(
@@ -86,46 +113,17 @@ class _RequestsScreenState extends State<RequestsScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: MetricCard(
-                    title: 'Open',
-                    value: open,
-                    icon: Icons.assignment_outlined,
-                    accent: AppColors.primary,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: MetricCard(
-                    title: 'Not started',
-                    value: waiting,
-                    icon: Icons.pending_outlined,
-                    accent: waiting > 0 ? AppColors.warning : AppColors.textMuted,
-                  ),
-                ),
-              ],
+            SearchBox(
+              hint: 'Search requests…',
+              onChanged: (v) => setState(() => _search = v),
+            ),
+            const SizedBox(height: 12),
+            PillFilters(
+              options: _filters,
+              selected: _filter,
+              onChanged: (v) => setState(() => _filter = v),
             ),
             const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _openOnly ? 'Showing open' : 'Showing all',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {
-                    setState(() => _openOnly = !_openOnly);
-                    _load();
-                  },
-                  child: Text(_openOnly ? 'Show all' : 'Show open'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
             if (_loading)
               const Padding(
                 padding: EdgeInsets.only(top: 40),
@@ -138,17 +136,29 @@ class _RequestsScreenState extends State<RequestsScreen> {
                 icon: Icons.error_outline,
                 iconColor: AppColors.danger,
               )
-            else if (_rows.isEmpty)
+            else if (shown.isEmpty)
               EmptyState(
-                title: 'Nothing waiting',
-                message: canRaise
+                title: 'Nothing here',
+                message: canRaise && _rows.isEmpty
                     ? 'No maintenance requests to show. Raise one with the button below.'
-                    : 'No maintenance requests to show.',
+                    : 'No maintenance requests match.',
                 icon: Icons.inbox_outlined,
               )
             else
-              for (final row in _rows) ...[
-                _RequestTile(row: row, onOpen: () => _open(row)),
+              for (final row in shown) ...[
+                WorkListTile(
+                  icon: Icons.handyman_outlined,
+                  title: row.title,
+                  code: row.id,
+                  date: formatDate(row.requestedAt),
+                  priority: row.priority,
+                  state: row.state,
+                  subtitle: [
+                    row.machineName.isEmpty ? row.plant : row.machineName,
+                    if (row.isOpen) row.ageDays == 0 ? 'today' : '${row.ageDays} days waiting',
+                  ].where((s) => s.isNotEmpty).join('  •  '),
+                  onTap: () => _open(row),
+                ),
                 const SizedBox(height: 10),
               ],
           ],
@@ -161,63 +171,6 @@ class _RequestsScreenState extends State<RequestsScreen> {
     final changed = await context.push<bool>('/maintenance/requests/${row.id}');
     if (changed == true) _load();
   }
-}
-
-class _RequestTile extends StatelessWidget {
-  const _RequestTile({required this.row, required this.onOpen});
-
-  final MaintenanceRequest row;
-  final VoidCallback onOpen;
-
-  @override
-  Widget build(BuildContext context) => AppCard(
-        onTap: onOpen,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    row.title,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                  ),
-                ),
-                StatusBadge(row.state),
-              ],
-            ),
-            const SizedBox(height: 2),
-            MonoText(row.id),
-            if (row.whatIsNeeded.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                row.whatIsNeeded,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13, color: AppColors.textBody),
-              ),
-            ],
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                SoftChip(row.plant),
-                if (row.priority.isNotEmpty) SoftChip(row.priority),
-                if (row.machineName.isNotEmpty) SoftChip(row.machineName),
-                SoftChip(row.ageDays == 0 ? 'Today' : '${row.ageDays} days waiting'),
-              ],
-            ),
-            if (row.waitingOn.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Waiting on: ${row.waitingOn}',
-                style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
-              ),
-            ],
-          ],
-        ),
-      );
 }
 
 /// Raising planned work.
@@ -234,9 +187,7 @@ class RaiseRequestSheet extends StatefulWidget {
 }
 
 class _RaiseRequestSheetState extends State<RaiseRequestSheet> {
-  final _title = TextEditingController();
   final _needed = TextEditingController();
-  final _why = TextEditingController();
 
   List<MachineOption> _machines = const [];
   List<PlantOption> _plants = const [];
@@ -273,15 +224,14 @@ class _RaiseRequestSheetState extends State<RaiseRequestSheet> {
 
   @override
   void dispose() {
-    _title.dispose();
     _needed.dispose();
-    _why.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
-    if (_title.text.trim().isEmpty || _needed.text.trim().isEmpty || _plant.isEmpty) {
-      setState(() => _problem = 'A description, a plant and what is needed.');
+    final needed = _needed.text.trim();
+    if (needed.isEmpty || _plant.isEmpty) {
+      setState(() => _problem = 'A plant and what is needed.');
       return;
     }
     setState(() {
@@ -290,12 +240,11 @@ class _RaiseRequestSheetState extends State<RaiseRequestSheet> {
     });
     try {
       await widget.repo.raiseRequest(
-        title: _title.text.trim(),
+        title: _titleFrom(needed),
         plant: _plant,
-        whatIsNeeded: _needed.text.trim(),
+        whatIsNeeded: needed,
         priority: _priority,
         machine: _machine,
-        whyNeeded: _why.text.trim(),
       );
       if (mounted) Navigator.of(context).pop(true);
     } on ApiException catch (e) {
@@ -303,6 +252,17 @@ class _RaiseRequestSheetState extends State<RaiseRequestSheet> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// The request's headline, taken from what is needed.
+  ///
+  /// The phone no longer asks "What do you want done?" separately - it was the
+  /// same answer typed twice - but the server still files every request under
+  /// a title and the lists show it. So the first line of what is needed stands
+  /// in, cut short enough for a list row.
+  static String _titleFrom(String needed) {
+    final line = needed.split('\n').first.trim();
+    return line.length <= 80 ? line : '${line.substring(0, 79).trimRight()}…';
   }
 
   @override
@@ -327,16 +287,6 @@ class _RaiseRequestSheetState extends State<RaiseRequestSheet> {
             if (_loading)
               const LoadingView(message: 'Loading…')
             else ...[
-              const _FieldLabel('What do you want done?'),
-              TextField(
-                controller: _title,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  hintText: 'Description',
-                ),
-              ),
-              const SizedBox(height: 12),
               const _FieldLabel('How urgent'),
               AppDropdown<String>(
                 value: _priority,
@@ -375,13 +325,6 @@ class _RaiseRequestSheetState extends State<RaiseRequestSheet> {
               TextField(
                 controller: _needed,
                 maxLines: 3,
-                decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
-              ),
-              const SizedBox(height: 12),
-              const _FieldLabel('Why'),
-              TextField(
-                controller: _why,
-                maxLines: 2,
                 decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
               ),
             ],

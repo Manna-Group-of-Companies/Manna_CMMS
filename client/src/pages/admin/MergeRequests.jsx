@@ -597,8 +597,7 @@ const MergeRequests = () => {
                                 {row.productName}
                               </span>
                               <span className="font-mono text-[10px] text-slate-500">
-                                {row.productCode || "—"}
-                                {row.unit ? ` • ${row.unit}` : ""}
+                                {row.unit || ""}
                               </span>
                             </div>
                           </div>
@@ -891,9 +890,6 @@ const MergeRequests = () => {
                                   <div>
                                     <span className="font-semibold text-slate-800">
                                       {line.productName}
-                                    </span>
-                                    <span className="block font-mono text-[10px] text-slate-500">
-                                      {line.product?.code || "—"}
                                     </span>
                                   </div>
                                 </div>

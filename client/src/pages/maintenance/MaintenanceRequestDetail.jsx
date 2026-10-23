@@ -18,6 +18,7 @@ import API from "../../services/api";
 import MaintenanceLogSheet from "./MaintenanceLogSheet";
 import { useAuth } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
+import { useErpRefresh } from "../../hooks/useErpRefresh";
 
 /**
  * One maintenance request, in full.
@@ -114,6 +115,9 @@ const MaintenanceRequestDetail = ({ id, onClose, onChanged }) => {
     load();
   }, [load]);
 
+  // The top bar's Refresh: read ERPNext again without leaving the screen.
+  useErpRefresh(() => load());
+
   useEffect(() => {
     API.get("/maintenance-requests/stages").then(({ data }) => setStages(data)).catch(() => {});
     API.get("/breakdowns/lookups")
@@ -197,7 +201,7 @@ const MaintenanceRequestDetail = ({ id, onClose, onChanged }) => {
                 <div className="note note-slate print:hidden">
                   <span>
                     {stage.requesterOnly
-                      ? `Waiting on ${record.requestedBy}, who raised it. Only they can close it.`
+                      ? `Waiting on ${record.requestedByName || record.requestedBy}, who raised it. Only they can close it.`
                       : `Waiting on maintenance: ${stage.title.toLowerCase()}.`}
                   </span>
                 </div>
@@ -844,7 +848,7 @@ const Report = ({ record }) => {
           value={record.machine ? `${record.machineName} (${record.machine})` : record.plant}
         />
         <KV label="Area" value={record.area} />
-        <KV label="Raised by" value={record.requestedBy} />
+        <KV label="Raised by" value={record.requestedByName || record.requestedBy} />
         <KV label="Raised at" value={when(record.requestedAt)} />
         <KV label="Wanted by" value={record.neededBy ? day(record.neededBy) : ""} />
         <KV label="What is needed" value={record.whatIsNeeded} wide />
@@ -853,7 +857,7 @@ const Report = ({ record }) => {
 
       {record.attendedAt && (
         <Block title="Attended">
-          <KV label="Attended by" value={record.attendedBy} />
+          <KV label="Attended by" value={record.attendedByName || record.attendedBy} />
           <KV label="Attended at" value={when(record.attendedAt)} />
         </Block>
       )}
@@ -923,7 +927,7 @@ const MaterialList = ({ rows }) => (
       {rows.map((m, i) => (
         <li key={i}>
           {m.qty} {m.uom || ""} &times; {m.description}
-          {m.itemCode ? ` (${m.itemCode})` : ""}
+          {m.sapCode ? ` (${m.sapCode})` : ""}
           {m.remarks ? ` — ${m.remarks}` : ""}
         </li>
       ))}

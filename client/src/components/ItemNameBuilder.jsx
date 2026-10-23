@@ -207,7 +207,6 @@ const ItemNameBuilder = ({ value, onChange, onApply, disabled = false }) => {
                 value={dimension.value}
                 onChange={(e) => setDimension(index, { value: e.target.value })}
                 disabled={disabled}
-                placeholder={index === 0 ? "e.g. 50" : "e.g. 10"}
                 className={`${field} flex-1`}
               />
               <Combobox
@@ -251,7 +250,7 @@ const ItemNameBuilder = ({ value, onChange, onApply, disabled = false }) => {
               value={naming.electricalRating}
               onChange={(e) => patch({ electricalRating: e.target.value })}
               disabled={disabled}
-              placeholder="e.g. 415"
+             
               className={`${field} flex-1`}
             />
             <Combobox
@@ -273,7 +272,7 @@ const ItemNameBuilder = ({ value, onChange, onApply, disabled = false }) => {
             value={naming.itemName}
             onChange={(e) => patch({ itemName: e.target.value })}
             disabled={disabled}
-            placeholder="e.g. Bearing"
+           
             className={field}
           />
         </div>
@@ -284,7 +283,7 @@ const ItemNameBuilder = ({ value, onChange, onApply, disabled = false }) => {
             value={naming.type}
             onChange={(e) => patch({ type: e.target.value })}
             disabled={disabled}
-            placeholder="e.g. Deep Groove"
+           
             className={field}
           />
         </div>
@@ -295,7 +294,7 @@ const ItemNameBuilder = ({ value, onChange, onApply, disabled = false }) => {
             value={naming.material}
             onChange={(e) => patch({ material: e.target.value })}
             disabled={disabled}
-            placeholder="e.g. SS304"
+           
             className={`${field} uppercase`}
           />
         </div>
@@ -306,7 +305,7 @@ const ItemNameBuilder = ({ value, onChange, onApply, disabled = false }) => {
             value={naming.itemCode}
             onChange={(e) => patch({ itemCode: e.target.value })}
             disabled={disabled}
-            placeholder="e.g. BS245SR61"
+           
             className={`${field} uppercase`}
           />
         </div>

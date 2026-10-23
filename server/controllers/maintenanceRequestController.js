@@ -1,3 +1,4 @@
+import { withNames } from "../repository/userNames.js";
 import * as requests from "../repository/maintenanceRequests.js";
 import { scopeFor, withinScope } from "../repository/plantScope.js";
 import { describeRequestStages } from "../integrations/erpnext/maintenanceRequestStages.js";
@@ -79,6 +80,7 @@ export const list = async (req, res) => {
       limit: Math.min(Number(req.query.limit) || 200, 400),
     });
 
+    await withNames(rows, ["requestedBy", "attendedBy"]);
     res.json({ rows, summary: requests.requestSummary(rows) });
   } catch (error) {
     fail(res, error, "Could not load maintenance requests");
@@ -99,7 +101,7 @@ export const detail = async (req, res) => {
     if (!request || !withinScope(await scopeFor(req.user), request.plant)) {
       return res.status(404).json({ message: "Request not found" });
     }
-    res.json(request);
+    res.json(await withNames(request, ["requestedBy", "attendedBy"]));
   } catch (error) {
     fail(res, error, "Could not load that request");
   }

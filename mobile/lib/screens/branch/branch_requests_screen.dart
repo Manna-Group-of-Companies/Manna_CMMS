@@ -394,9 +394,6 @@ class _Details extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: SpecTile(label: 'Engineering Stock code', value: request.productCode),
-            ),
-            Expanded(
               child: SpecTile(
                 label: 'Room stock when raised',
                 value: '${request.stockAtRequest}',

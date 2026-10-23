@@ -17,6 +17,7 @@ import ConditionSelect from "./ConditionSelect";
 import MachineHistory from "./MachineHistory";
 import MachinePrevention from "./MachinePrevention";
 import { useNotifications } from "../../context/NotificationContext";
+import { useDialog } from "../../context/DialogContext";
 
 /**
  * One machine, in full — and everything that came with it.
@@ -60,6 +61,7 @@ const isImage = (name) => /\.(png|jpe?g|gif|webp|tiff?)$/i.test(name || "");
  */
 const AssetDetail = ({ id, canEdit, canAttach, onClose, onChanged, onEdit }) => {
   const { showToast } = useNotifications();
+  const { confirm } = useDialog();
 
   const [asset, setAsset] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -124,7 +126,13 @@ const AssetDetail = ({ id, canEdit, canAttach, onClose, onChanged, onEdit }) => 
   };
 
   const remove = async (file) => {
-    if (!window.confirm(`Remove ${file.fileName}?`)) return;
+    const ok = await confirm({
+      title: "Remove this file?",
+      message: file.fileName,
+      confirmLabel: "Remove",
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       await API.delete(`/assets/${id}/files/${file.id}`);
       showToast(`${file.fileName} removed`, "success");
@@ -163,15 +171,22 @@ const AssetDetail = ({ id, canEdit, canAttach, onClose, onChanged, onEdit }) => 
                   <span className="mono text-sm font-semibold text-slate-900">{asset.code}</span>
                   {/* The condition, set here rather than through the full form.
                       It is the one thing about a machine that changes weekly. */}
+                  {/* Locked while a breakdown is open on it: the breakdown
+                      decides the condition then (see assets.js). */}
                   <ConditionSelect
                     asset={asset}
-                    canEdit={canEdit}
+                    canEdit={canEdit && !asset.openBreakdown}
                     onChanged={(updated) => {
                       setAsset((current) => ({ ...current, ...updated }));
                       onChanged?.();
                     }}
                     onError={(message) => showToast(message, "error")}
                   />
+                  {asset.openBreakdown && (
+                    <span className="badge badge-rose badge-soft">
+                      {asset.openBreakdown.id} · {asset.openBreakdown.state}
+                    </span>
+                  )}
                   <span className="badge badge-slate badge-soft">{asset.criticality}</span>
                 </div>
                 <h2 className="mt-1 text-lg font-bold tracking-tight text-slate-900 text-balance">

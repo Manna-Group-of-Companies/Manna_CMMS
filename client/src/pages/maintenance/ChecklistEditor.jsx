@@ -8,7 +8,6 @@ import {
   Plus,
   Printer,
   Save,
-  ShieldAlert,
   Trash2,
   X,
 } from "lucide-react";
@@ -16,6 +15,7 @@ import {
 import API from "../../services/api";
 import ChecklistSheet from "./ChecklistSheet";
 import { useNotifications } from "../../context/NotificationContext";
+import { useDialog } from "../../context/DialogContext";
 
 /**
  * One checklist, and the points on it.
@@ -32,12 +32,16 @@ import { useNotifications } from "../../context/NotificationContext";
  * Saving bumps the revision. That is not bookkeeping for its own sake: a signed
  * sheet in a file has a revision printed in its footer, and if the revision
  * never moves there is no telling which list somebody was working from.
+ *
+ * Only the title and the points are edited here. "Done by", "Takes about",
+ * "Effective from" and "Before you start" are still columns on the ERPNext
+ * record and keep whatever they hold — the editor no longer asks for them, and
+ * a save that does not send a field leaves it as it was.
  */
-
-const RESPONSIBILITIES = ["", "Operator", "Fitter", "Electrician", "Maintenance Team", "Contractor"];
 
 const ChecklistEditor = ({ id, machines, systems, canEdit, onClose, onChanged }) => {
   const { showToast } = useNotifications();
+  const { confirm } = useDialog();
 
   const [checklist, setChecklist] = useState(null);
   const [points, setPoints] = useState([]);
@@ -54,15 +58,7 @@ const ChecklistEditor = ({ id, machines, systems, canEdit, onClose, onChanged })
       const { data } = await API.get(`/preventive/${id}`);
       setChecklist(data);
       setPoints(data.points.map((p) => ({ ...p })));
-      setHead({
-        title: data.title,
-        responsibility: data.responsibility,
-        estimatedMinutes: data.estimatedMinutes || "",
-        safetyNote: data.safetyNote,
-        notes: data.notes,
-        effectiveFrom: data.effectiveFrom || "",
-        isActive: data.isActive,
-      });
+      setHead({ title: data.title });
       setDirty(false);
       setError("");
     } catch (err) {
@@ -100,7 +96,6 @@ const ChecklistEditor = ({ id, machines, systems, canEdit, onClose, onChanged })
         // to it, and React treats an undefined value as an uncontrolled field.
         point: "",
         howToCheck: "",
-        isSafety: false,
       },
     ]);
     setDirty(true);
@@ -110,8 +105,7 @@ const ChecklistEditor = ({ id, machines, systems, canEdit, onClose, onChanged })
     setSaving(true);
     try {
       const { data } = await API.put(`/preventive/${id}`, {
-        ...head,
-        estimatedMinutes: Number(head.estimatedMinutes) || 0,
+        title: head.title,
         points: points.filter((p) => String(p.point || "").trim()),
       });
       setChecklist(data);
@@ -126,8 +120,19 @@ const ChecklistEditor = ({ id, machines, systems, canEdit, onClose, onChanged })
     }
   };
 
-  const close = () => {
-    if (dirty && !window.confirm("There are unsaved changes. Close anyway?")) return;
+  const close = async () => {
+    if (
+      dirty &&
+      !(await confirm({
+        title: "Discard unsaved changes?",
+        message: "The changes to this checklist have not been saved.",
+        confirmLabel: "Close without saving",
+        cancelLabel: "Keep editing",
+        tone: "warning",
+      }))
+    ) {
+      return;
+    }
     onClose();
   };
 
@@ -216,81 +221,6 @@ const ChecklistEditor = ({ id, machines, systems, canEdit, onClose, onChanged })
                     }}
                   />
                 </div>
-
-                <div className="grid sm:grid-cols-3 gap-4">
-                  <div>
-                    <label className="field-label">Done by</label>
-                    <select
-                      className="field"
-                      value={head.responsibility || ""}
-                      disabled={!canEdit}
-                      onChange={(e) => {
-                        setHead((h) => ({ ...h, responsibility: e.target.value }));
-                        setDirty(true);
-                      }}
-                    >
-                      {RESPONSIBILITIES.map((r) => (
-                        <option key={r} value={r}>
-                          {r || "Not decided"}
-                        </option>
-                      ))}
-                    </select>
-                    {/* Said out loud because it is the reason daily lists work
-                        or do not: most daily points belong to the operator who
-                        is standing there anyway. */}
-                    <p className="mt-1 text-xs text-slate-500">
-                      A daily round given to a fitter becomes a weekly one in practice.
-                    </p>
-                  </div>
-                  <div>
-                    <label className="field-label">Takes about (minutes)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      className="field"
-                      value={head.estimatedMinutes}
-                      disabled={!canEdit}
-                      onChange={(e) => {
-                        setHead((h) => ({ ...h, estimatedMinutes: e.target.value }));
-                        setDirty(true);
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label className="field-label">Effective from</label>
-                    <input
-                      type="date"
-                      className="field"
-                      value={head.effectiveFrom || ""}
-                      disabled={!canEdit}
-                      onChange={(e) => {
-                        setHead((h) => ({ ...h, effectiveFrom: e.target.value }));
-                        setDirty(true);
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="field-label">
-                    <ShieldAlert className="inline h-3 w-3 mr-1" />
-                    Before you start
-                  </label>
-                  <textarea
-                    className="field field-area"
-                    rows={2}
-                    value={head.safetyNote || ""}
-                    disabled={!canEdit}
-                    placeholder="Isolate at the main switch and lock off. Permit required for work inside the mixer."
-                    onChange={(e) => {
-                      setHead((h) => ({ ...h, safetyNote: e.target.value }));
-                      setDirty(true);
-                    }}
-                  />
-                  <p className="mt-1 text-xs text-slate-500">
-                    Printed in a box at the top of the sheet, not as a point halfway down.
-                  </p>
-                </div>
               </div>
 
               <Points
@@ -314,7 +244,13 @@ const ChecklistEditor = ({ id, machines, systems, canEdit, onClose, onChanged })
                   <button
                     className="btn btn-neutral"
                     onClick={async () => {
-                      if (!window.confirm(`Retire ${checklist.title}?`)) return;
+                      const ok = await confirm({
+                        title: `Retire ${checklist.title}?`,
+                        message: "It stops being due. A checklist with no points is deleted instead.",
+                        confirmLabel: "Retire",
+                        tone: "danger",
+                      });
+                      if (!ok) return;
                       try {
                         const { data } = await API.delete(`/preventive/${id}`);
                         showToast(
@@ -380,9 +316,11 @@ const ChecklistEditor = ({ id, machines, systems, canEdit, onClose, onChanged })
 /**
  * The points themselves.
  *
- * Three columns rather than one: what to look at, how to tell, and what counts
- * as right. A point that says only "check the belt" gets a tick from anybody
- * who saw a belt.
+ * What to look at, and how to tell. A point that says only "check the belt"
+ * gets a tick from anybody who saw a belt.
+ *
+ * There is no safety tick any more. A point that was flagged keeps the flag in
+ * ERPNext (it travels through a save untouched), but nothing shows or sets it.
  */
 const Points = ({ rows, canEdit, onSet, onMove, onAdd, onRemove }) => (
   <div className="card p-5">
@@ -418,7 +356,7 @@ const Points = ({ rows, canEdit, onSet, onMove, onAdd, onRemove }) => (
               </span>
               <input
                 className="field field-sm flex-1"
-                placeholder="What to check — bearing housing temperature"
+                placeholder="What to check"
                 value={row.point}
                 disabled={!canEdit}
                 onChange={(e) => onSet(i, "point", e.target.value)}
@@ -467,26 +405,12 @@ const Points = ({ rows, canEdit, onSet, onMove, onAdd, onRemove }) => (
             <div className="pl-8">
               <input
                 className="field field-sm w-full"
-                placeholder="How — by hand, with a gun"
+                placeholder="How"
                 value={row.howToCheck || ""}
                 disabled={!canEdit}
                 onChange={(e) => onSet(i, "howToCheck", e.target.value)}
               />
             </div>
-
-            <label className="flex items-center gap-2 pl-8 cursor-pointer">
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5 accent-brand-600"
-                checked={Boolean(row.isSafety)}
-                disabled={!canEdit}
-                onChange={(e) => onSet(i, "isSafety", e.target.checked)}
-              />
-              <span className="text-xs text-slate-600">
-                Safety point — marked on the sheet, and never quietly dropped when the list is
-                trimmed
-              </span>
-            </label>
           </div>
         ))}
       </div>

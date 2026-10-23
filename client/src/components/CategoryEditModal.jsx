@@ -5,9 +5,7 @@ import TaxonomySelect, {
   useSubCategoryOptions,
   useSubCategoryBOptions,
 } from "./TaxonomySelect";
-import CategorySyncNote from "./CategorySyncNote";
 import { FolderTree, Loader2, X } from "lucide-react";
-import Select from "./Select";
 
 /**
  * Re-files one SAP-mirrored item: SAP item group > Sub-category A > Sub-category B.
@@ -95,17 +93,9 @@ const CategoryEditModal = ({ product, onClose, onSaved }) => {
 
       <form onSubmit={handleSubmit} className="contents">
         <div className="modal-body space-y-4">
-          <div className="text-[13px] text-slate-600">
-            <span className="mono text-brand-700">{product.code}</span>
-            {options && (
-              <>
-                {" "}
-                · SAP {options.sapDb} · {options.company}
-              </>
-            )}
-          </div>
-
-          <CategorySyncNote compact />
+          {product.sap?.code && (
+            <div className="mono text-[13px] text-brand-700">{product.sap.code}</div>
+          )}
 
           {!options && !error && (
             <div className="flex items-center gap-2 text-slate-500 text-sm">
@@ -115,25 +105,12 @@ const CategoryEditModal = ({ product, onClose, onSaved }) => {
 
           {options && (
             <>
-              <div>
-                <label className="field-label" htmlFor="cat-l1">
-                  Item group <span className="text-slate-400 font-normal">(SAP item group)</span>
-                </label>
-                <Select
-                  id="cat-l1"
-                  value={form.category}
-                  onChange={(e) => set("category", e.target.value)}
-                  options={options.groups}
-                  required
-                />
-                <p className="mt-1 text-[11px] text-slate-500">
-                  Only {options.company}'s engineering groups. A new item group is created in the SAP client.
-                </p>
-              </div>
-
+              {/* No item group choice: every item is in Engineering Stocks,
+                  so the item keeps the group it is in and only the two
+                  sub-categories are re-filed. */}
               <div>
                 <label className="field-label" htmlFor="cat-l2">
-                  Sub-category A <span className="text-slate-400 font-normal">(SAP SubTypeA)</span>
+                  Sub-category A
                 </label>
                 <TaxonomySelect
                   id="cat-l2"
@@ -146,7 +123,7 @@ const CategoryEditModal = ({ product, onClose, onSaved }) => {
 
               <div>
                 <label className="field-label" htmlFor="cat-l3">
-                  Sub-category B <span className="text-slate-400 font-normal">(SAP SubTypeB)</span>
+                  Sub-category B
                 </label>
                 <TaxonomySelect
                   id="cat-l3"

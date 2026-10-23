@@ -1,0 +1,215 @@
+// A purchase request goes Completed once its goods are received (23 Oct 2026).
+//
+//   node --test tests/
+
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import { historyNote, nextStatus, receiptProgress, receivesFor, reconcileCompletion } from "../repository/purchaseCompletion.js";
+import { checkOrder, mayOrder } from "../repository/purchaseRequests.js";
+
+const request = (extra = {}) => ({
+  name: "PR-2026-00400",
+  company: "HRI",
+  status: "Ordered",
+  po_numbers: "671",
+  po_doc_entry: null,
+  lines: [
+    { item: "ENG-0001", qty: 10 },
+    { item: "ENG-0002", qty: 2 },
+  ],
+  ...extra,
+});
+
+const receipt = (name, lines, extra = {}) => ({
+  name,
+  kind: "Goods Receipt",
+  company: "HRI",
+  status: "Posted",
+  sap_po_entry: 900,
+  sap_po_number: "671",
+  sap_doc_number: `GR${name.slice(-1)}`,
+  lines: lines.map(([item, qty]) => ({ item, qty })),
+  ...extra,
+});
+
+describe("what counts as received", () => {
+  it("a posted receipt against one of the request's POs, in its company", () => {
+    const pr = request({ po_numbers: "671, 702" });
+    assert.ok(receivesFor(pr, receipt("GR-1", [])));
+    assert.ok(receivesFor(pr, receipt("GR-2", [], { sap_po_number: "702" })));
+    assert.ok(!receivesFor(pr, receipt("GR-3", [], { sap_po_number: "703" })));
+    // SAP numbers each company's POs on its own.
+    assert.ok(!receivesFor(pr, receipt("GR-4", [], { company: "MRP" })));
+    // Not yet in SAP, or refused by it.
+    assert.ok(!receivesFor(pr, receipt("GR-5", [], { status: "Queued" })));
+    assert.ok(!receivesFor(pr, receipt("GR-6", [], { status: "Failed" })));
+    // No bill, no PO.
+    assert.ok(!receivesFor(pr, receipt("GR-7", [], { kind: "Stock Addition" })));
+  });
+
+  it("a PO made in the CMMS is matched by its SAP DocEntry", () => {
+    const pr = request({ po_numbers: "", po_doc_entry: 900 });
+    assert.ok(receivesFor(pr, receipt("GR-1", [], { sap_po_number: "" })));
+  });
+});
+
+describe("when a request is Completed", () => {
+  it("a full receipt completes it", () => {
+    const progress = receiptProgress(request(), [receipt("GR-1", [["ENG-0001", 10], ["ENG-0002", 2]])]);
+    assert.ok(progress.complete);
+    assert.equal(nextStatus(request(), progress), "Completed");
+  });
+
+  it("a partial receipt leaves it Ordered", () => {
+    const progress = receiptProgress(request(), [receipt("GR-1", [["ENG-0001", 10], ["ENG-0002", 1]])]);
+    assert.ok(!progress.complete);
+    assert.deepEqual(progress.lines.map((l) => l.received), [10, 1]);
+    assert.equal(nextStatus(request(), progress), null);
+  });
+
+  it("receipts add up across several", () => {
+    const first = receipt("GR-1", [["ENG-0001", 6]]);
+    const second = receipt("GR-2", [["ENG-0001", 4], ["ENG-0002", 2]]);
+    assert.ok(!receiptProgress(request(), [first]).complete);
+    const both = receiptProgress(request(), [first, second]);
+    assert.ok(both.complete);
+    assert.equal(both.receipts.length, 2);
+  });
+
+  it("more than was asked is still complete", () => {
+    assert.ok(receiptProgress(request(), [receipt("GR-1", [["ENG-0001", 12], ["ENG-0002", 2]])]).complete);
+  });
+
+  it("goes back to Ordered when the receipts no longer cover it", () => {
+    const pr = request({ status: "Completed" });
+    const progress = receiptProgress(pr, [receipt("GR-1", [["ENG-0001", 10]])]);
+    assert.equal(nextStatus(pr, progress), "Ordered");
+    assert.match(historyNote("Completed", "Ordered", progress, "2026-10-23 10:00:00"), /ENG-0002 0 of 2/);
+  });
+
+  it("a completed request that is still covered stays as it is", () => {
+    const pr = request({ status: "Completed" });
+    assert.equal(nextStatus(pr, receiptProgress(pr, [receipt("GR-1", [["ENG-0001", 10], ["ENG-0002", 2]])])), null);
+  });
+
+  it("never completes a closed, failed, queued or not-yet-ordered request", () => {
+    const full = [receipt("GR-1", [["ENG-0001", 10], ["ENG-0002", 2]])];
+    for (const status of ["Closed", "Failed", "Queued", "In SAP"]) {
+      const pr = request({ status });
+      assert.equal(nextStatus(pr, receiptProgress(pr, full)), null, status);
+    }
+  });
+
+  it("a request with no lines is never complete", () => {
+    assert.ok(!receiptProgress(request({ lines: [] }), []).complete);
+  });
+
+  it("is read only: no PO can be made from it", () => {
+    const pr = { ...request({ status: "Completed", sap_doc_entry: 77 }), lines: [] };
+    assert.ok(!mayOrder(pr));
+    assert.throws(() => checkOrder(pr, {}, {}, "2026-10-23"), (e) => e.status === 400);
+  });
+});
+
+/** ERPNext, in memory: the doctypes the completion check reads and writes. */
+const fakeErp = ({ requests, receipts }) => {
+  const docs = {
+    "CMMS Purchase Request": requests.map(({ lines, ...r }) => ({ ...r })),
+    "CMMS Purchase Request Line": requests.flatMap((r) => r.lines.map((l) => ({ ...l, parent: r.name }))),
+    "CMMS Goods Receipt": receipts.map(({ lines, ...r }) => ({ ...r })),
+    "CMMS Goods Receipt Line": receipts.flatMap((r) => r.lines.map((l) => ({ ...l, parent: r.name }))),
+    Comment: [],
+  };
+  const match = (row, [, field, op, value]) => {
+    if (op === "=") return row[field] === value;
+    if (op === "in") return value.map(String).includes(String(row[field]));
+    throw new Error(`fake ERPNext: ${op}`);
+  };
+  const pick = (doctype, { filters = [], orFilters = [] } = {}) =>
+    docs[doctype].filter(
+      (row) => filters.every((f) => match(row, f)) && (!orFilters.length || orFilters.some((f) => match(row, f)))
+    );
+  return {
+    docs,
+    listDocs: async (doctype, options) => pick(doctype, options).map((r) => ({ ...r })),
+    listChildRows: async (child, _parent, options) => pick(child, options).map((r) => ({ ...r })),
+    updateDoc: async (doctype, name, fields) => {
+      const row = docs[doctype].find((r) => r.name === name);
+      Object.assign(row, fields);
+      return row;
+    },
+    createDoc: async (doctype, doc) => {
+      docs[doctype].push(doc);
+      return doc;
+    },
+  };
+};
+
+describe("the completion check against ERPNext", () => {
+  const now = () => "2026-10-23 11:00:00";
+
+  it("raised, ordered, received: the request goes Completed, once", async () => {
+    // Raised and ordered: the sync has turned it Ordered with PO 671.
+    const erp = fakeErp({ requests: [request()], receipts: [] });
+    assert.deepEqual(await reconcileCompletion({ api: erp, now }), []);
+
+    // Half the goods come in.
+    erp.docs["CMMS Goods Receipt"].push({ ...receipt("GR-1", []), lines: undefined });
+    erp.docs["CMMS Goods Receipt Line"].push({ parent: "GR-1", item: "ENG-0001", qty: 10 });
+    assert.deepEqual(await reconcileCompletion({ api: erp, now }), []);
+    assert.equal(erp.docs["CMMS Purchase Request"][0].status, "Ordered");
+
+    // The rest - entered, then posted by the sync.
+    erp.docs["CMMS Goods Receipt"].push({ ...receipt("GR-2", [], { status: "Queued" }), lines: undefined });
+    erp.docs["CMMS Goods Receipt Line"].push({ parent: "GR-2", item: "ENG-0002", qty: 2 });
+    assert.deepEqual(await reconcileCompletion({ api: erp, now }), []);
+    erp.docs["CMMS Goods Receipt"][1].status = "Posted";
+
+    assert.deepEqual(await reconcileCompletion({ api: erp, now }), [{ id: "PR-2026-00400", from: "Ordered", to: "Completed" }]);
+    assert.equal(erp.docs["CMMS Purchase Request"][0].status, "Completed");
+    assert.equal(erp.docs.Comment.length, 1);
+    assert.equal(erp.docs.Comment[0].reference_name, "PR-2026-00400");
+    assert.match(erp.docs.Comment[0].content, /GR-1.*GR-2/);
+    assert.match(erp.docs.Comment[0].content, /ERPNext goods receipts at 2026-10-23 11:00:00/);
+
+    // Run again: nothing moves, nothing more is written.
+    assert.deepEqual(await reconcileCompletion({ api: erp, now }), []);
+    assert.equal(erp.docs.Comment.length, 1);
+  });
+
+  it("a receipt taken out of ERPNext reopens the request, and logs it", async () => {
+    const full = receipt("GR-1", [["ENG-0001", 10], ["ENG-0002", 2]]);
+    const erp = fakeErp({ requests: [request({ status: "Completed" })], receipts: [full] });
+    assert.deepEqual(await reconcileCompletion({ api: erp, now }), []);
+
+    erp.docs["CMMS Goods Receipt"].length = 0;
+    assert.deepEqual(await reconcileCompletion({ api: erp, now }), [{ id: "PR-2026-00400", from: "Completed", to: "Ordered" }]);
+    assert.equal(erp.docs["CMMS Purchase Request"][0].status, "Ordered");
+    assert.match(erp.docs.Comment[0].content, /Back to Ordered from Completed/);
+  });
+
+  it("leaves a closed request alone, received or not", async () => {
+    const erp = fakeErp({
+      requests: [request({ status: "Closed" })],
+      receipts: [receipt("GR-1", [["ENG-0001", 10], ["ENG-0002", 2]])],
+    });
+    assert.deepEqual(await reconcileCompletion({ api: erp, now }), []);
+    assert.equal(erp.docs["CMMS Purchase Request"][0].status, "Closed");
+  });
+
+  it("stops quietly when ERPNext does not have the status yet", async () => {
+    const erp = fakeErp({ requests: [request()], receipts: [receipt("GR-1", [["ENG-0001", 10], ["ENG-0002", 2]])] });
+    erp.updateDoc = async () => {
+      throw Object.assign(new Error('Status cannot be "Completed". It should be one of "Queued", "In SAP"'), { status: 417 });
+    };
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      assert.deepEqual(await reconcileCompletion({ api: erp, now }), []);
+    } finally {
+      console.warn = warn;
+    }
+    assert.equal(erp.docs.Comment.length, 0);
+  });
+});

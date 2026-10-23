@@ -337,6 +337,27 @@ const readCatalog = async () => {
 export const catalogProducts = () => readCatalog();
 
 /**
+ * The SAP code of each of these items, by ERPNext item code.
+ *
+ * The screens show an item by its SAP code alone (23 Oct 2026), and a spare or
+ * a material on a maintenance record holds only the ERPNext code. Read from the
+ * cached catalog, so a record with no item codes costs nothing; an item with
+ * no SAP code, or a catalog that cannot be read, maps to "".
+ */
+export const sapCodesFor = async (codes = []) => {
+  const wanted = new Set(codes.filter(Boolean));
+  if (!wanted.size) return new Map();
+  try {
+    const products = await readCatalog();
+    return new Map(
+      products.filter((p) => wanted.has(p.code)).map((p) => [p.code, p.sap?.code || ""]),
+    );
+  } catch {
+    return new Map();
+  }
+};
+
+/**
  * The catalog as one site sees it.
  *
  * Drops every item that site holds none of, and restates `quantity`, `rooms`

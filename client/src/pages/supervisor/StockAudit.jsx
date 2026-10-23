@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import { useDialog } from "../../context/DialogContext";
 import useStockRooms from "../../hooks/useStockRooms";
 import { formatCurrency } from "../../utils/currency";
 import AuditTrailModal from "../../components/AuditTrailModal";
@@ -50,6 +51,7 @@ import {
  */
 const StockAudit = () => {
   const { showToast } = useNotifications();
+  const { confirm } = useDialog();
   const rooms = useStockRooms();
   const period = currentPeriod();
 
@@ -256,9 +258,12 @@ const StockAudit = () => {
         ? `${uncounted} of ${audit.linesTotal} lines have not been counted. They score as unverified.\n\n`
         : "";
     if (
-      !window.confirm(
-        `${warning}Submit the ${periodLabel(audit.period)} count of ${audit.stockRoomName}? The sheet is frozen once submitted.`
-      )
+      !(await confirm({
+        title: `Submit the ${periodLabel(audit.period)} count?`,
+        message: `${warning}${audit.stockRoomName}'s sheet is frozen once submitted.`,
+        confirmLabel: "Submit count",
+        tone: uncounted > 0 ? "warning" : "default",
+      }))
     ) {
       return;
     }
@@ -339,12 +344,18 @@ const StockAudit = () => {
             return (
               <button
                 key={room._id}
-                onClick={() => {
+                onClick={async () => {
                   // Counts typed but not saved belong to the room they were
                   // typed against, so leaving is worth a question.
                   if (
                     Object.keys(drafts).length > 0 &&
-                    !window.confirm("Counts you have not saved will be lost. Switch store room?")
+                    !(await confirm({
+                      title: "Switch store room?",
+                      message: "Counts you have not saved will be lost.",
+                      confirmLabel: "Switch room",
+                      cancelLabel: "Stay",
+                      tone: "warning",
+                    }))
                   ) {
                     return;
                   }
@@ -694,9 +705,6 @@ const StockAudit = () => {
                               </span>
                             )}
                           </div>
-                          <div className="text-[10px] font-mono text-brand-700">
-                            {line.productCode || "—"}
-                          </div>
                           {/* Why this item is being asked for this month, so
                               nobody is walking to a shelf on faith. */}
                           {line.dueReason && (
@@ -989,7 +997,7 @@ const FoundItemModal = ({ auditId, onClose, onAdded }) => {
             <div className="p-3 rounded-xl border border-brand-200 bg-brand-50/50">
               <div className="text-sm font-bold text-slate-900">{selected.name}</div>
               <div className="text-[10px] font-mono text-brand-700">
-                {selected.code} • home room {selected.storeRoom}
+                {selected.sap?.code || "No SAP code yet"} • home room {selected.storeRoom}
               </div>
             </div>
           ) : (
@@ -1003,7 +1011,7 @@ const FoundItemModal = ({ auditId, onClose, onAdded }) => {
                   >
                     <div className="text-xs font-semibold text-slate-900">{product.name}</div>
                     <div className="text-[10px] font-mono text-brand-700">
-                      {product.code} • {product.storeRoom}
+                      {product.sap?.code || "No SAP code yet"} • {product.storeRoom}
                     </div>
                   </button>
                 ))}

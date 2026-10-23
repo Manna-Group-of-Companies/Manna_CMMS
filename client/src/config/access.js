@@ -6,13 +6,13 @@ import {
   ClipboardCheck,
   Contact,
   Factory,
-  FolderTree,
   Gauge,
   Hammer,
-  HardHat,
+  LayoutDashboard,
   KeyRound,
   PackageOpen,
   ReceiptIndianRupee,
+  Settings,
   ShoppingCart,
   TrendingDown,
   Wrench,
@@ -71,6 +71,12 @@ export const ROLES = [
  * twice.
  */
 export const VIEWS = {
+  /**
+   * The home screen (22 Oct 2026): breakdowns and maintenance requests summed
+   * up, for everyone on either of those two screens. It reads only their two
+   * lists, each still guarded by its own view, so this entry adds no data.
+   */
+  dashboard: [MANAGER, MAINTENANCE_MANAGER, HIGHER_MANAGEMENT, PRODUCTION_MANAGER, SUPERVISOR],
   /**
    * The catalog. Narrowed on 14 Oct 2026 from every role to the three who run
    * stock day to day, so releasing it reaches the plant heads and nobody else.
@@ -175,7 +181,9 @@ export const VIEWS = {
 // purchaseRequests released 14 Oct 2026, so the Admin can follow the purchase queue.
 // engineeringStock and goodsReceipts released 14 Oct 2026: the plant heads run their own store.
 // lowValuePurchases released 20 Oct 2026, with the purchase manager's view.
+// dashboard released 22 Oct 2026, as the home of everyone who follows maintenance.
 export const RELEASED = new Set([
+  "dashboard",
   "breakdowns",
   "maintenanceRequests",
   "purchaseRequests",
@@ -196,9 +204,29 @@ export const RELEASED = new Set([
  */
 const RELEASE_EXEMPT = [MAINTENANCE_MANAGER];
 
+/** One screen of the matrix, given the release. */
+const maySeeOne = (role, view) =>
+  (RELEASED.has(view) || RELEASE_EXEMPT.includes(role)) && (VIEWS[view] || []).includes(role);
+
+/**
+ * Settings (23 Oct 2026): the category tree and the maintenance team on one
+ * screen. Not a screen of its own in the matrix - each tab keeps its own
+ * audience, and Settings is offered to anybody who may open at least one tab.
+ * The server guards each tab's API as before.
+ */
+export const SETTINGS_TABS = ["categories", "technicians"];
+
 /** True when this role may see this screen, given the matrix and the release. */
 export const maySee = (role, view) =>
-  (RELEASED.has(view) || RELEASE_EXEMPT.includes(role)) && (VIEWS[view] || []).includes(role);
+  view === "settings"
+    ? SETTINGS_TABS.some((tab) => maySeeOne(role, tab))
+    : maySeeOne(role, view);
+
+/**
+ * Whether this role is shown what an item is worth (23 Oct 2026). The
+ * Maintenance Manager's alone; the server strips the value for anyone else.
+ */
+export const maySeeItemValue = (role) => role === MAINTENANCE_MANAGER;
 
 /**
  * Which console a role works in.
@@ -218,10 +246,11 @@ export const consoleFor = (role) => (role === SUPERVISOR ? "/supervisor" : "/adm
  * reached from two menus.
  */
 export const NAV = [
+  // First, so it is where a role that has it lands - see homePathFor.
+  { view: "dashboard", label: "Dashboard", path: "dashboard", icon: LayoutDashboard },
   { view: "engineeringStock", label: "Engineering Stock", path: "products", icon: Boxes },
   { view: "goodsReceipts", label: "Goods Receipts", path: "goods-receipts", icon: ClipboardCheck },
   { view: "purchaseRequests", label: "Purchase Requests", path: "purchase-requests", icon: ShoppingCart },
-  { view: "categories", label: "Categories", path: "categories", icon: FolderTree },
   { view: "lowStock", label: "Low Stock", path: "low-stock", icon: AlertTriangle },
   { view: "breakdowns", label: "Breakdowns", path: "breakdowns", icon: Wrench },
   {
@@ -235,13 +264,12 @@ export const NAV = [
   // board's landing off Breakdowns.
   {
     view: "lowValuePurchases",
-    label: "Miscellaneous Requests",
+    label: "Miscellaneous Purchases",
     path: "low-value-purchases",
     icon: ReceiptIndianRupee,
   },
   { view: "preventive", label: "Preventive Maintenance", path: "preventive", icon: CalendarCheck },
   { view: "assets", label: "Asset Management", path: "assets", icon: Factory },
-  { view: "technicians", label: "Maintenance Team", path: "technicians", icon: HardHat },
   { view: "breakdownReport", label: "Breakdown Report", path: "breakdown-report", icon: BarChart3 },
   { view: "scrap", label: "Scrap & Consumption", path: "scrap", icon: TrendingDown },
   { view: "redStockRoom", label: "Red Stock Room", path: "returns", icon: PackageOpen },
@@ -250,6 +278,8 @@ export const NAV = [
   { view: "stockAudits", label: "Stock Audits", path: "audits", icon: Gauge },
   { view: "recipients", label: "Recipients", path: "recipients", icon: Contact },
   { view: "users", label: "Users & Passwords", path: "users", icon: KeyRound },
+  // Categories and the maintenance team, combined (23 Oct 2026).
+  { view: "settings", label: "Settings", path: "settings", icon: Settings },
 ];
 
 /** The menu one role is shown, with absolute paths. */

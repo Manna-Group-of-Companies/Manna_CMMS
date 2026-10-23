@@ -20,7 +20,11 @@ dotenv.config();
  *     (lowValuePurchaseDoctype.js);
  *   - the PO fields on CMMS Purchase Request and its lines, which the PO form
  *     writes and sap-sync posts as a SAP Purchase Order. Custom Fields, so the
- *     doctype itself (sap-sync/setup-purchase-request.js) is not rewritten.
+ *     doctype itself (sap-sync/setup-purchase-request.js) is not rewritten;
+ *   - Completed among the request's statuses (23 Oct 2026), set by the CMMS
+ *     once the goods are received (repository/purchaseCompletion.js). The
+ *     status field is the doctype's own, so its options are widened in place;
+ *     no request changes status.
  *
  * Only adds. Safe to run again.
  */
@@ -121,6 +125,36 @@ const syncPoFields = async () => {
   }
 };
 
+const STATUS_OPTIONS = ["Queued", "In SAP", "Ordered", "Completed", "Closed", "Failed"];
+
+const syncStatusOptions = async () => {
+  log("\n=== purchase request statuses ===");
+  const meta = await getDoc("DocType", "CMMS Purchase Request").catch(() => null);
+  if (!meta) {
+    log("  ! CMMS Purchase Request is not on this site - run sap-sync/setup-purchase-request.js first");
+    return;
+  }
+  const field = (meta.fields || []).find((x) => x.fieldname === "status");
+  const have = String(field?.options || "").split("\n").filter(Boolean);
+  const missing = STATUS_OPTIONS.filter((o) => !have.includes(o));
+  if (!field || !missing.length) {
+    log(`  = status options: ${have.join(", ")}`);
+    return;
+  }
+  // Every option already there is kept, in its place; the new ones go before Closed.
+  const options = [...have];
+  for (const o of missing) {
+    const at = options.indexOf("Closed");
+    options.splice(at < 0 ? options.length : at, 0, o);
+  }
+  log(`  ~ status options: ${have.join(", ")} -> ${options.join(", ")}`);
+  if (DRY) return;
+  // The whole table, as Frappe replaces a child table it is given; each row keeps its name.
+  await updateDoc("DocType", meta.name, {
+    fields: meta.fields.map((x) => (x.fieldname === "status" ? { ...x, options: options.join("\n") } : x)),
+  });
+};
+
 const main = async () => {
   if (!erpHasCredentials()) {
     console.error(`ERPNext credentials are not set (${erpDisabledReason()}).`);
@@ -130,6 +164,7 @@ const main = async () => {
   await syncRole();
   await syncDoctypes();
   await syncPoFields();
+  await syncStatusOptions();
   log("\nDone.");
 };
 

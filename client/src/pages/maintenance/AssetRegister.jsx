@@ -16,6 +16,10 @@ import { useNotifications } from "../../context/NotificationContext";
 import AssetDetail from "./AssetDetail";
 import AssetFormModal from "./AssetFormModal";
 import ConditionSelect from "./ConditionSelect";
+import Pagination from "../../components/Pagination";
+import { pageSlice } from "../../utils/pageSlice";
+
+const PAGE_SIZE = 20;
 
 /**
  * The asset register.
@@ -54,6 +58,7 @@ const AssetRegister = () => {
   const [opened, setOpened] = useState("");
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [page, setPage] = useState(1);
 
   const load = useCallback(
     async (silent = false) => {
@@ -76,8 +81,13 @@ const AssetRegister = () => {
   useEffect(() => {
     // Debounced: the search box re-queries on every keystroke.
     const t = setTimeout(() => load(), 250);
+    // A new search or filter starts again from the first page.
+    setPage(1);
     return () => clearTimeout(t);
   }, [load]);
+
+  // Twenty to a page; the figures above still count the whole register.
+  const { page: current, rows: pageRows } = pageSlice(rows, page, PAGE_SIZE);
 
   useEffect(() => {
     API.get("/assets/plants").then(({ data }) => setPlants(data)).catch(() => setPlants([]));
@@ -215,7 +225,7 @@ const AssetRegister = () => {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((a) => (
+                {pageRows.map((a) => (
                   <tr
                     key={a.id}
                     className="cursor-pointer hover:bg-slate-50"
@@ -250,9 +260,13 @@ const AssetRegister = () => {
                       {/* Settable in the list. Walking the register and marking
                           three machines stopped should not mean opening three
                           machines and a form each time. */}
+                      {/* An open breakdown decides the condition, so it is not
+                          offered for change here: setting Running on a machine
+                          whose breakdown is still open is how the two screens
+                          came to disagree. The server derives it; see assets.js. */}
                       <ConditionSelect
                         asset={a}
-                        canEdit={canEdit}
+                        canEdit={canEdit && !a.openBreakdown}
                         onChanged={(updated) =>
                           setRows((current) =>
                             current.map((r) =>
@@ -262,6 +276,11 @@ const AssetRegister = () => {
                         }
                         onError={(message) => showToast(message, "error")}
                       />
+                      {a.openBreakdown && (
+                        <div className="mt-1 text-xs text-slate-500">
+                          {a.openBreakdown.id} · {a.openBreakdown.state}
+                        </div>
+                      )}
                     </td>
                     <td>
                       {a.fileCount > 0 ? (
@@ -281,6 +300,14 @@ const AssetRegister = () => {
               </tbody>
             </table>
           </div>
+          <Pagination
+            className="rounded-none border-x-0 border-b-0"
+            page={current}
+            total={rows.length}
+            pageSize={PAGE_SIZE}
+            onPage={setPage}
+            noun="machine"
+          />
         </div>
       )}
 

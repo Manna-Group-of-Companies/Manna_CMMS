@@ -14,6 +14,7 @@ import {
 } from "../integrations/erpnext/maintenanceRequestStages.js";
 import { erpNow } from "../integrations/erpnext/time.js";
 import { attach, detach, listAttachments } from "./attachments.js";
+import { sapCodesFor } from "./catalog.js";
 
 /**
  * Maintenance requests — the planned work.
@@ -186,6 +187,7 @@ export const getRequest = async (id) => {
   if (!doc) return null;
 
   const nextAction = nextRequestActionFor(doc.workflow_state);
+  const sapCodes = await sapCodesFor((doc.materials_used || []).map((m) => m.item_code));
 
   return {
     ...toSummary(doc),
@@ -207,6 +209,8 @@ export const getRequest = async (id) => {
     logSheetVerifiedAt: doc.log_sheet_verified_at || null,
     materials: (doc.materials_used || []).map((m) => ({
       itemCode: m.item_code || "",
+      // What the screens show: the SAP code only, never the ERPNext one.
+      sapCode: sapCodes.get(m.item_code) || "",
       description: m.description,
       qty: Number(m.qty || 0),
       uom: m.uom || "",

@@ -470,9 +470,6 @@ const RequestManagement = () => {
                               <div className="font-semibold text-slate-800 truncate">
                                 {line.productName}
                               </div>
-                              <div className="font-mono text-[10px] text-slate-500">
-                                {line.product?.code || "—"}
-                              </div>
                             </div>
                           </div>
                           <div className="text-right shrink-0">
@@ -511,9 +508,6 @@ const RequestManagement = () => {
                         <h4 className="text-[15px] font-semibold text-slate-900 leading-tight">
                           {selectedRequest.details.name}
                         </h4>
-                        <span className="mono text-brand-700 mt-1 block">
-                          CODE: {selectedRequest.details.code}
-                        </span>
                         <span className="badge badge-slate badge-soft mt-2 bg-white">
                           To be saved in:&nbsp;<strong>{selectedRequest.details.storeRoom}</strong>
                         </span>
@@ -541,7 +535,7 @@ const RequestManagement = () => {
 
                     <div className="kv">
                       <span className="kv-label">Description</span>
-                      <p className="text-[13px] text-slate-700 leading-relaxed">
+                      <p className="text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
                         {selectedRequest.details.description || "No description provided."}
                       </p>
                     </div>
@@ -635,9 +629,6 @@ const RequestManagement = () => {
                         <h4 className="text-[15px] font-semibold text-slate-900 truncate">
                           {selectedRequest.product?.name}
                         </h4>
-                        <span className="mono text-slate-500 block">
-                          Code: {selectedRequest.product?.code}
-                        </span>
                         <span className="text-[12px] text-slate-600 block">
                           Location: <strong>{selectedRequest.product?.storeRoom}</strong>
                         </span>

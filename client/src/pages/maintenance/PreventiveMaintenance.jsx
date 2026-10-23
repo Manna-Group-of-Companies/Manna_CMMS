@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CalendarCheck,
-  CheckCircle2,
-  Grid3X3,
+  ChevronRight,
   ListChecks,
   Loader2,
   Plus,
-  RefreshCw,
+  Search,
   X,
 } from "lucide-react";
 
@@ -15,6 +14,7 @@ import API from "../../services/api";
 import ChecklistEditor from "./ChecklistEditor";
 import { useAuth, MANAGER, MAINTENANCE_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
+import { useErpRefresh } from "../../hooks/useErpRefresh";
 
 /**
  * Preventive maintenance — the inspections that stop a breakdown happening.
@@ -22,10 +22,12 @@ import { useNotifications } from "../../context/NotificationContext";
  * One checklist per machine per frequency: what to look at daily, weekly,
  * monthly, and on down to yearly. Written here, printed for the floor.
  *
- * Two views, and the second is the one that changes anything. The list shows
- * the checklists that exist. The coverage grid shows the machines that have
- * none — which is the question somebody asks when they say "I want a checklist
- * for every machine", and the one a list of what exists can never answer.
+ * Read asset first. The screen opens on the asset list — every machine on the
+ * register and every electrical system — and choosing one shows that asset's
+ * checklists with the frequency of each. That is the way the question is asked
+ * on the floor ("what do we check on the cracker mill?"), and an asset with no
+ * checklist at all is visible in the list rather than missing from it, which a
+ * list of the checklists that exist could never show.
  */
 
 const FREQUENCIES = ["Daily", "Weekly", "Monthly", "Quarterly", "Half-Yearly", "Yearly"];
@@ -39,10 +41,13 @@ const FREQUENCY_STYLE = {
   Yearly: "badge-violet",
 };
 
-const TABS = [
-  { key: "lists", label: "Checklists", icon: ListChecks },
-  { key: "coverage", label: "Coverage", icon: Grid3X3 },
-];
+const FREQUENCY_RANK = Object.fromEntries(FREQUENCIES.map((f, i) => [f, i]));
+
+const byFrequency = (a, b) =>
+  (FREQUENCY_RANK[a.frequency] ?? 99) - (FREQUENCY_RANK[b.frequency] ?? 99);
+
+/** `machine:CODE` or `electrical:ID` — the kind travels with the code. */
+const keyOf = (kind, code) => `${kind}:${code}`;
 
 const PreventiveMaintenance = () => {
   const { user } = useAuth();
@@ -52,9 +57,7 @@ const PreventiveMaintenance = () => {
   // inspected against, and a standard anybody can edit is not a standard.
   const canEdit = user?.role === MANAGER || user?.role === MAINTENANCE_MANAGER;
 
-  const [tab, setTab] = useState("lists");
   const [rows, setRows] = useState([]);
-  const [cover, setCover] = useState(null);
   const [machines, setMachines] = useState([]);
   // The electrical portfolio is inspected on a schedule too, and none of it is
   // a machine on the register — see preventiveDoctypes.js.
@@ -64,30 +67,18 @@ const PreventiveMaintenance = () => {
   const [error, setError] = useState("");
 
   const [plant, setPlant] = useState("");
-  const [frequency, setFrequency] = useState("");
-  /**
-   * Which asset's sheets to show, as `machine:CODE` or `electrical:ID`.
-   *
-   * One field rather than two, because they are one question — nobody wants to
-   * filter by a machine *and* an electrical system at once, and two selects
-   * offering that would only invite the combination that returns nothing.
-   *
-   * The kind travels in the value because the server takes them as separate
-   * filters, and a bare code cannot say which of the two it is.
-   */
-  const [asset, setAsset] = useState("");
+  const [search, setSearch] = useState("");
+  // "" every asset, "with" only those with a checklist, "without" the gaps.
+  const [show, setShow] = useState("");
+  const [selected, setSelected] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [opened, setOpened] = useState("");
   const [adding, setAdding] = useState(false);
   /**
    * Whether the asset lookup came back at all.
    *
-   * The three lookups below used to swallow their own failures and set an empty
-   * list, so a machine picker with nothing in it meant either "no machines" or
-   * "the request failed" and the screen could not tell you which. It was the
-   * second — every query naming `output_per_hour` was being refused by ERPNext
-   * because the field had never been added — and the picker reported it as an
-   * empty register. A lookup that fails has to say so.
+   * A list with nothing in it has to say whether that is "no machines" or "the
+   * request failed" — the second once reported itself as an empty register.
    */
   const [lookupFailed, setLookupFailed] = useState(false);
 
@@ -95,24 +86,10 @@ const PreventiveMaintenance = () => {
     async (silent = false) => {
       if (!silent) setLoading(true);
       try {
-        const [kind, code] = asset.split(":");
-        const [lists, coverage] = await Promise.all([
-          API.get("/preventive", {
-            params: {
-              plant,
-              frequency,
-              machine: kind === "machine" ? code : "",
-              electricalSystem: kind === "electrical" ? code : "",
-              includeInactive,
-            },
-          }),
-          // Coverage is the whole plant on purpose: it is read to find the
-          // machines with nothing, and narrowing it to one machine would answer
-          // a question nobody is asking on that tab.
-          API.get("/preventive/coverage", { params: { plant } }),
-        ]);
-        setRows(lists.data);
-        setCover(coverage.data);
+        // Every checklist, once. The asset list counts them per asset and the
+        // detail filters them, so neither needs a request of its own.
+        const { data } = await API.get("/preventive", { params: { includeInactive } });
+        setRows(data);
         setError("");
       } catch (err) {
         setError(
@@ -122,12 +99,15 @@ const PreventiveMaintenance = () => {
         setLoading(false);
       }
     },
-    [plant, frequency, asset, includeInactive]
+    [includeInactive]
   );
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // The top bar's Refresh: read ERPNext again without leaving the screen.
+  useErpRefresh(() => load(true));
 
   useEffect(() => {
     API.get("/breakdowns/machines")
@@ -139,38 +119,76 @@ const PreventiveMaintenance = () => {
         setMachines([]);
         setLookupFailed(true);
       });
-    // The electrical portfolio and the plant list are not fatal to this screen:
-    // without them the picker still lists machines and the plant filter falls
-    // back to all plants, which is a narrower screen rather than a broken one.
+    // Not fatal: without them the list still shows machines, and the plant
+    // filter falls back to all plants.
     API.get("/electrical").then(({ data }) => setSystems(data)).catch(() => setSystems([]));
     API.get("/breakdowns/plants").then(({ data }) => setPlants(data)).catch(() => setPlants([]));
   }, []);
 
-  // Only what stands in the chosen plant. Offering a machine from another site
-  // is offering a filter that returns an empty list.
-  const visibleMachines = machines.filter((m) => !plant || m.plant === plant);
-  const visibleSystems = systems.filter((sys) => !plant || sys.plant === plant);
+  /** The checklists of each asset, keyed the way the list is. */
+  const byAsset = useMemo(() => {
+    const map = new Map();
+    for (const c of rows) {
+      const key = keyOf(c.assetKind, c.asset);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(c);
+    }
+    for (const list of map.values()) list.sort(byFrequency);
+    return map;
+  }, [rows]);
 
   /**
-   * Choosing a plant, and what it does to the machine already picked.
+   * Every asset, machines first and then the electrical systems.
    *
-   * Kept only when it stands in the new plant. Otherwise the two filters
-   * contradict each other and the page goes empty with both boxes still
-   * reading as though they should be showing something — which looks like a
-   * page that is broken rather than a pair of filters that cannot both be true.
+   * A retired machine stays only while something is still filed against it —
+   * it needs no inspection, but a sheet on it must still be findable.
    */
-  const pickPlant = (next) => {
-    setPlant(next);
-    if (!asset || !next) return;
+  const assets = useMemo(() => {
+    const list = [
+      ...machines.map((m) => ({
+        key: keyOf("machine", m.code),
+        kind: "machine",
+        code: m.code,
+        name: m.name || m.code,
+        plant: m.plant || "",
+        criticality: m.criticality || "",
+        retired: m.status === "Retired",
+      })),
+      ...systems.map((sys) => ({
+        key: keyOf("electrical", sys.id),
+        kind: "electrical",
+        code: sys.id,
+        name: sys.name || sys.id,
+        plant: sys.plant || "",
+        criticality: "",
+        retired: false,
+      })),
+    ];
+    return list
+      .map((a) => ({ ...a, checklists: byAsset.get(a.key) || [] }))
+      .filter((a) => !a.retired || a.checklists.length);
+  }, [machines, systems, byAsset]);
 
-    const [kind, code] = asset.split(":");
-    const stillThere =
-      kind === "machine"
-        ? machines.some((m) => m.code === code && m.plant === next)
-        : systems.some((sys) => sys.id === code && sys.plant === next);
+  const term = search.trim().toLowerCase();
+  const visible = assets.filter((a) => {
+    if (plant && a.plant !== plant) return false;
+    if (show === "with" && a.checklists.length === 0) return false;
+    if (show === "without" && a.checklists.length > 0) return false;
+    if (!term) return true;
+    return [a.name, a.code].some((v) => String(v).toLowerCase().includes(term));
+  });
 
-    if (!stillThere) setAsset("");
+  const active = assets.filter((a) => !a.retired);
+  const totals = {
+    checklists: rows.filter((c) => c.isActive).length,
+    assets: active.length,
+    withAny: active.filter((a) => a.checklists.some((c) => c.isActive)).length,
+    criticalWithNone: active.filter(
+      (a) => a.criticality.startsWith("A") && !a.checklists.some((c) => c.isActive)
+    ).length,
   };
+
+  const current = assets.find((a) => a.key === selected) || null;
 
   return (
     <div className="space-y-5">
@@ -182,16 +200,12 @@ const PreventiveMaintenance = () => {
           <div>
             <h2 className="panel-title">Preventive maintenance</h2>
             <p className="panel-sub">
-              The checks that stop a breakdown being reported. One checklist per machine per
-              frequency — written here, printed for the floor.
+              Choose an asset to see its checklists and how often each is done — written here,
+              printed for the floor.
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn btn-sm btn-neutral" onClick={() => load()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
           {canEdit && (
             <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}>
               <Plus className="h-4 w-4" />
@@ -208,139 +222,125 @@ const PreventiveMaintenance = () => {
         </div>
       )}
 
-      {cover && <Coverage totals={cover.totals} />}
+      {!loading && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Stat label="Checklists" value={totals.checklists} />
+          <Stat label="Assets covered" value={`${totals.withAny} of ${totals.assets}`} />
+          <Stat
+            label="Assets with none"
+            value={totals.assets - totals.withAny}
+            tone={totals.assets - totals.withAny ? "amber" : ""}
+            sub="no checklist at any frequency"
+          />
+          <Stat
+            label="Critical with none"
+            value={totals.criticalWithNone}
+            tone={totals.criticalWithNone ? "rose" : ""}
+            sub="A-critical, uninspected"
+          />
+        </div>
+      )}
 
-      <div className="tabs">
-        {TABS.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`tab inline-flex items-center gap-1.5 ${tab === key ? "tab-active" : ""}`}
-            aria-current={tab === key ? "page" : undefined}
-          >
-            <Icon className="h-3.5 w-3.5" />
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <div className="card p-3">
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-          {/*
-            A picker, not a search box.
-            Typing was the wrong shape for this list. A checklist is filed
-            against one machine, so the only useful narrowing is "show me this
-            machine's sheets" — and a text field answered that only if the
-            person spelled the machine the way the register does. The register
-            is the authority on those names, so it supplies the options.
-          */}
-          <div className="sm:col-span-2">
-            <label className="field-label">
-              {systems.length ? "Machine or system" : "Machine"}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-start">
+        {/* --- the asset list --------------------------------------------- */}
+        <div className="table-card">
+          <div className="p-3 space-y-2 border-b border-slate-100">
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <Search className="h-4 w-4" />
+              </span>
+              <input
+                className="field field-search"
+                placeholder="Machine or system, name or code…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                aria-label="Search the assets"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                className="field field-sm cursor-pointer"
+                value={plant}
+                onChange={(e) => setPlant(e.target.value)}
+                aria-label="Filter by plant"
+              >
+                <option value="">All plants</option>
+                {plants.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="field field-sm cursor-pointer"
+                value={show}
+                onChange={(e) => setShow(e.target.value)}
+                aria-label="Filter by checklists"
+              >
+                <option value="">All assets</option>
+                <option value="with">With checklists</option>
+                <option value="without">Without checklists</option>
+              </select>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-brand-600"
+                checked={includeInactive}
+                onChange={(e) => setIncludeInactive(e.target.checked)}
+              />
+              <span className="text-xs text-slate-600">Include retired checklists</span>
             </label>
-            <select
-              className="field field-sm cursor-pointer"
-              value={asset}
-              onChange={(e) => setAsset(e.target.value)}
-              disabled={tab === "coverage"}
-            >
-              <option value="">
-                {systems.length ? "All machines and systems" : "All machines"}
-              </option>
-              {/* Narrowed to the chosen plant, so the list is what is in front
-                  of the person rather than every machine in the group. */}
-              {visibleMachines.length > 0 && (
-                <optgroup label="Machines">
-                  {visibleMachines.map((m) => (
-                    <option key={m.code} value={`machine:${m.code}`}>
-                      {m.name} — {m.code}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {visibleSystems.length > 0 && (
-                <optgroup label="Electrical systems">
-                  {visibleSystems.map((sys) => (
-                    <option key={sys.id} value={`electrical:${sys.id}`}>
-                      {sys.name} — {sys.id}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-            {lookupFailed ? (
-              <p className="mt-1 text-xs text-rose-600">
+            {lookupFailed && (
+              <p className="text-xs text-rose-600">
                 The machine register did not load, so this list is empty — it does not mean there
                 are no machines. Reload, and if it persists the server log will say why.
               </p>
-            ) : tab === "coverage" ? (
-              <p className="mt-1 text-xs text-slate-500">
-                Coverage is read to find the machines with nothing on them, so it always shows the
-                whole plant.
-              </p>
-            ) : (
-              plant &&
-              visibleMachines.length === 0 && (
-                <p className="mt-1 text-xs text-slate-500">
-                  No machines are on the register for {plant}.
-                </p>
-              )
             )}
           </div>
-          <div>
-            <label className="field-label">Plant</label>
-            <select
-              className="field field-sm cursor-pointer"
-              value={plant}
-              onChange={(e) => pickPlant(e.target.value)}
-            >
-              <option value="">All plants</option>
-              {plants.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name}
-                </option>
+
+          {loading ? (
+            <div className="h-40 grid place-items-center">
+              <Loader2 className="h-6 w-6 animate-spin text-brand-500" />
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="empty">
+              <ListChecks className="h-8 w-8 text-slate-300 mb-2" />
+              <p className="empty-title">No assets match</p>
+              <p className="empty-sub">Clear the search or choose another plant.</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100 max-h-[70vh] overflow-y-auto">
+              {visible.map((a) => (
+                <AssetRow
+                  key={a.key}
+                  asset={a}
+                  selected={a.key === selected}
+                  onSelect={() => setSelected(a.key)}
+                />
               ))}
-            </select>
-          </div>
-          <div>
-            <label className="field-label">Frequency</label>
-            <select
-              className="field field-sm cursor-pointer"
-              value={frequency}
-              onChange={(e) => setFrequency(e.target.value)}
-              disabled={tab === "coverage"}
-            >
-              <option value="">All frequencies</option>
-              {FREQUENCIES.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
-            </select>
-          </div>
+            </ul>
+          )}
         </div>
-        {tab === "lists" && (
-          <label className="mt-2 flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-brand-600"
-              checked={includeInactive}
-              onChange={(e) => setIncludeInactive(e.target.checked)}
-            />
-            <span className="text-xs text-slate-600">Include retired checklists</span>
-          </label>
+
+        {/* --- the chosen asset's checklists ------------------------------- */}
+        {current ? (
+          <AssetChecklists
+            asset={current}
+            canEdit={canEdit}
+            onOpen={setOpened}
+            onAdd={() => setAdding(true)}
+          />
+        ) : (
+          <div className="card">
+            <div className="empty">
+              <ListChecks className="h-8 w-8 text-slate-300 mb-2" />
+              <p className="empty-title">Choose an asset</p>
+              <p className="empty-sub">Its checklists, and how often each is done, show here.</p>
+            </div>
+          </div>
         )}
       </div>
-
-      {loading ? (
-        <div className="h-40 grid place-items-center">
-          <Loader2 className="h-6 w-6 animate-spin text-brand-500" />
-        </div>
-      ) : tab === "lists" ? (
-        <Lists rows={rows} onOpen={setOpened} />
-      ) : (
-        <CoverageGrid cover={cover} onOpen={setOpened} />
-      )}
 
       {opened && (
         <ChecklistEditor
@@ -358,14 +358,15 @@ const PreventiveMaintenance = () => {
           machines={machines}
           systems={systems}
           existing={rows}
+          preset={current}
           onClose={() => setAdding(false)}
           onDone={(created) => {
             setAdding(false);
             showToast(`${created.title} created`, "success");
             load(true);
+            setSelected(keyOf(created.assetKind, created.asset));
             // Straight into the editor, because a checklist with no points on it
-            // is not yet a checklist — and a screen that congratulates somebody
-            // for creating an empty one invites them to leave it that way.
+            // is not yet a checklist.
             setOpened(created.id);
           }}
         />
@@ -373,31 +374,6 @@ const PreventiveMaintenance = () => {
     </div>
   );
 };
-
-/** How much of the plant is covered at all. */
-const Coverage = ({ totals }) => (
-  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-    <Stat label="Checklists" value={totals.checklists} />
-    <Stat label="Machines covered" value={`${totals.withAny} of ${totals.machines}`} />
-    <Stat
-      label="Machines with none"
-      value={totals.withNone}
-      tone={totals.withNone ? "amber" : ""}
-      sub="no checklist at any frequency"
-    />
-    {/*
-      The only line on this screen that names something to do today. A hand
-      pump with nothing is a gap; a critical machine with nothing is a machine
-      running on luck.
-    */}
-    <Stat
-      label="Critical with none"
-      value={totals.criticalWithNone}
-      tone={totals.criticalWithNone ? "rose" : ""}
-      sub="A-critical, uninspected"
-    />
-  </div>
-);
 
 const Stat = ({ label, value, sub, tone = "" }) => (
   <div className="card p-4">
@@ -413,148 +389,113 @@ const Stat = ({ label, value, sub, tone = "" }) => (
   </div>
 );
 
-const Lists = ({ rows, onOpen }) => (
-  <div className="table-card">
-    <div className="table-scroll">
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th>Checklist</th>
-            <th>Asset</th>
-            <th>Frequency</th>
-            <th>Done by</th>
-            <th className="text-right">Takes</th>
-            <th>Revision</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((c) => (
-            <tr key={c.id} className="cursor-pointer hover:bg-slate-50" onClick={() => onOpen(c.id)}>
-              <td>
-                <span className="cell-title">{c.title}</span>
-                <div className="mono text-xs text-slate-500">{c.id}</div>
-              </td>
-              <td>
-                <span className="cell-title">{c.assetName}</span>
-                <div className="mono text-slate-500">
-                  {c.asset}
-                  {/* Named rather than left to be inferred from the code: an
-                      electrical sheet sits in the same list as the machines
-                      and reads like one of them otherwise. */}
-                  {c.assetKind === "electrical" && (
-                    <span className="ml-1 badge badge-slate">electrical</span>
-                  )}
-                </div>
-              </td>
-              <td>
-                <span className={`badge ${FREQUENCY_STYLE[c.frequency] || "badge-slate"}`}>
-                  {c.frequency}
-                </span>
-                {!c.isActive && <span className="ml-1 badge badge-slate">retired</span>}
-              </td>
-              <td className="text-slate-600">{c.responsibility || "—"}</td>
-              <td className="text-right tabular-nums">
-                {c.estimatedMinutes ? `${c.estimatedMinutes} min` : "—"}
-              </td>
-              <td className="text-slate-500">Rev {c.revision}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-
-    {rows.length === 0 && (
-      <div className="empty">
-        <ListChecks className="h-8 w-8 text-slate-300 mb-2" />
-        <p className="empty-title">No checklists yet</p>
-        <p className="empty-sub">
-          Start with the machines that stop the plant. The Coverage tab shows which those are and
-          which of them have nothing.
-        </p>
-      </div>
-    )}
-  </div>
-);
-
-/**
- * Machines down the side, frequencies across the top.
- *
- * The empty cells are the information. A list of the checklists that exist can
- * only ever say what is there; this says what is not, which is the whole
- * question behind "a checklist for every machine".
- */
-const CoverageGrid = ({ cover, onOpen }) => {
-  if (!cover) return null;
+/** One asset in the list, with the frequencies it is already inspected at. */
+const AssetRow = ({ asset: a, selected, onSelect }) => {
+  const critical = a.criticality.startsWith("A");
+  const frequencies = [...new Set(a.checklists.filter((c) => c.isActive).map((c) => c.frequency))];
 
   return (
-    <div className="table-card">
-      <div className="px-5 pt-5">
-        <h3 className="section-title">Coverage</h3>
-        <p className="panel-sub mb-3">
-          Every machine on the register against every frequency. A blank cell is a check nobody is
-          doing — not every machine needs all six, but a critical one with a whole empty row is
-          running on luck.
+    <li>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={selected ? "true" : undefined}
+        className={`w-full flex items-center gap-3 px-4 py-3 text-left cursor-pointer transition-colors ${
+          selected ? "bg-brand-50" : "hover:bg-slate-50"
+        }`}
+      >
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-slate-800 truncate">{a.name}</p>
+          <p className="mono text-xs text-slate-500 truncate">
+            {a.code}
+            {a.plant ? ` · ${a.plant}` : ""}
+            {a.kind === "electrical" && <span className="ml-1 badge badge-slate">electrical</span>}
+            {critical && <span className="ml-1 badge badge-rose badge-soft">critical</span>}
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {frequencies.length ? (
+              frequencies.map((f) => (
+                <span key={f} className={`badge ${FREQUENCY_STYLE[f] || "badge-slate"}`}>
+                  {f}
+                </span>
+              ))
+            ) : (
+              <span className="text-xs text-amber-700">No checklist</span>
+            )}
+          </div>
+        </div>
+        <ChevronRight
+          className={`h-4 w-4 shrink-0 ${selected ? "text-brand-600" : "text-slate-300"}`}
+        />
+      </button>
+    </li>
+  );
+};
+
+/** The chosen asset's checklists, each with its frequency. */
+const AssetChecklists = ({ asset, canEdit, onOpen, onAdd }) => (
+  <div className="table-card">
+    <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
+      <div className="min-w-0">
+        <h3 className="section-title">{asset.name}</h3>
+        <p className="panel-sub">
+          <span className="mono">{asset.code}</span>
+          {asset.plant ? ` · ${asset.plant}` : ""}
+          {asset.kind === "electrical" ? " · electrical system" : ""}
         </p>
       </div>
+      {canEdit && (
+        <button className="btn btn-sm btn-primary shrink-0" onClick={onAdd}>
+          <Plus className="h-4 w-4" />
+          Add checklist
+        </button>
+      )}
+    </div>
+
+    {asset.checklists.length === 0 ? (
+      <div className="empty">
+        <ListChecks className="h-8 w-8 text-slate-300 mb-2" />
+        <p className="empty-title">No checklists for this asset</p>
+        <p className="empty-sub">
+          Nothing is inspected on a schedule, so every failure on it will be found by it stopping.
+        </p>
+      </div>
+    ) : (
       <div className="table-scroll">
         <table className="tbl">
           <thead>
             <tr>
-              <th>Machine</th>
-              {cover.frequencies.map((f) => (
-                <th key={f} className="text-center">
-                  {f}
-                </th>
-              ))}
+              <th>Frequency</th>
+              <th>Checklist</th>
+              <th>Revision</th>
             </tr>
           </thead>
           <tbody>
-            {cover.machines.map((m) => {
-              const critical = m.criticality?.startsWith("A");
-              return (
-                <tr key={m.machine} className={m.count === 0 && critical ? "bg-rose-50/60" : ""}>
-                  <td>
-                    <span className="cell-title">{m.machineName}</span>
-                    <div className="mono text-slate-500">
-                      {m.machine}
-                      {m.criticality ? ` · ${m.criticality.replace(/^[ABC] - /, "")}` : ""}
-                    </div>
-                  </td>
-                  {cover.frequencies.map((f) => {
-                    const id = m.frequencies[f];
-                    return (
-                      <td key={f} className="text-center">
-                        {id ? (
-                          <button
-                            className="inline-grid place-items-center h-7 w-7 rounded-lg text-emerald-600 hover:bg-emerald-50 cursor-pointer"
-                            onClick={() => onOpen(id)}
-                            aria-label={`Open the ${f.toLowerCase()} checklist for ${m.machineName}`}
-                          >
-                            <CheckCircle2 className="h-4 w-4" />
-                          </button>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
+            {asset.checklists.map((c) => (
+              <tr
+                key={c.id}
+                className="cursor-pointer hover:bg-slate-50"
+                onClick={() => onOpen(c.id)}
+              >
+                <td>
+                  <span className={`badge ${FREQUENCY_STYLE[c.frequency] || "badge-slate"}`}>
+                    {c.frequency}
+                  </span>
+                  {!c.isActive && <span className="ml-1 badge badge-slate">retired</span>}
+                </td>
+                <td>
+                  <span className="cell-title">{c.title}</span>
+                  <div className="mono text-xs text-slate-500">{c.id}</div>
+                </td>
+                <td className="text-slate-500">Rev {c.revision}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
-
-      {cover.machines.length === 0 && (
-        <div className="empty">
-          <Grid3X3 className="h-8 w-8 text-slate-300 mb-2" />
-          <p className="empty-title">No machines on the register</p>
-          <p className="empty-sub">Add machines in Asset Management first.</p>
-        </div>
-      )}
-    </div>
-  );
-};
+    )}
+  </div>
+);
 
 /**
  * A new checklist.
@@ -562,21 +503,19 @@ const CoverageGrid = ({ cover, onOpen }) => {
  * Machine and frequency are fixed at creation and cannot be edited afterwards.
  * Changing either turns it into a different list, and doing that by editing
  * hides the change from anybody holding a printed copy.
+ *
+ * Opened from an asset, it starts on that asset.
  */
-const NewChecklist = ({ machines, systems, existing, onClose, onDone }) => {
-  // Which kind of asset the sheet is for. Not derived from whichever picker
-  // has a value, because switching between them has to clear the other — a
-  // checklist belongs to a machine or an electrical system, never both, and
-  // the server refuses one carrying two.
-  const [kind, setKind] = useState("machine");
+const NewChecklist = ({ machines, systems, existing, preset, onClose, onDone }) => {
+  // Which kind of asset the sheet is for. Switching between them clears the
+  // other — a checklist belongs to a machine or an electrical system, never
+  // both, and the server refuses one carrying two.
+  const [kind, setKind] = useState(preset?.kind || "machine");
   const [form, setForm] = useState({
-    machine: "",
-    electricalSystem: "",
+    machine: preset?.kind === "machine" ? preset.code : "",
+    electricalSystem: preset?.kind === "electrical" ? preset.code : "",
     frequency: "",
     title: "",
-    responsibility: "",
-    estimatedMinutes: "",
-    safetyNote: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -591,8 +530,7 @@ const NewChecklist = ({ machines, systems, existing, onClose, onDone }) => {
   const asset = kind === "machine" ? form.machine : form.electricalSystem;
 
   // Not refused, only pointed out. Two lists at the same frequency is sometimes
-  // right — a mechanical daily round and an electrical one — and refusing it
-  // would send somebody to cram both onto one sheet.
+  // right — a mechanical daily round and an electrical one.
   const clash =
     asset &&
     form.frequency &&
@@ -612,12 +550,11 @@ const NewChecklist = ({ machines, systems, existing, onClose, onDone }) => {
     setError("");
     try {
       const { data } = await API.post("/preventive", {
-        ...form,
         // Only the one that applies. Sending a blank alongside a real value is
         // what the server reads as "both", and it refuses that.
         machine: kind === "machine" ? form.machine : "",
         electricalSystem: kind === "electrical" ? form.electricalSystem : "",
-        estimatedMinutes: Number(form.estimatedMinutes) || 0,
+        frequency: form.frequency,
         title: form.title.trim() || `${form.frequency} check`,
       });
       onDone(data);
@@ -680,10 +617,6 @@ const NewChecklist = ({ machines, systems, existing, onClose, onDone }) => {
                 <option value="">Choose the machine…</option>
                 {machines.map((m) => (
                   <option key={m.code} value={m.code}>
-                    {/* Named the way the asset register names it: the machine
-                        first, its code after. The area used to trail in brackets
-                        and made every option read as a different machine from the
-                        one on the register. */}
                     {m.name} — {m.code}
                   </option>
                 ))}
@@ -701,9 +634,6 @@ const NewChecklist = ({ machines, systems, existing, onClose, onDone }) => {
                 <option value="">Choose the system…</option>
                 {systems.map((sys) => (
                   <option key={sys.id} value={sys.id}>
-                    {/* Name first, the way the machine picker and the filter
-                        above both read. The same system listed two ways on one
-                        screen looks like two systems. */}
                     {sys.name} — {sys.id}
                   </option>
                 ))}
@@ -711,36 +641,23 @@ const NewChecklist = ({ machines, systems, existing, onClose, onDone }) => {
             </div>
           )}
 
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className="field-label">How often</label>
-              <select className="field" value={form.frequency} onChange={set("frequency")} required>
-                <option value="">Choose…</option>
-                {FREQUENCIES.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="field-label">Done by</label>
-              <select className="field" value={form.responsibility} onChange={set("responsibility")}>
-                <option value="">Not decided</option>
-                {["Operator", "Fitter", "Electrician", "Maintenance Team", "Contractor"].map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <label className="field-label">How often</label>
+            <select className="field" value={form.frequency} onChange={set("frequency")} required>
+              <option value="">Choose…</option>
+              {FREQUENCIES.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
           </div>
 
           {clash && (
             <div className="note note-amber">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <span>
-                There is already a {form.frequency.toLowerCase()} checklist on this machine —{" "}
+                There is already a {form.frequency.toLowerCase()} checklist on this asset —{" "}
                 {clash.title}. A second one is fine if it is a different trade; otherwise add the
                 points to that one.
               </span>
@@ -756,20 +673,9 @@ const NewChecklist = ({ machines, systems, existing, onClose, onDone }) => {
               placeholder={form.frequency ? `${form.frequency} check` : "Daily check"}
             />
             <p className="mt-1 text-xs text-slate-500">
-              Optional. Worth naming where a machine has two at the same frequency — "Daily
+              Optional. Worth naming where an asset has two at the same frequency — "Daily
               mechanical", "Daily electrical".
             </p>
-          </div>
-
-          <div>
-            <label className="field-label">Before you start</label>
-            <textarea
-              className="field field-area"
-              rows={2}
-              value={form.safetyNote}
-              onChange={set("safetyNote")}
-              placeholder="Isolation, lock-off, permits — printed in a box at the top of the sheet."
-            />
           </div>
         </div>
 

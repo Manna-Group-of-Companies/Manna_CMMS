@@ -3,14 +3,20 @@ import 'package:flutter/services.dart';
 
 import 'palette.dart';
 
+/// The family every style names. Android's own default, so naming it changes
+/// nothing on a phone; it matters where a style built from scratch would
+/// otherwise fall back to the platform's choice - and to the test renderer's
+/// placeholder font in the screen gallery (test/gallery).
+const kFontFamily = 'Roboto';
+
 ThemeData buildAppTheme() {
   final base = ThemeData.light(useMaterial3: true);
 
   const inputBorderRadius = BorderRadius.all(Radius.circular(12));
   OutlineInputBorder border(Color color, [double width = 1]) => OutlineInputBorder(
-        borderRadius: inputBorderRadius,
-        borderSide: BorderSide(color: color, width: width),
-      );
+    borderRadius: inputBorderRadius,
+    borderSide: BorderSide(color: color, width: width),
+  );
 
   return base.copyWith(
     scaffoldBackgroundColor: AppColors.canvas,
@@ -40,6 +46,7 @@ ThemeData buildAppTheme() {
         statusBarBrightness: Brightness.light,
       ),
       titleTextStyle: TextStyle(
+        fontFamily: kFontFamily,
         color: AppColors.textStrong,
         fontSize: 17,
         fontWeight: FontWeight.w700,
@@ -59,6 +66,7 @@ ThemeData buildAppTheme() {
         side: const BorderSide(color: AppColors.border),
       ),
       titleTextStyle: const TextStyle(
+        fontFamily: kFontFamily,
         color: AppColors.textStrong,
         fontSize: 17,
         fontWeight: FontWeight.w700,
@@ -67,9 +75,7 @@ ThemeData buildAppTheme() {
     bottomSheetTheme: const BottomSheetThemeData(
       backgroundColor: AppColors.surface,
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
     ),
     dividerTheme: const DividerThemeData(color: AppColors.border, thickness: 1, space: 1),
     inputDecorationTheme: InputDecorationTheme(
@@ -77,9 +83,17 @@ ThemeData buildAppTheme() {
       fillColor: AppColors.surface,
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      hintStyle: const TextStyle(color: AppColors.textFaint, fontSize: 13),
-      labelStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
-      floatingLabelStyle: const TextStyle(color: AppColors.primaryDeep, fontSize: 13),
+      hintStyle: const TextStyle(fontFamily: kFontFamily, color: AppColors.textFaint, fontSize: 13),
+      labelStyle: const TextStyle(
+        fontFamily: kFontFamily,
+        color: AppColors.textSecondary,
+        fontSize: 13,
+      ),
+      floatingLabelStyle: const TextStyle(
+        fontFamily: kFontFamily,
+        color: AppColors.primaryDeep,
+        fontSize: 13,
+      ),
       prefixIconColor: AppColors.textMuted,
       border: border(AppColors.border),
       enabledBorder: border(AppColors.border),
@@ -96,14 +110,22 @@ ThemeData buildAppTheme() {
         disabledForegroundColor: Colors.white70,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+        textStyle: const TextStyle(
+          fontFamily: kFontFamily,
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         foregroundColor: AppColors.textSecondary,
-        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+        textStyle: const TextStyle(
+          fontFamily: kFontFamily,
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     ),
@@ -112,7 +134,11 @@ ThemeData buildAppTheme() {
         foregroundColor: AppColors.textBody,
         side: const BorderSide(color: AppColors.borderStrong),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+        textStyle: const TextStyle(
+          fontFamily: kFontFamily,
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     ),
@@ -120,11 +146,21 @@ ThemeData buildAppTheme() {
       backgroundColor: AppColors.primary,
       foregroundColor: Colors.white,
       elevation: 3,
+      shape: StadiumBorder(),
+      extendedTextStyle: TextStyle(
+        fontFamily: kFontFamily,
+        fontWeight: FontWeight.w700,
+        fontSize: 13,
+      ),
     ),
     snackBarTheme: const SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       backgroundColor: AppColors.surface,
-      contentTextStyle: TextStyle(color: AppColors.textStrong, fontSize: 13),
+      contentTextStyle: TextStyle(
+        fontFamily: kFontFamily,
+        color: AppColors.textStrong,
+        fontSize: 13,
+      ),
     ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(color: AppColors.primary),
     scrollbarTheme: ScrollbarThemeData(
