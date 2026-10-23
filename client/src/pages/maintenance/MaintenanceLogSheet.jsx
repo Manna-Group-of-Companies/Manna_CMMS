@@ -102,7 +102,7 @@ const MaintenanceLogSheet = ({ record, onClose }) => {
             />
             <Cell label="Area" value={record.area} />
             <Cell label="Wanted by" value={day(record.neededBy)} />
-            <Cell label="Requested by" value={record.requestedBy} span={2} />
+            <Cell label="Requested by" value={record.requestedByName || record.requestedBy} span={2} />
             <Cell label="Raised on" value={when(record.requestedAt)} span={2} />
             <Cell label="Work started" value={when(record.startedAt)} span={2} />
             <Cell label="Completed" value={when(record.completedAt)} span={2} />
@@ -132,7 +132,7 @@ const MaintenanceLogSheet = ({ record, onClose }) => {
                 <tr key={i}>
                   <Td className="text-center">{i + 1}</Td>
                   <Td>{m?.description || ""}</Td>
-                  <Td className="font-mono text-xs">{m?.itemCode || ""}</Td>
+                  <Td className="font-mono text-xs">{m?.sapCode || ""}</Td>
                   <Td className="text-center">{m?.qty || ""}</Td>
                   <Td className="text-center">{m?.uom || ""}</Td>
                   <Td />

@@ -468,3 +468,69 @@ class _RowsField extends StatelessWidget {
         ],
       );
 }
+
+/// The Attend step, as one button.
+///
+/// Attending collects nothing - it only tells whoever asked that maintenance
+/// has seen it - so a form card around a lone button was a form with nothing
+/// to fill. Shown by the detail screens only when the record is on that step
+/// and the server's stage list lets this role take it.
+class AttendCard extends StatefulWidget {
+  const AttendCard({
+    super.key,
+    required this.stage,
+    required this.busy,
+    required this.onAttend,
+  });
+
+  final WorkStage stage;
+  final bool busy;
+
+  /// Returns an error message to show, or null when it went through.
+  final Future<String?> Function() onAttend;
+
+  @override
+  State<AttendCard> createState() => _AttendCardState();
+}
+
+class _AttendCardState extends State<AttendCard> {
+  String _problem = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final stage = widget.stage;
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (stage.blurb.isNotEmpty) ...[
+            Text(
+              stage.blurb,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (_problem.isNotEmpty) ...[
+            Text(_problem, style: const TextStyle(color: AppColors.danger, fontSize: 13)),
+            const SizedBox(height: 10),
+          ],
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              icon: const Icon(Icons.engineering_outlined, size: 18),
+              label: Text(widget.busy ? 'Saving…' : 'Attend'),
+              onPressed: widget.busy
+                  ? null
+                  : () async {
+                      setState(() => _problem = '');
+                      final error = await widget.onAttend();
+                      if (error != null && mounted) setState(() => _problem = error);
+                    },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

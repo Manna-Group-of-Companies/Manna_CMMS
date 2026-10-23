@@ -241,7 +241,6 @@ const SapHandoff = () => {
                     >
                       <td className="px-5 py-3">
                         <p className="font-bold text-slate-900 break-words">{product.name}</p>
-                        <p className="text-[11px] text-slate-500">{product.code}</p>
                         {/* A name the convention rejected still has to reach SAP,
                             but the Plant Manager should know before typing it in. */}
                         {product.nameCompliant === false && (

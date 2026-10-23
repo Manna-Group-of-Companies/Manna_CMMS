@@ -339,8 +339,6 @@ class _RoomItemRow extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 3),
-                MonoText(item.code.isEmpty ? '—' : item.code, fontSize: 10),
               ],
             ),
           ),

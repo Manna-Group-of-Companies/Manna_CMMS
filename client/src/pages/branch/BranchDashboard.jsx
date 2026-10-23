@@ -289,7 +289,6 @@ const BranchDashboard = () => {
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr className="text-[11px] uppercase tracking-wider text-slate-600">
                   <th className="px-6 py-3 font-semibold">Engineering Stock</th>
-                  <th className="px-6 py-3 font-semibold">Code</th>
                   <th className="px-6 py-3 font-semibold">Category</th>
                   <th className="px-6 py-3 font-semibold text-right">Quantity</th>
                   <th className="px-6 py-3 font-semibold text-right">Min</th>
@@ -320,7 +319,6 @@ const BranchDashboard = () => {
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-xs text-slate-600">{item.code}</td>
                       <td className="px-6 py-4 text-xs text-slate-600">
                         {item.category || "—"}
                       </td>

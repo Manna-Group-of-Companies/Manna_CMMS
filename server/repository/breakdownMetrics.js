@@ -52,9 +52,17 @@ const mean = (values) => {
  * nobody types.
  */
 const intervalsOf = (b, at = new Date()) => ({
-  // Stopped until work actually started. How quickly maintenance got to it,
-  // which is the whole of the delay now that nothing sits between the two.
-  response: hoursBetween(b.stopped_at, b.repair_started_at),
+  /**
+   * Response time (23 Oct 2026): reported until maintenance attended to it.
+   *
+   * "Reported" is when the record was made and "attended" is the stamp the
+   * Attend step writes - both timestamps nobody types. A breakdown never
+   * attended through that step (all of them before 20 Oct 2026) has no
+   * response time, and is left out of the mean rather than given a guessed one.
+   */
+  response: hoursBetween(b.creation, b.attended_at),
+  // Attended until work actually started.
+  toRepair: hoursBetween(b.attended_at, b.repair_started_at),
   // Work started until the machine ran again. Time with a spanner in hand.
   repair: hoursBetween(b.repair_started_at, b.completed_at),
   // The whole stoppage, once it is over. Null while the machine is still down,
@@ -206,7 +214,7 @@ export const buildReport = async ({ from, to, plant = "" } = {}) => {
     listAll("CMMS Breakdown", {
       fields: [
         "name", "machine", "machine_name", "plant", "workflow_state", "priority",
-        "failure_mode", "stopped_at", "repair_started_at",
+        "failure_mode", "stopped_at", "repair_started_at", "creation", "attended_at",
         "completed_at", "closed_at", "actual_downtime_hours", "output_lost",
         "output_per_hour", "output_uom", "labour_hours", "production_stopped", "root_cause",
         "repeat_failure", "repeat_of",
@@ -264,6 +272,7 @@ export const buildReport = async ({ from, to, plant = "" } = {}) => {
         mtbf: mtbf({ breakdowns: rows, machine, windowDays }),
         mttrHours: mttr(rows),
         meanResponseHours: mean(intervals.map((i) => i.response)),
+        meanToRepairHours: mean(intervals.map((i) => i.toRepair)),
         meanRepairHours: mean(intervals.map((i) => i.repair)),
         availability: availability({ breakdowns: rows, machine, windowDays }),
       };
@@ -311,6 +320,7 @@ export const buildReport = async ({ from, to, plant = "" } = {}) => {
       // take us".
       mttrHours: mttr(closed),
       meanResponseHours: mean(allIntervals.map((i) => i.response)),
+      meanToRepairHours: mean(allIntervals.map((i) => i.toRepair)),
       meanRepairHours: mean(allIntervals.map((i) => i.repair)),
       productionStopped: breakdowns.filter((b) => b.production_stopped).length,
       // Flagged at closing by the person doing the analysis, so this counts
@@ -385,6 +395,10 @@ export const buildReport = async ({ from, to, plant = "" } = {}) => {
         failureMode: b.failure_mode || "",
         stoppedAt: b.stopped_at,
         completedAt: b.completed_at || null,
+        // The two stamps the response time is measured between, so the report
+        // can show them beside it.
+        reportedAt: b.creation || null,
+        attendedAt: b.attended_at || null,
         responseHours: i.response,
         repairHours: i.repair,
         downtimeHours: i.elapsed,
@@ -419,7 +433,7 @@ export const machineReliability = async ({ machine, from, to } = {}) => {
   const breakdowns = await listAll("CMMS Breakdown", {
     fields: [
       "name", "machine", "machine_name", "plant", "workflow_state", "priority",
-      "failure_mode", "stopped_at", "repair_started_at", "completed_at",
+      "failure_mode", "stopped_at", "repair_started_at", "creation", "attended_at", "completed_at",
       "closed_at", "actual_downtime_hours", "output_lost", "output_per_hour", "output_uom",
       "labour_hours", "production_stopped", "root_cause", "likely_cause",
       "actions_performed", "assigned_to", "reported_by",
@@ -473,6 +487,7 @@ export const machineReliability = async ({ machine, from, to } = {}) => {
       mttrHours: mttr(breakdowns),
       availability: availability({ breakdowns, machine: machineDoc, windowDays }),
       meanResponseHours: mean(intervals.map((i) => i.response)),
+      meanToRepairHours: mean(intervals.map((i) => i.toRepair)),
       meanRepairHours: mean(intervals.map((i) => i.repair)),
       productionStopped: breakdowns.filter((b) => b.production_stopped).length,
       repeats: breakdowns.filter((b) => b.repeat_failure).length,

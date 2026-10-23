@@ -897,7 +897,11 @@ class AppDropdown<T> extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         dropdownColor: AppColors.surface,
         icon: const Icon(Icons.keyboard_arrow_down, size: 18, color: AppColors.textMuted),
-        style: const TextStyle(color: AppColors.textBody, fontSize: 12.5),
+        style: const TextStyle(
+          fontFamily: kFontFamily,
+          color: AppColors.textBody,
+          fontSize: 12.5,
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         onChanged: onChanged,
         items: [

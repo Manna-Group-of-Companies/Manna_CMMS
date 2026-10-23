@@ -1,18 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  Clock,
-  Factory,
-  Plus,
-  RefreshCw,
-  Wrench,
-  X,
-} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { AlertTriangle, Clock, Factory, Plus, Wrench, X } from "lucide-react";
 
+import { useSearchParams } from "react-router-dom";
 import API from "../../services/api";
 import BreakdownDetail from "./BreakdownDetail";
 import { useAuth, MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
+import { WorkThumb } from "../../components/WorkUi";
+import { useErpRefresh } from "../../hooks/useErpRefresh";
 
 /**
  * Breakdowns — Module 2's first screen.
@@ -104,14 +99,30 @@ const Breakdowns = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showOpen, setShowOpen] = useState(true);
-  const [reporting, setReporting] = useState(false);
+  // Narrows the list to one company. The server applies it, inside whatever
+  // plants this person is confined to, so it cannot widen what they see.
+  const [plant, setPlant] = useState("");
+  const [plants, setPlants] = useState([]);
+  // `?report=1` (the dashboard's "Report breakdown") lands with the form open.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [reporting, setReporting] = useState(() => canReport && searchParams.get("report") === "1");
   const [opened, setOpened] = useState("");
+
+  // Take the flag back off the address once used, so a refresh or the back
+  // button does not open the form a second time.
+  useEffect(() => {
+    if (searchParams.has("report")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("report");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const load = useCallback(
     async (silent = false) => {
       if (!silent) setLoading(true);
       try {
-        const { data } = await API.get("/breakdowns", { params: { open: showOpen } });
+        const { data } = await API.get("/breakdowns", { params: { open: showOpen, plant } });
         setRows(data);
         setError("");
       } catch (err) {
@@ -123,40 +134,24 @@ const Breakdowns = () => {
         setLoading(false);
       }
     },
-    [showOpen]
+    [showOpen, plant]
   );
 
   useEffect(() => {
     load();
   }, [load]);
 
+  // The top bar's Refresh, in place of a button of the page's own.
+  useErpRefresh(() => load(true));
+
   useEffect(() => {
     API.get("/breakdowns/machines")
       .then(({ data }) => setMachines(data))
       .catch(() => setMachines([]));
+    API.get("/breakdowns/plants")
+      .then(({ data }) => setPlants(data))
+      .catch(() => setPlants([]));
   }, []);
-
-  const stats = useMemo(() => {
-    const open = rows.filter((r) => !["Closed", "Cancelled"].includes(r.state));
-
-    /**
-     * Machines that are down *now*.
-     *
-     * Not the same as open. A breakdown stays open after the repair while the
-     * root cause is written up, but the machine is running again the moment it
-     * reaches Repaired - so counting it in "downtime so far" reported a plant
-     * as still losing hours to a machine that was back in production. Reported
-     * and Under Repair are the only states where the machine is actually
-     * stopped.
-     */
-    const down = rows.filter((r) => ["Reported", "Attended", "Under Repair"].includes(r.state));
-
-    return {
-      open: open.length,
-      notStarted: rows.filter((r) => ["Reported", "Attended"].includes(r.state)).length,
-      downtime: down.reduce((sum, r) => sum + (r.stoppedForHours || 0), 0),
-    };
-  }, [rows]);
 
   return (
     <div className="space-y-5">
@@ -170,13 +165,30 @@ const Breakdowns = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn btn-sm btn-neutral" onClick={() => setShowOpen((v) => !v)}>
-            {showOpen ? "Showing open" : "Showing all"}
-          </button>
-          <button className="btn btn-sm btn-neutral" onClick={() => load()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
+          {/* A plant head is served one company only, so they get no choice. */}
+          {plants.length > 1 && (
+            <select
+              className="field field-sm cursor-pointer w-auto"
+              value={plant}
+              onChange={(e) => setPlant(e.target.value)}
+              aria-label="Filter by company"
+            >
+              <option value="">All companies</option>
+              {plants.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <div className="tabs">
+            <button className={`tab ${showOpen ? "tab-active" : ""}`} onClick={() => setShowOpen(true)}>
+              Open
+            </button>
+            <button className={`tab ${showOpen ? "" : "tab-active"}`} onClick={() => setShowOpen(false)}>
+              All
+            </button>
+          </div>
           {canReport && (
             <button className="btn btn-sm btn-primary" onClick={() => setReporting(true)}>
               <Plus className="h-4 w-4" />
@@ -193,14 +205,9 @@ const Breakdowns = () => {
         </div>
       )}
 
-      {/* "Production stopped" was here and is gone: every breakdown is a stopped
-          machine, so the tile always read the same as Open. */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <Stat label="Open" value={stats.open} />
-        <Stat label="Work not started" value={stats.notStarted} tone={stats.notStarted ? "rose" : ""} />
-        <Stat label="Downtime so far" value={hoursLabel(Math.round(stats.downtime * 10) / 10)} />
-      </div>
-
+      {/* The Open / Response time / Downtime tiles were here, removed at the
+          plant's request (Oct 2026): the table carries the same figures per
+          breakdown, and the report has the totals. */}
       <div className="table-card">
         <div className="table-scroll">
           <table className="tbl">
@@ -209,8 +216,8 @@ const Breakdowns = () => {
                 <th>Breakdown</th>
                 <th>Machine</th>
                 <th>Status</th>
-                <th>Waiting on</th>
                 <th>Priority</th>
+                <th>Response time</th>
                 <th>Stopped for</th>
                 <th></th>
               </tr>
@@ -225,8 +232,13 @@ const Breakdowns = () => {
                     onClick={() => setOpened(r.id)}
                   >
                     <td>
-                      <span className="cell-title">{r.id}</span>
-                      <div className="text-xs text-slate-500 max-w-xs truncate">{r.whatHappened}</div>
+                      <div className="flex items-center gap-3">
+                        <WorkThumb icon={Wrench} priority={r.priority} />
+                        <div className="min-w-0">
+                          <span className="cell-title">{r.id}</span>
+                          <div className="text-xs text-slate-500 max-w-xs truncate">{r.whatHappened}</div>
+                        </div>
+                      </div>
                     </td>
                     <td>
                       <span className="cell-title">{r.machineName}</span>
@@ -242,7 +254,6 @@ const Breakdowns = () => {
                         <span className="ml-1 badge badge-rose badge-soft">repeat</span>
                       )}
                     </td>
-                    <td className="text-slate-500">{r.waitingOn || "—"}</td>
                     <td>
                       {r.priority ? (
                         <span className={`badge ${PRIORITY_STYLE[r.priority] || "badge-slate"}`}>
@@ -255,6 +266,15 @@ const Breakdowns = () => {
                     {/* Hours only. The output-lost figure under this was worked
                         out from a per-machine rate that has not been measured,
                         so it read as fact while resting on an estimate. */}
+                    <td>
+                      {r.responseHours !== null && r.responseHours !== undefined ? (
+                        hoursLabel(r.responseHours)
+                      ) : r.state === "Reported" ? (
+                        <span className="text-slate-500">Waiting</span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
                     <td>{hoursLabel(r.stoppedForHours)}</td>
                     <td className="text-right">
                       {next && canAdvance(r.state) && (
@@ -275,7 +295,11 @@ const Breakdowns = () => {
             <Factory className="h-8 w-8 text-slate-300 mb-2" />
             <p className="empty-title">Nothing broken down</p>
             <p className="empty-sub">
-              {showOpen ? "No open breakdowns." : "No breakdowns have been reported yet."}
+              {plant
+                ? `No ${showOpen ? "open " : ""}breakdowns at ${plant}.`
+                : showOpen
+                  ? "No open breakdowns."
+                  : "No breakdowns have been reported yet."}
             </p>
           </div>
         )}
@@ -304,19 +328,6 @@ const Breakdowns = () => {
     </div>
   );
 };
-
-const Stat = ({ label, value, tone = "" }) => (
-  <div className="card p-4">
-    <p className="eyebrow">{label}</p>
-    <p
-      className={`mt-1 text-2xl font-bold tracking-tight ${
-        tone === "rose" ? "text-rose-600" : tone === "amber" ? "text-amber-600" : "text-slate-900"
-      }`}
-    >
-      {value}
-    </p>
-  </div>
-);
 
 /**
  * Five fields, and no more.

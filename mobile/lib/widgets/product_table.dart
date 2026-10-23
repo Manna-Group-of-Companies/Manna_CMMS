@@ -45,7 +45,8 @@ class ProductTable extends StatelessWidget {
       cellsOf: (context, product) => [
         TableTitleCell(
           title: product.name,
-          subtitle: product.code,
+          // SAP's code only; ERPNext's own item code is not shown.
+          subtitle: product.sap.code.isNotEmpty ? product.sap.code : 'No SAP code yet',
           imageUrl: product.image,
         ),
         TableNumberCell(

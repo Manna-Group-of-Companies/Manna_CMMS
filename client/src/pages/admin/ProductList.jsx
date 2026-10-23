@@ -8,6 +8,8 @@ import ProductFormModal from "./ProductFormModal";
 import CompanyBreakdown from "../../components/CompanyBreakdown";
 import CategoryEditModal from "../../components/CategoryEditModal";
 import { useSapSyncDone } from "../../hooks/useSapSync";
+import { useErpRefresh } from "../../hooks/useErpRefresh";
+import { maySeeItemValue } from "../../config/access";
 import { statusTone } from "../../utils/productStatus";
 import { formatCurrency } from "../../utils/currency";
 import {
@@ -24,19 +26,19 @@ import {
   FolderTree,
 } from "lucide-react";
 import Select from "../../components/Select";
+import Pagination from "../../components/Pagination";
+import { pageSlice } from "../../utils/pageSlice";
+
+const PAGE_SIZE = 20;
 
 /** The two intake flags. Only shown when they say something: a null
     nameCompliant means "never checked", which is not a finding. */
 const ProductFlags = ({ product }) => {
   const offName = product.nameCompliant === false;
   const sapPending = product.sap?.status === "Pending";
-  // Items mirrored from SAP carry their SAP code with no hand-off status.
-  const sapCode =
-    (product.sap?.status === "Created" || (product.sapCategory && !product.sap?.status)) &&
-    product.sap?.code;
   const catPending = product.sapCategory?.pending;
   const catError = product.sapCategory?.error;
-  if (!offName && !sapPending && !sapCode && !catPending && !catError) return null;
+  if (!offName && !sapPending && !catPending && !catError) return null;
 
   return (
     <div className="flex flex-wrap gap-1 mt-0.5">
@@ -45,9 +47,6 @@ const ProductFlags = ({ product }) => {
       )}
       {sapPending && (
         <span className="badge badge-indigo badge-soft text-[10px]">SAP stock sync on queue</span>
-      )}
-      {sapCode && (
-        <span className="badge badge-emerald badge-soft text-[10px]">SAP {product.sap.code}</span>
       )}
       {catPending && !catError && (
         <span
@@ -65,6 +64,15 @@ const ProductFlags = ({ product }) => {
     </div>
   );
 };
+
+/** The item's SAP code - the only code shown for an item. An item SAP has
+    not numbered yet says so, rather than showing ERPNext's own code. */
+const ItemCode = ({ product }) =>
+  product.sap?.code ? (
+    <div className="mono text-brand-700">{product.sap.code}</div>
+  ) : (
+    <div className="text-[12px] text-slate-500">No SAP code yet</div>
+  );
 
 /** What is on the shelf, over the limit it is judged against. Without the
     limit an amber badge only says "low" — this says how low, and against
@@ -99,12 +107,12 @@ const ValueCell = ({ product }) =>
     </span>
   );
 
-/** Item group, then Sub-category A, then B. A is the level people file and
-    look things up by, so it is always shown, labelled, even when empty. */
+/** Sub-category A, then B. The item group is not shown: every item is in
+    Engineering Stocks. A is the level people file and look things up by, so
+    it is always shown, labelled, even when empty. */
 const CategoryLevels = ({ product }) => (
   <>
-    <div>{product.category}</div>
-    <div className="text-[12px] text-slate-600">A: {product.subCategory || "—"}</div>
+    <div className="text-slate-800">A: {product.subCategory || "—"}</div>
     {product.subCategoryB && (
       <div className="text-[11px] text-slate-500">B: {product.subCategoryB}</div>
     )}
@@ -124,7 +132,7 @@ const RowActions = ({
       <button
         onClick={() => onOpen(product, "category")}
         className="icon-btn icon-btn-brand"
-        title="Category (SAP item group / Sub-category A / B)"
+        title="Category"
         aria-label={`Category of ${product.name}`}
       >
         <FolderTree className="h-4 w-4" />
@@ -133,7 +141,7 @@ const RowActions = ({
     <button
       onClick={() => onOpen(product, "details")}
       className="icon-btn"
-      title="Engineering Stock Details"
+      title="Details"
       aria-label={`Details for ${product.name}`}
     >
       <Eye className="h-4 w-4" />
@@ -142,7 +150,7 @@ const RowActions = ({
       <button
         onClick={() => onOpen(product, "form")}
         className="icon-btn icon-btn-brand"
-        title="Edit (SAP item master)"
+        title="Edit"
         aria-label={`Edit ${product.name}`}
       >
         <Edit className="h-4 w-4" />
@@ -152,7 +160,7 @@ const RowActions = ({
       <button
         onClick={() => onOpen(product, "delete")}
         className="icon-btn icon-btn-danger"
-        title="Delete Engineering Stock"
+        title="Delete"
         aria-label={`Delete ${product.name}`}
       >
         <Trash2 className="h-4 w-4" />
@@ -188,18 +196,22 @@ const ProductList = () => {
   const canEditCategory = user?.role === MAINTENANCE_MANAGER;
   // DELETE /products/:id is the Manager's.
   const canDelete = user?.role === MANAGER;
+  // What an item is worth is the Maintenance Manager's alone (23 Oct 2026).
+  const showValue = maySeeItemValue(user?.role);
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
+
   const [subCategories, setSubCategories] = useState([]);
   const [subCategoriesB, setSubCategoriesB] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("");
+  // No item group filter: every item is in Engineering Stocks.
+  const selectedCategory = "";
   const [selectedSubCategory, setSelectedSubCategory] = useState("");
   const [selectedSubCategoryB, setSelectedSubCategoryB] = useState("");
   const [selectedStoreRoom, setSelectedStoreRoom] = useState("");
+  const [page, setPage] = useState(1);
 
   // Modals Toggles
   const [activeModal, setActiveModal] = useState(null);
@@ -249,15 +261,6 @@ const ProductList = () => {
     }
   };
 
-  const fetchCategories = async () => {
-    try {
-      const { data } = await API.get("/products/categories");
-      setCategories(data);
-    } catch (error) {
-      console.error("Error loading categories:", error);
-    }
-  };
-
   // Sub-category A, scoped to the chosen category when there is one. Without a
   // category it lists every A: A is how people look items up, so it must work
   // on its own.
@@ -289,13 +292,6 @@ const ProductList = () => {
     }
   };
 
-  /** Picking a category drops a sub-category that no longer belongs to it. */
-  const handleCategoryChange = (value) => {
-    setSelectedCategory(value);
-    setSelectedSubCategory("");
-    setSelectedSubCategoryB("");
-  };
-
   const handleSubCategoryChange = (value) => {
     setSelectedSubCategory(value);
     setSelectedSubCategoryB("");
@@ -303,8 +299,12 @@ const ProductList = () => {
 
   useEffect(() => {
     fetchProducts();
-    fetchCategories();
+    // A new search or filter starts again from the first page.
+    setPage(1);
   }, [searchTerm, selectedCategory, selectedSubCategory, selectedSubCategoryB, selectedStoreRoom]);
+
+  // Twenty to a page; pageSlice keeps the page in range when a refresh shrinks the list.
+  const { page: current, rows: pageRows } = pageSlice(products, page, PAGE_SIZE);
 
   useEffect(() => {
     fetchSubCategories();
@@ -321,6 +321,9 @@ const ProductList = () => {
   // The sync is pressed in the top bar, which knows nothing of this list. A run
   // that finishes leaves exactly the quantities it was pressed to replace.
   useSapSyncDone(() => fetchProducts({ silent: true }));
+
+  // The top bar's Refresh: re-read ERPNext with the filters as they are.
+  useErpRefresh(() => fetchProducts({ silent: true }));
 
 
 
@@ -346,17 +349,6 @@ const ProductList = () => {
 
           {/* Filters */}
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3 2xl:flex">
-            {/* Category Select */}
-            <Select
-              value={selectedCategory}
-              onChange={(e) => handleCategoryChange(e.target.value)}
-              options={categories}
-              placeholder="All Categories"
-              className="field field-sm"
-              wrapClassName="w-full 2xl:w-48"
-              aria-label="Filter by category"
-            />
-
             {/* Sub-category A Select (SAP SubTypeA) */}
             <Select
               value={selectedSubCategory}
@@ -434,12 +426,12 @@ const ProductList = () => {
               screen is a sideways scroll and nothing else, so each item gets a
               card and every cell keeps its column header as a label. */}
           <div className="space-y-3 md:hidden">
-            {products.map((product) => (
+            {pageRows.map((product) => (
               <div key={product._id} className="card p-4">
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="cell-title break-words leading-snug">{product.name}</div>
-                    <div className="mono text-brand-700">{product.code}</div>
+                    <ItemCode product={product} />
                     <ProductFlags product={product} />
                   </div>
                 </div>
@@ -448,9 +440,11 @@ const ProductList = () => {
                   <CardRow label="Category">
                     <CategoryLevels product={product} />
                   </CardRow>
-                  <CardRow label="Value">
-                    <ValueCell product={product} />
-                  </CardRow>
+                  {showValue && (
+                    <CardRow label="Value">
+                      <ValueCell product={product} />
+                    </CardRow>
+                  )}
                   <CardRow label="HSN · Tax">
                     <span className="mono text-slate-600">
                       {[product.hsnCode, product.taxRate].filter(Boolean).join(" · ") || "—"}
@@ -484,13 +478,13 @@ const ProductList = () => {
                     <th>Category</th>
                     <th>HSN · Tax</th>
                     <th>Company</th>
-                    <th className="text-right">Value</th>
+                    {showValue && <th className="text-right">Value</th>}
                     <th className="text-center">Stock</th>
                     <th className="text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {products.map((product) => (
+                  {pageRows.map((product) => (
                     <tr key={product._id}>
                       <td>
                         {/* Capped and wrapped, not truncated: a nowrap name sizes the
@@ -501,7 +495,7 @@ const ProductList = () => {
                             <div className="cell-title break-words leading-snug line-clamp-2" title={product.name}>
                               {product.name}
                             </div>
-                            <div className="mono text-brand-700">{product.code}</div>
+                            <ItemCode product={product} />
                             <ProductFlags product={product} />
                           </div>
                         </div>
@@ -515,9 +509,11 @@ const ProductList = () => {
                       <td>
                         <span className="badge badge-slate badge-soft">{product.storeRoom}</span>
                       </td>
-                      <td className="text-right">
-                        <ValueCell product={product} />
-                      </td>
+                      {showValue && (
+                        <td className="text-right">
+                          <ValueCell product={product} />
+                        </td>
+                      )}
                       <td className="text-center">
                         <StockBadge product={product} />
                       </td>
@@ -535,6 +531,15 @@ const ProductList = () => {
               </table>
             </div>
           </div>
+
+          <Pagination
+            className="mt-4"
+            page={current}
+            total={products.length}
+            pageSize={PAGE_SIZE}
+            onPage={setPage}
+            noun="item"
+          />
         </>
       )}
 
@@ -576,7 +581,8 @@ const ProductList = () => {
 
               <div className="modal-body space-y-4">
                 <p className="text-sm text-slate-700">
-                  Delete <strong>{selectedProduct.name}</strong> ({selectedProduct.code})?
+                  Delete <strong>{selectedProduct.name}</strong>
+                  {selectedProduct.sap?.code ? ` (${selectedProduct.sap.code})` : ""}?
                 </p>
                 <div className="note note-rose">
                   <AlertCircle className="h-4 w-4 shrink-0 mt-px" />
@@ -620,9 +626,9 @@ const ProductList = () => {
                     <h4 className="text-base font-semibold text-slate-900 leading-tight">
                       {selectedProduct.name}
                     </h4>
-                    <span className="mono text-brand-700 mt-1 block">
-                      CODE: {selectedProduct.code}
-                    </span>
+                    {selectedProduct.sap?.code && (
+                      <span className="mono text-brand-700 mt-1 block">{selectedProduct.sap.code}</span>
+                    )}
                     <div className="flex flex-wrap items-center gap-2 mt-2">
                       <span className="badge badge-slate badge-soft">
                         {selectedProduct.storeRoom}
@@ -675,14 +681,16 @@ const ProductList = () => {
                       {selectedProduct.quantity} {selectedProduct.unit}
                     </span>
                   </div>
-                  <div className="kv">
-                    <span className="kv-label">Value</span>
-                    <span className="kv-value">
-                      {Number(selectedProduct.unitCost) > 0
-                        ? `${formatCurrency(selectedProduct.unitCost)} per ${selectedProduct.unit || "unit"}`
-                        : "Nil value"}
-                    </span>
-                  </div>
+                  {showValue && (
+                    <div className="kv">
+                      <span className="kv-label">Value</span>
+                      <span className="kv-value">
+                        {Number(selectedProduct.unitCost) > 0
+                          ? `${formatCurrency(selectedProduct.unitCost)} per ${selectedProduct.unit || "unit"}`
+                          : "Nil value"}
+                      </span>
+                    </div>
+                  )}
                   <div className="kv">
                     <span className="kv-label">Min Stock Limit</span>
                     <span className="kv-value">
@@ -701,7 +709,8 @@ const ProductList = () => {
 
                 <div className="kv">
                   <span className="kv-label">Description</span>
-                  <p className="text-[13px] text-slate-700 leading-relaxed">
+                  {/* One part a line, as typed in the app - keep the line breaks. */}
+                  <p className="text-[13px] text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
                     {selectedProduct.description || "No description provided."}
                   </p>
                 </div>

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  CheckCircle2,
+  ArrowRight,
+  Check,
   ChevronDown,
-  ChevronRight,
-  Circle,
+  Clock,
+  Factory,
   Loader2,
   Package,
   Plus,
@@ -14,6 +15,7 @@ import {
   ShieldCheck,
   Trash2,
   Users,
+  Wrench,
   X,
   Ban,
 } from "lucide-react";
@@ -22,6 +24,8 @@ import API from "../../services/api";
 import { outputLabel } from "../../utils/output";
 import { useNotifications } from "../../context/NotificationContext";
 import { useAuth } from "../../context/AuthContext";
+import { useDialog } from "../../context/DialogContext";
+import { useErpRefresh } from "../../hooks/useErpRefresh";
 
 /**
  * One breakdown, in full.
@@ -151,6 +155,9 @@ const BreakdownDetail = ({ id, onClose, onChanged }) => {
     load();
   }, [load]);
 
+  // The top bar's Refresh: read ERPNext again without leaving the screen.
+  useErpRefresh(() => load());
+
   useEffect(() => {
     API.get("/breakdowns/stages").then(({ data }) => setStages(data)).catch(() => {});
     API.get("/breakdowns/lookups").then(({ data }) => setLookups(data)).catch(() => {});
@@ -188,8 +195,13 @@ const BreakdownDetail = ({ id, onClose, onChanged }) => {
 
   return (
     <div className="modal-backdrop items-stretch justify-end p-0" onClick={onClose}>
+      {/* A panel from the right on the canvas grey, so each section's white
+          card stands apart from the next. */}
       <div
-        className="bg-white w-full max-w-3xl h-full overflow-y-auto shadow-2xl print:max-w-none print:shadow-none"
+        role="dialog"
+        aria-modal="true"
+        aria-label={record ? `Breakdown ${record.id}` : "Breakdown"}
+        className="h-dvh w-full max-w-3xl overflow-y-auto bg-canvas shadow-2xl animate-drawer-in print:max-w-none print:bg-white print:shadow-none"
         onClick={(e) => e.stopPropagation()}
       >
         {loading ? (
@@ -210,7 +222,7 @@ const BreakdownDetail = ({ id, onClose, onChanged }) => {
           <>
             <Header record={record} onClose={onClose} />
 
-            <div className="px-6 pb-10 space-y-6">
+            <div className="space-y-5 px-4 pb-10 pt-5 sm:px-6">
               <Rail record={record} reached={reached} />
 
               {stage ? (
@@ -244,12 +256,42 @@ const BreakdownDetail = ({ id, onClose, onChanged }) => {
   );
 };
 
+/** The header's icon tile takes the colour of where the breakdown stands. */
+const STATE_TILE = {
+  Reported: "bg-rose-50 text-rose-600 ring-rose-100",
+  Attended: "bg-orange-50 text-orange-600 ring-orange-100",
+  "Under Repair": "bg-amber-50 text-amber-600 ring-amber-100",
+  Repaired: "bg-emerald-50 text-emerald-600 ring-emerald-100",
+  Closed: "bg-slate-100 text-slate-500 ring-slate-200",
+  Cancelled: "bg-slate-100 text-slate-500 ring-slate-200",
+};
+
 const Header = ({ record, onClose }) => (
-  <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-6 py-4 print:static">
-    <div className="flex items-start gap-3">
+  <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur sm:px-6 print:static">
+    <div className="flex items-start gap-3 sm:gap-4">
+      <span
+        className={`hidden h-12 w-12 shrink-0 place-items-center rounded-xl ring-1 sm:grid ${
+          STATE_TILE[record.state] || STATE_TILE.Closed
+        }`}
+      >
+        <Wrench className="h-6 w-6" aria-hidden="true" />
+      </span>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="mono text-sm font-semibold text-slate-900">{record.id}</span>
+        <p className="mono font-semibold text-slate-500">{record.id}</p>
+        <h2 className="mt-0.5 text-xl font-bold tracking-tight text-slate-900 text-balance">
+          {record.machineName}
+        </h2>
+        <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-slate-500">
+          <span className="inline-flex items-center gap-1.5">
+            <Factory className="h-3.5 w-3.5" aria-hidden="true" />
+            {record.plant}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+            Stopped {when(record.stoppedAt)}
+          </span>
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className={`badge ${STATE_STYLE[record.state] || "badge-slate"}`}>
             {record.state}
           </span>
@@ -268,20 +310,18 @@ const Header = ({ record, onClose }) => (
             </span>
           )}
         </div>
-        <h2 className="mt-1 text-lg font-bold tracking-tight text-slate-900 text-balance">
-          {record.machineName}
-        </h2>
-        <p className="text-xs text-slate-500">
-          {record.plant} · stopped {when(record.stoppedAt)}
-        </p>
       </div>
-      <div className="flex items-center gap-1 print:hidden">
-        <button className="btn btn-sm btn-neutral" onClick={() => window.print()}>
-          <Printer className="h-4 w-4" />
-          Print
+      <div className="flex shrink-0 items-center gap-2 print:hidden">
+        <button
+          className="btn btn-sm btn-neutral btn-icon sm:w-auto sm:px-3"
+          onClick={() => window.print()}
+          aria-label="Print"
+        >
+          <Printer className="h-4 w-4" aria-hidden="true" />
+          <span className="hidden sm:inline">Print</span>
         </button>
-        <button className="modal-close" onClick={onClose} aria-label="Close">
-          <X className="h-4 w-4" />
+        <button className="btn btn-sm btn-neutral btn-icon" onClick={onClose} aria-label="Close">
+          <X className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
     </div>
@@ -311,35 +351,50 @@ const Rail = ({ record, reached }) => {
     Closed: record.closedAt,
   };
 
+  // A closed breakdown has finished the journey: every step is done and none
+  // is "current".
+  const finished = record.state === "Closed";
+
   return (
-    <div className="card p-4">
-      <ol className="flex flex-wrap items-center gap-x-1 gap-y-2">
+    <div className="card px-3 py-5 sm:px-6">
+      <ol className="flex">
         {JOURNEY.map((state, i) => {
           const passed = i <= reached;
+          const current = i === reached && !finished;
           return (
-            <li key={state} className="flex items-center gap-1">
-              <div className="flex items-center gap-1.5">
-                {passed ? (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                ) : (
-                  <Circle className="h-4 w-4 text-slate-300 shrink-0" />
-                )}
-                <div className="leading-tight">
-                  <span
-                    className={`text-xs font-semibold ${
-                      i === reached ? "text-brand-700" : passed ? "text-slate-700" : "text-slate-400"
-                    }`}
-                  >
-                    {state}
-                  </span>
-                  {at[state] && passed && (
-                    <span className="block text-[10px] text-slate-400">{day(at[state])}</span>
-                  )}
-                </div>
-              </div>
+            <li
+              key={state}
+              aria-current={current ? "step" : undefined}
+              className="relative flex flex-1 flex-col items-center text-center"
+            >
+              {/* The line to the next step, green once that step is reached. */}
               {i < JOURNEY.length - 1 && (
-                <ChevronRight className="h-3.5 w-3.5 text-slate-300 shrink-0" />
+                <span
+                  aria-hidden="true"
+                  className={`absolute left-1/2 top-4 h-0.5 w-full ${i < reached ? "bg-emerald-500" : "bg-slate-200"}`}
+                />
               )}
+              <span
+                className={`relative grid h-8 w-8 place-items-center rounded-full border-2 text-[12px] font-bold ${
+                  current
+                    ? "border-brand-600 bg-brand-600 text-white ring-4 ring-brand-100"
+                    : passed
+                      ? "border-emerald-500 bg-emerald-500 text-white"
+                      : "border-slate-200 bg-white text-slate-400"
+                }`}
+              >
+                {passed && !current ? <Check className="h-4 w-4" aria-hidden="true" /> : i + 1}
+              </span>
+              <span
+                className={`mt-2 px-0.5 text-[11px] font-semibold leading-tight sm:text-[12px] ${
+                  current ? "text-brand-700" : passed ? "text-slate-800" : "text-slate-400"
+                }`}
+              >
+                {state}
+              </span>
+              <span className="mt-0.5 text-[10px] text-slate-500 sm:text-[11px]">
+                {passed && at[state] ? day(at[state]) : " "}
+              </span>
             </li>
           );
         })}
@@ -372,7 +427,7 @@ const Rail = ({ record, reached }) => {
  * made to disappear.
  */
 const CancelReport = ({ record, stages, user, onDone }) => {
-  const [open, setOpen] = useState(false);
+  const { confirm } = useDialog();
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState("");
 
@@ -382,6 +437,14 @@ const CancelReport = ({ record, stages, user, onDone }) => {
   if (!(stage.allowedRoles || []).includes(user.role)) return null;
 
   const submit = async () => {
+    const ok = await confirm({
+      title: `${stage.title}?`,
+      message: stage.blurb || `${record.id} will be closed as cancelled.`,
+      confirmLabel: stage.title,
+      cancelLabel: "Keep it",
+      tone: "danger",
+    });
+    if (!ok) return;
     setSaving(true);
     setProblem("");
     try {
@@ -398,24 +461,19 @@ const CancelReport = ({ record, stages, user, onDone }) => {
   };
 
   return (
-    <div className="print:hidden">
-      {!open ? (
-        <button className="btn btn-sm btn-neutral" onClick={() => setOpen(true)}>
-          <Ban className="h-3.5 w-3.5" />
-          {stage.title}
-        </button>
-      ) : (
-        <div className="note note-amber flex-col items-start gap-2">
-          <p>{stage.blurb}</p>
-          {problem && <p className="text-rose-600">{problem}</p>}
-          <div className="flex gap-2">
-            <button className="btn btn-sm btn-neutral" onClick={() => setOpen(false)} disabled={saving}>
-              Keep it
-            </button>
-            <button className="btn btn-sm btn-primary" onClick={submit} disabled={saving}>
-              {saving ? "Cancelling…" : stage.title}
-            </button>
-          </div>
+    <div className="space-y-2 print:hidden">
+      <button className="btn btn-sm btn-danger-soft" onClick={submit} disabled={saving}>
+        {saving ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+        ) : (
+          <Ban className="h-3.5 w-3.5" aria-hidden="true" />
+        )}
+        {saving ? "Cancelling…" : stage.title}
+      </button>
+      {problem && (
+        <div className="note note-rose">
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{problem}</span>
         </div>
       )}
     </div>
@@ -551,16 +609,19 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
   };
 
   return (
-    <form className="card p-5 border-brand-500/30 print:hidden" onSubmit={submit}>
-      <div className="flex items-center gap-2.5 mb-1">
-        <span className="panel-icon">
-          <ChevronRight className="h-4 w-4" />
+    <form className="card overflow-hidden border-brand-200 print:hidden" onSubmit={submit}>
+      {/* The one thing this record is waiting for, headed as such. */}
+      <div className="flex items-start gap-3 border-b border-brand-100 bg-brand-50/70 px-5 py-4">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-600 text-white">
+          <ArrowRight className="h-5 w-5" aria-hidden="true" />
         </span>
-        <div>
-          <h3 className="section-title">{stage.title}</h3>
-          {stage.blurb && <p className="panel-sub">{stage.blurb}</p>}
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-700">Next step</p>
+          <h3 className="text-base font-semibold tracking-tight text-slate-900">{stage.title}</h3>
+          {stage.blurb && <p className="mt-0.5 text-[13px] text-slate-600">{stage.blurb}</p>}
         </div>
       </div>
+      <div className="p-5">
 
       {problem && (
         <div className="note note-rose mt-3">
@@ -705,10 +766,16 @@ const StageForm = ({ action, stage, record, lookups, onDone }) => {
         )}
       </div>
 
-      <div className="mt-5 flex justify-end">
-        <button type="submit" className="btn btn-primary" disabled={saving}>
+      <div className="mt-5 flex justify-end border-t border-slate-100 pt-4">
+        <button type="submit" className="btn btn-primary w-full sm:w-auto" disabled={saving}>
+          {saving ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <Check className="h-4 w-4" aria-hidden="true" />
+          )}
           {saving ? "Saving…" : `Save and mark ${stage.to}`}
         </button>
+      </div>
       </div>
     </form>
   );
@@ -731,9 +798,8 @@ const splitOf = (r) => {
     return h < 0 ? null : h;
   };
   return {
-    // Stopped until work started, then work until it ran again. There is no
-    // third interval any more: nothing sits between the report and the repair.
-    response: gap(r.stoppedAt, r.repairStartedAt),
+    // Work until it ran again. The interval before it is shown as the response
+    // time (reported until attended), measured by the server.
     repair: gap(r.repairStartedAt, r.completedAt),
   };
 };
@@ -945,7 +1011,7 @@ const Spares = ({ rows, onChange, store, loadError }) => {
                 <div className="col-span-7 min-w-0">
                   <div className="text-sm text-slate-800 break-words leading-snug">{row.description}</div>
                   <div className="mono text-[11px] text-slate-500">
-                    {item ? `SAP ${item.sapCode} · ${available} ${item.unit} available` : row.item_code}
+                    {item ? `SAP ${item.sapCode} · ${available} ${item.unit} available` : ""}
                   </div>
                 </div>
                 <div className="col-span-4">
@@ -1261,14 +1327,16 @@ const Report = ({ record, user, onChanged }) => {
         <KV label="Plant" value={record.plant} />
         <KV label="Stopped at" value={when(record.stoppedAt)} />
         <KV label="Production stopped" value={record.productionStopped ? "Yes" : "No"} />
-        <KV label="Reported by" value={record.reportedBy} />
+        <KV label="Reported by" value={record.reportedByName || record.reportedBy} />
         <KV label="What happened" value={record.whatHappened} wide />
       </Block>
 
       {record.attendedAt && (
         <Block title="Attended">
-          <KV label="Attended by" value={record.attendedBy} />
+          <KV label="Attended by" value={record.attendedByName || record.attendedBy} />
           <KV label="Attended at" value={when(record.attendedAt)} />
+          {/* Reported until attended, measured by the server from the two stamps. */}
+          <KV label="Response time" value={hours(record.responseHours)} />
         </Block>
       )}
 
@@ -1288,9 +1356,10 @@ const Report = ({ record, user, onChanged }) => {
             )}
           />
           <KV label="Labour" value={record.labourHours ? `${record.labourHours} person-hours` : ""} />
-          {/* Two intervals, not three: nothing sits between the report and the
-              start of work any more. */}
-          <KV label="Time before work started" value={hours(splitOf(record).response)} />
+          {/* Response time, reported until attended, in place of the old "time
+              before work started" (stopped until repair began): the plant
+              asked for the one measure the list and the report also use. */}
+          <KV label="Response time" value={hours(record.responseHours)} />
           <KV label="Time under repair" value={hours(splitOf(record).repair)} />
           <KV label="What was done" value={record.actionsPerformed} wide />
           {record.spares?.length > 0 && (
@@ -1341,10 +1410,12 @@ const Report = ({ record, user, onChanged }) => {
 };
 
 const Block = ({ title, children }) => (
-  <div className="card p-5">
-    <h3 className="section-title mb-3">{title}</h3>
-    <div className="grid sm:grid-cols-2 gap-x-6 gap-y-3">{children}</div>
-  </div>
+  <section className="card overflow-hidden">
+    <h3 className="border-b border-slate-100 px-5 py-3.5 text-[15px] font-semibold tracking-tight text-slate-900">
+      {title}
+    </h3>
+    <div className="grid gap-x-6 gap-y-4 p-5 sm:grid-cols-2">{children}</div>
+  </section>
 );
 
 const KV = ({ label, value, wide }) =>
@@ -1398,7 +1469,7 @@ const SpareList = ({ record, user, onChanged }) => {
         {record.spares.map((s, i) => (
           <li key={i}>
             {s.qtyRequired} &times; {s.description}
-            {s.itemCode ? ` (${s.itemCode})` : ""}
+            {s.sapCode ? ` (${s.sapCode})` : ""}
           </li>
         ))}
       </ul>

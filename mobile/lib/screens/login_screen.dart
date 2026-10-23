@@ -8,6 +8,7 @@ import '../core/palette.dart';
 import '../core/toast.dart';
 import '../state/auth_provider.dart';
 import '../state/server_provider.dart';
+import '../widgets/cmms_mark.dart';
 import '../widgets/common.dart';
 import '../widgets/server_status_banner.dart';
 
@@ -86,21 +87,7 @@ class _LoginScreenState extends State<LoginScreen> {
       backgroundColor: AppColors.canvas,
       body: Stack(
         children: [
-          // A soft teal wash behind the top of the page, mirroring the hero
-          // tile on the dashboard.
-          Container(
-            height: 260,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  AppColors.primary.withValues(alpha: 0.10),
-                  AppColors.canvas.withValues(alpha: 0),
-                ],
-              ),
-            ),
-          ),
+          const Positioned.fill(child: _FloatingBackdrop()),
           SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -118,11 +105,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           borderRadius: BorderRadius.circular(18),
                           boxShadow: AppShadows.raised,
                         ),
-                        child: const Icon(
-                          Icons.widgets_outlined,
-                          size: 38,
-                          color: Colors.white,
-                        ),
+                        child: const CmmsMark(size: 38),
                       ),
                       const SizedBox(height: 14),
                       const Text(
@@ -133,11 +116,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.6,
                         ),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Stock Management System',
-                        style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                       ),
                       const SizedBox(height: 28),
 
@@ -185,7 +163,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                                 const SizedBox(height: 16),
                               ],
-                              const _FieldLabel('ERPNext Email'),
+                              const _FieldLabel('Email'),
                               TextFormField(
                                 controller: _email,
                                 textInputAction: TextInputAction.next,
@@ -198,7 +176,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                 style: const TextStyle(
                                     fontSize: 14, color: AppColors.textStrong),
                                 decoration: const InputDecoration(
-                                  hintText: 'you@mannarubber.com',
                                   prefixIcon: Icon(Icons.mail_outline, size: 18),
                                 ),
                                 validator: (value) {
@@ -243,6 +220,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                   onPressed: _loading ? null : _submit,
                                   style: FilledButton.styleFrom(
                                     padding: EdgeInsets.zero,
+                                    elevation: 3,
+                                    shadowColor: AppColors.primary.withValues(alpha: 0.5),
                                   ),
                                   child: _loading
                                       ? const SizedBox(
@@ -281,6 +260,60 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
+/// Soft orange light behind the sign-in: three blurred discs in the brand
+/// orange, faint enough that the card stays the thing the eye lands on. Still
+/// rather than animated - a looping animation on the first screen costs
+/// battery on a shop-floor phone and gives a test's pumpAndSettle nothing to
+/// settle on.
+class _FloatingBackdrop extends StatelessWidget {
+  const _FloatingBackdrop();
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+        child: LayoutBuilder(
+          builder: (context, box) {
+            final w = box.maxWidth;
+            return Stack(
+              clipBehavior: Clip.hardEdge,
+              children: [
+                _glow(left: -w * 0.35, top: -w * 0.30, size: w * 0.95, alpha: 0.20),
+                _glow(right: -w * 0.30, top: w * 0.18, size: w * 0.60, alpha: 0.12),
+                _glow(left: w * 0.10, bottom: -w * 0.45, size: w * 0.90, alpha: 0.10),
+              ],
+            );
+          },
+        ),
+      );
+
+  static Widget _glow({
+    double? left,
+    double? right,
+    double? top,
+    double? bottom,
+    required double size,
+    required double alpha,
+  }) =>
+      Positioned(
+        left: left,
+        right: right,
+        top: top,
+        bottom: bottom,
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [
+                AppColors.primary.withValues(alpha: alpha),
+                AppColors.primary.withValues(alpha: 0),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
 class _FieldLabel extends StatelessWidget {
   const _FieldLabel(this.text);
 
@@ -290,12 +323,11 @@ class _FieldLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(
-          text.toUpperCase(),
+          text,
           style: const TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 10.5,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1,
+            color: AppColors.textBody,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
           ),
         ),
       );

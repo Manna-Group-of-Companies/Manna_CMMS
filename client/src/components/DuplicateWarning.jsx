@@ -100,7 +100,6 @@ const DuplicateWarning = ({ matches = [], checking = false, heading }) => {
             <div className="min-w-0">
               <p className="font-bold text-slate-900 text-xs break-words">{match.name}</p>
               <p className="text-[11px] text-slate-500 flex flex-wrap items-center gap-x-2">
-                <span>{match.code}</span>
                 <span className="inline-flex items-center gap-0.5">
                   <MapPin className="h-3 w-3" />
                   {match.storeRoom}

@@ -327,7 +327,7 @@ const Users = () => {
                       value={form.name}
                       onChange={(e) => setForm({ ...form, name: e.target.value })}
                       required
-                      placeholder="e.g. Night Shift Supervisor"
+                     
                       className="field"
                     />
                   </div>
@@ -369,7 +369,7 @@ const Users = () => {
                       type="email"
                       value={form.email}
                       onChange={(e) => setForm({ ...form, email: e.target.value })}
-                      placeholder="name@company.com"
+                     
                       className="field"
                     />
                   </div>
@@ -387,7 +387,7 @@ const Users = () => {
                   onChange={(e) => setPin(onlyDigits(e.target.value))}
                   maxLength={PIN_LENGTH}
                   required={editing !== "new"}
-                  placeholder="0000"
+                 
                   // Wider and monospaced: a PIN is read back digit by digit.
                   className="field h-12 text-center text-lg font-mono tracking-[0.6em] indent-[0.6em] placeholder-slate-300"
                 />

@@ -494,11 +494,17 @@ export const readSapTree = async () => {
   const tree = new Map();
   const node = (name) => {
     const key = levelKey(name);
-    if (!tree.has(key)) tree.set(key, { name, companies: new Set(), itemCount: 0, pending: 0, subs: new Map() });
+    if (!tree.has(key)) tree.set(key, { name, companies: new Set(), itemCount: 0, pending: 0, subs: new Map(), engineering: false });
     return tree.get(key);
   };
   for (const [abbr, entry] of Object.entries(map)) {
-    for (const g of entry.groups || []) node(g.name).companies.add(abbr);
+    for (const g of entry.groups || []) {
+      const n = node(g.name);
+      n.companies.add(abbr);
+      // One of SAP's engineering item groups, as opposed to a group that is
+      // here only because some item is filed under it.
+      n.engineering = true;
+    }
   }
 
   let notFromSap = 0;
@@ -512,29 +518,46 @@ export const readSapTree = async () => {
     top.companies.add(p.sapCategory.company);
     top.itemCount += 1;
     if (p.sapCategory.pending) top.pending += 1;
+    // Per company as well, so a screen filtered to one company counts only
+    // that company's items at every level.
+    const co = p.sapCategory.company;
+    const bump = (n) => {
+      n.byCompany ??= {};
+      n.byCompany[co] = (n.byCompany[co] || 0) + 1;
+    };
+    bump(top);
 
     const aKey = levelKey(p.subCategory);
     if (!top.subs.has(aKey)) top.subs.set(aKey, { name: p.subCategory, itemCount: 0, subs: new Map() });
     const a = top.subs.get(aKey);
     a.itemCount += 1;
+    bump(a);
 
     const bKey = levelKey(p.subCategoryB);
     if (!a.subs.has(bKey)) a.subs.set(bKey, { name: p.subCategoryB, itemCount: 0 });
     a.subs.get(bKey).itemCount += 1;
+    bump(a.subs.get(bKey));
   }
 
   const byName = (x, y) => (x.name || "\uffff").localeCompare(y.name || "\uffff");
   const categories = [...tree.values()]
     .map((c) => ({
       name: c.name,
+      // True for SAP's engineering item groups; false for a group that is in
+      // the tree only because some item is filed under it.
+      engineering: c.engineering,
       companies: [...c.companies].sort(),
       itemCount: c.itemCount,
+      byCompany: c.byCompany || {},
       pending: c.pending,
       subCategories: [...c.subs.values()]
         .map((a) => ({
           name: a.name, // "" = items with no Sub-category A
           itemCount: a.itemCount,
-          subCategoriesB: [...a.subs.values()].map((b) => ({ name: b.name, itemCount: b.itemCount })).sort(byName),
+          byCompany: a.byCompany || {},
+          subCategoriesB: [...a.subs.values()]
+            .map((b) => ({ name: b.name, itemCount: b.itemCount, byCompany: b.byCompany || {} }))
+            .sort(byName),
         }))
         .sort(byName),
     }))

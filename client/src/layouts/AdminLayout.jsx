@@ -3,18 +3,23 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth, homePathFor, canSeeAdminConsole } from "../context/AuthContext";
 import Sidebar from "../components/Sidebar";
 import Navbar from "../components/Navbar";
+import { useErpRefreshFallback } from "../hooks/useErpRefresh";
 
 const AdminLayout = () => {
   const { user, loading } = useAuth();
   const location = useLocation();
   // The sidebar is a drawer below lg; this is what opens it.
   const [menuOpen, setMenuOpen] = useState(false);
+  // Refresh on a screen with no reload of its own remounts it, so every view
+  // offers the top bar's Refresh (23 Oct 2026).
+  const [reloadKey, setReloadKey] = useState(0);
+  useErpRefreshFallback(() => setReloadKey((k) => k + 1));
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-canvas text-slate-900 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-brand-500"></div>
+      <div className="min-h-dvh bg-canvas text-slate-900 flex items-center justify-center">
+        <div role="status" className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-brand-500" aria-hidden="true"></div>
           <span className="text-sm font-medium text-slate-600">Loading your session...</span>
         </div>
       </div>
@@ -40,6 +45,7 @@ const AdminLayout = () => {
    * "/admin/breakdown-report" is not answered by "/admin/breakdowns".
    */
   const PAGE_META = [
+    ["/admin/dashboard", "Dashboard", ""],
     ["/admin/breakdown-report", "Breakdown Report", "Downtime and reliability across the group"],
     ["/admin/breakdowns", "Breakdowns", ""],
     // No strapline: the screen is named plainly enough, and a sentence under
@@ -57,19 +63,16 @@ const AdminLayout = () => {
       "Purchase Requests",
       "Requests sent to SAP, and the purchase orders raised from them",
     ],
-    [
-      "/admin/low-value-purchases",
-      "Miscellaneous Requests",
-      "Purchase and repair requests for every company",
-    ],
-    ["/admin/categories", "Categories", "The category tree items are filed under"],
+    // Titled by the page itself (its header carries the date and time too), so
+    // the bar above stays empty rather than saying it twice.
+    ["/admin/low-value-purchases", "", ""],
+    ["/admin/settings", "Settings", ""],
     [
       "/admin/low-stock",
       "Low Stock",
       "Every item at or below its minimum, and what refilling it takes",
     ],
     ["/admin/assets", "Asset Management", "The machine register and everything known about each"],
-    ["/admin/technicians", "Maintenance Team", "Who may be named on a repair"],
     ["/admin/electrical", "Electrical Systems", "Panels, supplies and what they feed"],
     ["/admin/scrap", "Scrap & Consumption", "Value written off across the stores"],
     [
@@ -100,32 +103,32 @@ const AdminLayout = () => {
     "/admin/products",
     "/admin/goods-receipts",
     "/admin/purchase-requests",
-    "/admin/categories",
+    "/admin/low-stock",
+    "/admin/settings",
   ];
   const onSapScreen = SAP_SYNC_PATHS.some((path) => location.pathname.startsWith(path));
 
-  // The Purchase Request Sheet is a spreadsheet: it gets the whole width,
-  // where every other screen is capped to keep its tables readable.
-  const fullWidth = location.pathname.startsWith("/admin/low-value-purchases");
-
   return (
-    <div className="min-h-screen bg-canvas flex">
+    <div className="min-h-dvh bg-canvas flex">
+      <a href="#main" className="skip-link">
+        Skip to content
+      </a>
       {/* Sidebar Navigation */}
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
 
       {/* Main Content Area */}
-      <div className="flex-1 min-w-0 flex flex-col h-screen max-h-[100dvh] overflow-hidden">
+      <div className="flex-1 min-w-0 flex flex-col h-dvh overflow-hidden">
         <Navbar
           title={title}
           subtitle={subtitle}
           onMenuClick={() => setMenuOpen(true)}
           sapSync={onSapScreen}
         />
-        <main className="flex-1 overflow-y-auto bg-canvas">
+        <main id="main" tabIndex={-1} className="focus:outline-none flex-1 overflow-y-auto bg-canvas">
           {/* Capped so the tables do not stretch to the full width of a very
               wide monitor, which leaves the eye travelling across empty cells. */}
-          <div className={fullWidth ? "w-full p-2 sm:p-3" : "mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8"}>
-            <Outlet />
+          <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">
+            <Outlet key={reloadKey} />
           </div>
         </main>
       </div>

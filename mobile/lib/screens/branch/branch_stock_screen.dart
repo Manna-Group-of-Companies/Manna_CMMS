@@ -213,7 +213,7 @@ class _BranchStockTable extends StatelessWidget {
       cellsOf: (context, item) {
         final (_, color) = _status(item);
         return [
-          TableTitleCell(title: item.name, subtitle: item.code, imageUrl: item.image),
+          TableTitleCell(title: item.name, subtitle: item.category, imageUrl: item.image),
           TableNumberCell(
             value: '${item.quantity}',
             unit: item.unit,
@@ -231,7 +231,6 @@ class _BranchStockTable extends StatelessWidget {
         final (label, color) = _status(item);
         return TableDetail(
           lines: [
-            TableDetailLine(label: 'Code', value: item.code),
             TableDetailLine(label: 'Category', value: item.category),
             TableDetailLine(label: 'In company', value: '${item.quantity} ${item.unit}'),
             TableDetailLine(label: 'Minimum', value: '${item.minStock} ${item.unit}'),

@@ -154,7 +154,7 @@ const PurchaseOrderModal = ({ request, onClose, onSaved }) => {
           taxCode: l.taxCode,
         })),
       });
-      showToast(`PO for ${data.id} saved. The SAP sync posts it.`, "success");
+      showToast("Purchase order saved. The SAP sync posts it.", "success");
       onSaved?.(data);
       onClose();
     } catch (err) {
@@ -175,9 +175,9 @@ const PurchaseOrderModal = ({ request, onClose, onSaved }) => {
             {again ? "Make the PO again" : "Make PO"}
           </h3>
           <p className="modal-sub">
-            {request.id}
-            {request.sapDocNumber ? ` · SAP PR ${request.sapDocNumber}` : ""} ·{" "}
-            {request.companyName || request.company}
+            {[request.sapDocNumber && `SAP PR ${request.sapDocNumber}`, request.companyName || request.company]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
         <button onClick={onClose} className="modal-close" aria-label="Close">
@@ -335,7 +335,7 @@ const PurchaseOrderModal = ({ request, onClose, onSaved }) => {
                             <td>
                               <div className="min-w-[160px] max-w-[280px]">
                                 <div className="cell-title break-words leading-snug">{l.name}</div>
-                                <div className="mono text-[11px] text-slate-500">SAP {l.sapItemCode || l.itemCode}</div>
+                                <div className="mono text-[11px] text-slate-500">SAP {l.sapItemCode}</div>
                               </div>
                             </td>
                             <td className="text-right whitespace-nowrap text-slate-700">

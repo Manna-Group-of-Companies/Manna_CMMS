@@ -216,7 +216,7 @@ const PurchaseRequestModal = ({ product = null, products = null, onClose, onSave
           remarks: l.remarks.trim(),
         })),
       });
-      showToast(`Purchase request ${data.id} saved. SAP gets it within a minute.`, "success");
+      showToast("Purchase request saved. SAP gets it within a minute.", "success");
       onSaved?.();
       onClose();
     } catch (err) {
@@ -487,7 +487,7 @@ const PurchaseRequestModal = ({ product = null, products = null, onClose, onSave
                   className="field field-area"
                   rows={2}
                   maxLength={250}
-                  placeholder="Breakdown of mixer 3 / below minimum"
+                 
                   required
                 />
               </div>

@@ -9,6 +9,7 @@ import '../../models/maintenance.dart';
 import '../../router.dart';
 import '../../state/auth_provider.dart';
 import '../../widgets/common.dart';
+import '../../widgets/work_widgets.dart';
 import 'stage_form.dart';
 
 /// One breakdown, and whatever step it is sitting on.
@@ -88,6 +89,14 @@ class _BreakdownDetailScreenState extends State<BreakdownDetailScreen> {
     final next = record == null || record.nextAction.isEmpty ? null : _stages[record.nextAction];
     final mayTakeNext = !viewOnly && next != null && next.allows(role);
 
+    // Attending is the one step the view-only phone still takes: it records
+    // only that maintenance has seen it, and the person who asked is waiting
+    // on exactly that. Who may is still the server's list.
+    final mayAttend = record != null &&
+        record.nextAction == 'Attend' &&
+        next != null &&
+        next.allows(role);
+
     // Withdrawing a report that should not have been raised. Only while it is
     // still Reported: once maintenance has started there is something real to
     // account for, and it is closed rather than made to disappear.
@@ -102,7 +111,7 @@ class _BreakdownDetailScreenState extends State<BreakdownDetailScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(record?.machineName ?? 'Breakdown'),
+          title: const Text('Breakdown Details'),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => Navigator.of(context).pop(_changed),
@@ -122,7 +131,13 @@ class _BreakdownDetailScreenState extends State<BreakdownDetailScreen> {
                     children: [
                       _Summary(record: record!),
                       const SizedBox(height: 12),
-                      if (mayTakeNext)
+                      if (mayAttend)
+                        AttendCard(
+                          stage: next,
+                          busy: _busy,
+                          onAttend: () => _advance('Attend', const {}),
+                        )
+                      else if (mayTakeNext)
                         StageForm(
                           key: ValueKey(record.nextAction),
                           stage: next,
@@ -167,60 +182,81 @@ class _Summary extends StatelessWidget {
   final Breakdown record;
 
   @override
-  Widget build(BuildContext context) => AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          WorkDetailHeader(
+            icon: Icons.precision_manufacturing_outlined,
+            title: record.machineName.isEmpty ? record.machine : record.machineName,
+            code: record.id,
+            priority: record.priority,
+            state: record.state,
+            extra: [
+              if (record.repeatFailure)
+                const TintChip('Repeat failure', color: AppColors.danger),
+            ],
+          ),
+          const SizedBox(height: 14),
+          AppCard(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Column(
               children: [
-                Expanded(child: MonoText(record.id, fontSize: 13)),
-                StatusBadge(record.state),
+                InfoRow(
+                  icon: Icons.event_outlined,
+                  label: 'Stopped at',
+                  value: formatDateTime(record.stoppedAt),
+                ),
+                InfoRow(
+                  icon: Icons.person_outline,
+                  label: 'Reported by',
+                  value: record.reportedBy,
+                ),
+                if (record.attendedAt != null)
+                  InfoRow(
+                    icon: Icons.engineering_outlined,
+                    label: 'Attended',
+                    value: '${formatDateTime(record.attendedAt)} · ${record.attendedBy}',
+                  ),
+                if (record.responseHours != null)
+                  InfoRow(
+                    icon: Icons.timer_outlined,
+                    label: 'Response time',
+                    value: formatHours(record.responseHours!),
+                  ),
+                InfoRow(
+                  icon: Icons.precision_manufacturing_outlined,
+                  label: 'Machine',
+                  value: record.machine,
+                ),
+                InfoRow(
+                  icon: Icons.location_on_outlined,
+                  label: 'Plant',
+                  value: record.plant,
+                ),
+                if (record.waitingOn.isNotEmpty)
+                  InfoRow(
+                    icon: Icons.hourglass_empty_rounded,
+                    label: 'Waiting on',
+                    value: record.waitingOn,
+                  ),
               ],
             ),
-            const SizedBox(height: 10),
-            Text(
-              record.whatHappened,
-              style: const TextStyle(fontSize: 14, color: AppColors.textBody),
-            ),
+          ),
+          const SizedBox(height: 12),
+          TextSection(title: 'What happened', text: record.whatHappened),
+          if (record.failureMode.isNotEmpty) ...[
             const SizedBox(height: 12),
-            _Line('Machine', '${record.machineName} — ${record.machine}'),
-            _Line('Plant', record.plant),
-            _Line('Stopped at', formatDateTime(record.stoppedAt)),
-            if (record.attendedAt != null)
-              _Line('Attended', '${formatDateTime(record.attendedAt)} · ${record.attendedBy}'),
-            if (record.priority.isNotEmpty) _Line('Urgency', record.priority),
-            if (record.failureMode.isNotEmpty) _Line('Failure mode', record.failureMode),
-            if (record.actionsPerformed.isNotEmpty)
-              _Line('What was done', record.actionsPerformed),
-            if (record.rootCause.isNotEmpty) _Line('Root cause', record.rootCause),
-            if (record.waitingOn.isNotEmpty) _Line('Waiting on', record.waitingOn),
+            TextSection(title: 'Failure mode', text: record.failureMode),
           ],
-        ),
-      );
-}
-
-class _Line extends StatelessWidget {
-  const _Line(this.label, this.value);
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 110,
-              child: Text(
-                label,
-                style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
-              ),
-            ),
-            Expanded(child: Text(value, style: const TextStyle(fontSize: 13))),
+          if (record.actionsPerformed.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            TextSection(title: 'What was done', text: record.actionsPerformed),
           ],
-        ),
+          if (record.rootCause.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            TextSection(title: 'Root cause', text: record.rootCause),
+          ],
+        ],
       );
 }
 

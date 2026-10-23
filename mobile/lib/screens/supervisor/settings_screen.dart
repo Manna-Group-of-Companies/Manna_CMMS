@@ -70,29 +70,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _confirmSignOut() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Sign out', style: TextStyle(fontSize: 17)),
-        content: const Text(
-          'Are you sure you want to sign out?',
-          style: TextStyle(color: AppColors.textSecondary, fontSize: 13.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.dangerDeep),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Sign Out'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true && mounted) {
+    final confirmed = await confirmSignOut(context);
+    if (confirmed && mounted) {
       await context.read<AuthProvider>().logout();
     }
   }
@@ -103,7 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final summary = _summary;
 
     return AppShell(
-      title: 'Settings',
+      title: 'Profile',
       child: RefreshIndicator(
         onRefresh: _load,
         color: AppColors.primary,
@@ -125,23 +104,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 16),
                   Row(
                     children: [
-                      Container(
-                        height: 58,
-                        width: 58,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary.withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
-                          border:
-                              Border.all(color: AppColors.primary.withValues(alpha: 0.22)),
-                        ),
-                        child: Icon(
-                          user?.isBranch == true
-                              ? Icons.warehouse_outlined
-                              : Icons.person_outline,
-                          size: 28,
-                          color: AppColors.primaryDeep,
-                        ),
-                      ),
+                      const AccountAvatar(size: 60),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(

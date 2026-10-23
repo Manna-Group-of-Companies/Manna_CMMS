@@ -15,6 +15,7 @@ import {
 
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import { useDialog } from "../../context/DialogContext";
 
 /**
  * One plant's electrical system: the supply, and its paperwork.
@@ -49,6 +50,7 @@ const isImage = (name) => /\.(png|jpe?g|gif|webp|tiff?)$/i.test(name || "");
 
 const ElectricalSystemDetail = ({ id, canEdit, canAttach, onClose, onChanged }) => {
   const { showToast } = useNotifications();
+  const { confirm } = useDialog();
 
   const [system, setSystem] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -114,7 +116,13 @@ const ElectricalSystemDetail = ({ id, canEdit, canAttach, onClose, onChanged }) 
   };
 
   const remove = async (file) => {
-    if (!window.confirm(`Remove ${file.fileName}?`)) return;
+    const ok = await confirm({
+      title: "Remove this file?",
+      message: file.fileName,
+      confirmLabel: "Remove",
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       await API.delete(`/electrical/${id}/files/${file.id}`);
       showToast(`${file.fileName} removed`, "success");

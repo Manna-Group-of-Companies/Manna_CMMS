@@ -76,7 +76,6 @@ class _SapHandoffScreenState extends State<SapHandoffScreen> {
     final naming = product.naming;
     return [
       product.name,
-      'Code: ${product.code}',
       if (naming?.itemCode.isNotEmpty == true) 'Serial number: ${naming!.itemCode}',
       'Category: ${product.category}'
           '${product.subCategory.isEmpty ? '' : ' / ${product.subCategory}'}',
@@ -234,7 +233,6 @@ class _PendingCard extends StatelessWidget {
               runSpacing: 6,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                MonoText(product.code),
                 // A name the convention rejected still has to reach SAP, but
                 // the Plant Manager should know before typing it in.
                 if (product.nameCompliant == false)

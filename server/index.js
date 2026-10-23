@@ -11,6 +11,7 @@ import {
 import { settleParkedSupervisorMerges } from "./utils/mergeApply.js";
 import { startErpSyncWorker } from "./integrations/erpnext/worker.js";
 import { startDriftScheduler } from "./integrations/erpnext/driftRunner.js";
+import { startPurchaseCompletionScheduler } from "./integrations/erpnext/purchaseCompletionRunner.js";
 import { pruneSessions } from "./integrations/erpnext/auth.js";
 
 // Routes imports
@@ -203,6 +204,9 @@ const start = async () => {
     // Compares the two systems overnight and files a report. The safety net
     // for a movement that failed to post without anybody noticing.
     startDriftScheduler();
+
+    // Turns a purchase request Completed once its goods receipts cover it.
+    startPurchaseCompletionScheduler();
 
     // Expired ERPNext sessions are dropped on a timer rather than only when
     // somebody happens to present one, so a server left running for weeks

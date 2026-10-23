@@ -152,7 +152,7 @@ const MachineHistory = ({ machineId }) => {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             <Fig label="MTBF" value={hours(s.mtbf?.hours)} sub={`${s.mtbf?.basis || ""} hours`} />
             <Fig label="MTTR" value={hours(s.mttrHours)} sub="stopped to running" />
-            <Fig label="Mean response" value={hours(s.meanResponseHours)} sub="until work started" />
+            <Fig label="Response time" value={hours(s.meanResponseHours)} sub="reported to attended, average" />
             <Fig label="Mean repair" value={hours(s.meanRepairHours)} sub="work to running" />
           </div>
 
@@ -212,7 +212,7 @@ const MachineHistory = ({ machineId }) => {
                       {outputLabel(b.outputLost, b.outputUom)
                         ? ` · ${outputLabel(b.outputLost, b.outputUom)} lost`
                         : ""}
-                      {b.responseHours !== null ? ` · responded in ${hours(b.responseHours)}` : ""}
+                      {b.responseHours !== null ? ` · response time ${hours(b.responseHours)}` : ""}
                       {b.repairHours !== null ? ` · repair ${hours(b.repairHours)}` : ""}
                     </p>
 

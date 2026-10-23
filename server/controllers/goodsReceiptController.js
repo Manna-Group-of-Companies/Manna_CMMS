@@ -1,3 +1,4 @@
+import { withNames } from "../repository/userNames.js";
 import * as receipts from "../repository/goodsReceipts.js";
 import * as hsn from "../repository/hsnRequests.js";
 import { scopeFor, withinCompany } from "../repository/plantScope.js";
@@ -18,13 +19,13 @@ const fail = (res, error, fallback = "Something went wrong") => {
 export const list = async (req, res) => {
   try {
     res.json(
-      await receipts.listReceipts({
+      await withNames(await receipts.listReceipts({
         status: req.query.status || "",
         kind: req.query.kind || "",
         limit: Math.min(Number(req.query.limit) || 100, 300),
         // A plant head's own company only; everyone else sees the lot.
         onlyCompanies: (await scopeFor(req.user)).companies,
-      })
+      }), ["raisedBy"])
     );
   } catch (error) {
     fail(res, error, "Could not load goods receipts");
@@ -40,7 +41,7 @@ export const detail = async (req, res) => {
     if (!found || !withinCompany(await scopeFor(req.user), found.company)) {
       return res.status(404).json({ message: "Receipt not found" });
     }
-    res.json(found);
+    res.json(await withNames(found, ["raisedBy"]));
   } catch (error) {
     fail(res, error, "Could not load the receipt");
   }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import { useDialog } from "../../context/DialogContext";
 import { useAuth, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import useStockRooms from "../../hooks/useStockRooms";
@@ -45,14 +46,15 @@ const RECIPIENT_GROUPS = ["Our Company", "Outside Company"];
 
 const ProductList = () => {
   const { showToast } = useNotifications();
+  const { confirm } = useDialog();
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("");
+  // No item group filter: every item is in Engineering Stocks.
+  const selectedCategory = "";
   const [selectedSubCategory, setSelectedSubCategory] = useState("");
   const [selectedStoreRoom, setSelectedStoreRoom] = useState("");
   const [stockStatus, setStockStatus] = useState("");
@@ -152,15 +154,6 @@ const ProductList = () => {
     }
   };
 
-  const fetchCategories = async () => {
-    try {
-      const { data } = await API.get("/products/categories");
-      setCategories(data);
-    } catch (error) {
-      console.error("Error loading categories:", error);
-    }
-  };
-
   /**
    * Who an issue can be made out to. The Admin keeps this list; a supervisor
    * picks from it rather than typing a name, so the same firm cannot arrive
@@ -192,7 +185,6 @@ const ProductList = () => {
 
   useEffect(() => {
     fetchProducts();
-    fetchCategories();
   }, [searchTerm, selectedCategory, selectedSubCategory, selectedStoreRoom, stockStatus]);
 
   // Read once: the Admin adding a recipient mid-shift is rare, and the issue
@@ -300,7 +292,7 @@ const ProductList = () => {
       setActiveModal(null);
       resetProductForm();
     } catch (error) {
-      const retry = intakeOverrideFor(error, overrides);
+      const retry = await intakeOverrideFor(error, overrides);
       if (retry) return handleAddRequest(null, { ...overrides, ...retry });
 
       showToast(error.response?.data?.message || "Failed to submit request", "error");
@@ -316,7 +308,7 @@ const ProductList = () => {
    * when the error is something else, or when that override was already set (so
    * a refusal can never loop).
    */
-  const intakeOverrideFor = (error, overrides) => {
+  const intakeOverrideFor = async (error, overrides) => {
     const { status, data } = error.response || {};
 
     const flag =
@@ -327,7 +319,13 @@ const ProductList = () => {
           : null;
 
     if (!flag || overrides[flag]) return null;
-    if (!window.confirm(`${data.message}.\n\nSave anyway?`)) return null;
+    const ok = await confirm({
+      title: "Save anyway?",
+      message: `${data.message}.`,
+      confirmLabel: "Save anyway",
+      tone: "warning",
+    });
+    if (!ok) return null;
 
     return { [flag]: true };
   };
@@ -365,7 +363,7 @@ const ProductList = () => {
       setActiveModal(null);
       fetchProducts(); // The change is live, so show it.
     } catch (error) {
-      const retry = intakeOverrideFor(error, overrides);
+      const retry = await intakeOverrideFor(error, overrides);
       if (retry) return handleEditProduct(null, { ...overrides, ...retry });
 
       showToast(error.response?.data?.message || "Failed to save the engineering stock", "error");
@@ -423,25 +421,6 @@ const ProductList = () => {
 
           {/* Filters */}
           <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-            {/* Category Select */}
-            <select
-              value={selectedCategory}
-              onChange={(e) => {
-                // Picking a category drops a sub-category that no longer
-                // belongs to it.
-                setSelectedCategory(e.target.value);
-                setSelectedSubCategory("");
-              }}
-              className="px-3 py-2 text-xs rounded-xl bg-white border border-slate-200 text-slate-700 focus:outline-none focus:border-brand-500"
-            >
-              <option value="">All Categories</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-
             {/* Sub-Category Select */}
             <select
               value={selectedSubCategory}
@@ -541,7 +520,12 @@ const ProductList = () => {
                         />
                         <div>
                           <div className="font-bold text-slate-900">{product.name}</div>
-                          <div className="text-[10px] font-mono text-brand-700">{product.code}</div>
+                          {/* SAP's code only; ERPNext's own item code is not shown. */}
+                          {product.sap?.code ? (
+                            <div className="text-[10px] font-mono text-brand-700">{product.sap.code}</div>
+                          ) : (
+                            <div className="text-[10px] text-slate-500">No SAP code yet</div>
+                          )}
                           {product.sapSyncPending && (
                             <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 border border-indigo-200 text-indigo-600">
                               SAP stock sync on queue
@@ -550,10 +534,10 @@ const ProductList = () => {
                         </div>
                       </td>
                       <td className="py-4 px-6">
-                        <div className="text-slate-800">{product.category}</div>
-                        {/* Sub-category A first: it is the level the store looks things up by. */}
+                        {/* No item group: every item is in Engineering Stocks.
+                            Sub-category A first: it is the level the store looks things up by. */}
                         {product.subCategory && (
-                          <div className="text-[10px] text-slate-500">A: {product.subCategory}</div>
+                          <div className="text-slate-800">A: {product.subCategory}</div>
                         )}
                         {product.subCategoryB && (
                           <div className="text-[10px] text-slate-500">B: {product.subCategoryB}</div>
@@ -696,7 +680,9 @@ const ProductList = () => {
                   />
                   <div>
                     <h4 className="text-xl font-bold text-slate-900 leading-tight">{selectedProduct.name}</h4>
-                    <span className="text-xs font-mono text-brand-700 mt-1 block">CODE: {selectedProduct.code}</span>
+                    <span className="text-xs font-mono text-brand-700 mt-1 block">
+                      {selectedProduct.sap?.code ? `SAP CODE: ${selectedProduct.sap.code}` : "No SAP code yet"}
+                    </span>
                     <div className="flex flex-wrap items-center gap-2 mt-2">
                       <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
                         {selectedProduct.storeRoom}
@@ -755,7 +741,10 @@ const ProductList = () => {
 
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
                   <span className="text-slate-500 block mb-1">Description</span>
-                  <p className="text-slate-700 leading-relaxed">{selectedProduct.description || "No description provided."}</p>
+                  {/* One part a line, as typed in the app - keep the line breaks. */}
+                  <p className="text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
+                    {selectedProduct.description || "No description provided."}
+                  </p>
                 </div>
               </div>
             </div>
@@ -835,7 +824,6 @@ const ProductList = () => {
                           value={productForm.name}
                           onChange={handleFormChange}
                           required
-                          placeholder="e.g. 25MM Bearing Deep Groove SS304"
                           className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
                         />
                         {/* ST-10 — only worth showing where it can be acted on,
@@ -905,7 +893,6 @@ const ProductList = () => {
                       name="rackNumber"
                       value={productForm.rackNumber}
                       onChange={handleFormChange}
-                      placeholder="e.g. A-1"
                       className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
                     />
                   </div>
@@ -938,7 +925,6 @@ const ProductList = () => {
                           value={productForm.unit}
                           onChange={handleFormChange}
                           required
-                          placeholder="e.g. Pcs, Box, Kg"
                           className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-brand-500"
                         />
                       </div>
@@ -1013,9 +999,9 @@ const ProductList = () => {
                     name="description"
                     value={productForm.description}
                     onChange={handleFormChange}
-                    rows="3"
-                    placeholder="Provide details about components, warranty, or catalog mapping..."
-                    className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500 resize-none"
+                    rows="5"
+                    placeholder="One part a line - components, warranty, catalog mapping..."
+                    className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500 resize-y"
                   ></textarea>
                 </div>
 
@@ -1030,7 +1016,7 @@ const ProductList = () => {
                     </h4>
                     <dl className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3">
                       {[
-                        ["Code", selectedProduct.code, "fixed identity"],
+                        ["SAP Code", selectedProduct.sap?.code || "No SAP code yet", "set by SAP"],
                         ["Unit", selectedProduct.unit, "fixed identity"],
                         [
                           "Current Stock",
@@ -1175,7 +1161,6 @@ const ProductList = () => {
                     value={issuePurpose}
                     onChange={(e) => setIssuePurpose(e.target.value)}
                     rows="2"
-                    placeholder="e.g. Quarterly office supply restock"
                     className="w-full px-3 py-2 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500 resize-none"
                   ></textarea>
                 </div>

@@ -68,7 +68,9 @@ class IssueTable extends StatelessWidget {
       cellsOf: (context, issue) => [
         TableTitleCell(
           title: issue.product?.name ?? 'Deleted Engineering Stock',
-          subtitle: issue.product?.code ?? '—',
+          subtitle: (issue.product?.sap.code ?? '').isNotEmpty
+              ? issue.product!.sap.code
+              : issue.product?.storeRoom ?? '',
           imageUrl: issue.product?.image ?? '',
         ),
         TableNumberCell(

@@ -338,7 +338,7 @@ const RedStockRoom = () => {
                           <div>
                             <div className="font-bold text-slate-900">{item.productName}</div>
                             <div className="text-[10px] font-mono text-brand-700">
-                              {item.restockNumber} • {item.productCode || "—"}
+                              {item.restockNumber}
                             </div>
                           </div>
                         </div>

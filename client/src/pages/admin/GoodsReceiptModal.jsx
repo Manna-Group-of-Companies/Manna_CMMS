@@ -222,7 +222,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
     if (problem) return;
     try {
       setSaving(true);
-      const { data } = await API.post("/goods-receipts", {
+      await API.post("/goods-receipts", {
         company,
         poEntry: po.entry,
         billNo: billNo.trim(),
@@ -237,7 +237,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
         })),
       });
       showToast(
-        `Goods receipt ${data.id} saved. SAP posts it within a minute; the stock shows once it is posted.`,
+        "Goods receipt saved. SAP posts it within a minute; the stock shows once it is posted.",
         "success"
       );
       onSaved?.();
@@ -409,7 +409,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                               <div className="min-w-[180px] max-w-[300px]">
                                 <div className="cell-title break-words leading-snug">{l.name}</div>
                                 <div className="mono text-[11px] text-slate-500">
-                                  {l.sapItemCode || l.itemCode}
+                                  {l.sapItemCode}
                                 </div>
                                 {!l.inCatalog && (
                                   <span className="badge badge-slate badge-soft text-[10px] mt-0.5">

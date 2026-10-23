@@ -1,3 +1,4 @@
+import { withNames } from "../repository/userNames.js";
 import * as requests from "../repository/purchaseRequests.js";
 import { scopeFor, withinCompany } from "../repository/plantScope.js";
 
@@ -11,17 +12,24 @@ const fail = (res, error, fallback = "Something went wrong") => {
 };
 
 /** @route GET /api/purchase-requests */
+/** Names beside the emails: who raised each request, and who raised its order. */
+const withRequestNames = async (rowsOrRow) => {
+  const rows = Array.isArray(rowsOrRow) ? rowsOrRow : [rowsOrRow];
+  await withNames(rows, ["raisedBy"]);
+  await withNames(rows.map((r) => r?.order).filter(Boolean), ["raisedBy"]);
+  return rowsOrRow;
+};
+
 export const list = async (req, res) => {
   try {
     // A plant head's own company only; everyone else sees the lot.
     const { companies } = await scopeFor(req.user);
-    res.json(
-      await requests.listRequests({
-        status: req.query.status || "",
-        limit: Math.min(Number(req.query.limit) || 100, 300),
-        onlyCompanies: companies,
-      })
-    );
+    const rows = await requests.listRequests({
+      status: req.query.status || "",
+      limit: Math.min(Number(req.query.limit) || 100, 300),
+      onlyCompanies: companies,
+    });
+    res.json(await withRequestNames(rows));
   } catch (error) {
     fail(res, error, "Could not load purchase requests");
   }
@@ -36,7 +44,7 @@ export const detail = async (req, res) => {
     if (!found || !withinCompany(await scopeFor(req.user), found.company)) {
       return res.status(404).json({ message: "Purchase request not found" });
     }
-    res.json(found);
+    res.json(await withRequestNames(found));
   } catch (error) {
     fail(res, error, "Could not load the purchase request");
   }

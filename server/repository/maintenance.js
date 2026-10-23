@@ -31,6 +31,7 @@ export const sparesForBreakdown = async (id) => {
 };
 import { erpNow } from "../integrations/erpnext/time.js";
 import { attach, detach, listAttachments } from "./attachments.js";
+import { sapCodesFor } from "./catalog.js";
 
 /**
  * Breakdowns and machines.
@@ -65,6 +66,9 @@ const BREAKDOWN_FIELDS = [
   "output_uom",
   "repeat_failure",
   "repeat_of",
+  // For the response time: reported (the record made) to attended.
+  "creation",
+  "attended_at",
   "modified",
 ];
 
@@ -87,6 +91,12 @@ const hoursBetween = (from, to) => {
   return Math.round(((b - a) / 3600_000) * 10) / 10;
 };
 
+/** Reported to attended, or null when either is missing or out of order. */
+const responseHoursOf = (row) => {
+  const h = hoursBetween(row.creation, row.attended_at);
+  return h === null || h < 0 ? null : h;
+};
+
 const toSummary = (row) => {
   const stoppedFor = hoursBetween(row.stopped_at, row.completed_at || erpNow());
   const outputPerHour = Number(row.output_per_hour || 0);
@@ -102,6 +112,12 @@ const toSummary = (row) => {
     failureMode: row.failure_mode || "",
     stoppedAt: row.stopped_at,
     completedAt: row.completed_at || null,
+    reportedAt: row.creation || null,
+    attendedAt: row.attended_at || null,
+    // Response time: reported until maintenance attended to it, in hours. Null
+    // until the Attend step stamps it - never estimated. The same measure the
+    // Breakdown Report averages (breakdownMetrics.js).
+    responseHours: responseHoursOf(row),
     whatHappened: row.what_happened,
     productionStopped: Boolean(row.production_stopped),
     reportedBy: row.reported_by,
@@ -199,6 +215,8 @@ export const getBreakdown = async (id) => {
   });
   if (!doc) return null;
 
+  const sapCodes = await sapCodesFor((doc.spares_required || []).map((s) => s.item_code));
+
   return {
     ...toSummary(doc),
     // Only fetched once the record has reached a stage that asks the question
@@ -239,6 +257,8 @@ export const getBreakdown = async (id) => {
     assessedAt: doc.assessed_at || null,
     spares: (doc.spares_required || []).map((s) => ({
       itemCode: s.item_code || "",
+      // What the screens show: the SAP code only, never the ERPNext one.
+      sapCode: sapCodes.get(s.item_code) || "",
       description: s.description,
       qtyRequired: Number(s.qty_required || 0),
     })),
@@ -320,9 +340,23 @@ export const applyAction = async (id, action) => {
 
   const after = await getBreakdown(id);
 
-  // A machine is running again once the repair is done.
+  // A machine is running again once the repair is done - unless another
+  // breakdown on it is still open, which used to be set Running regardless and
+  // left the register saying the machine ran while the breakdown screen said
+  // it was down. The register reads the open breakdowns too (assets.js).
   if (["Repaired", "Closed", "Cancelled"].includes(after.state)) {
-    await updateDoc("CMMS Machine", after.machine, { status: "Running" }).catch(() => {});
+    const stillDown = await listAll("CMMS Breakdown", {
+      fields: ["name"],
+      filters: [
+        ["CMMS Breakdown", "machine", "=", after.machine],
+        ["CMMS Breakdown", "name", "!=", id],
+        ["CMMS Breakdown", "workflow_state", "in", ["Reported", "Attended", "Under Repair"]],
+      ],
+      max: 1,
+    }).catch(() => []);
+    if (!stillDown.length) {
+      await updateDoc("CMMS Machine", after.machine, { status: "Running" }).catch(() => {});
+    }
   }
   return after;
 };

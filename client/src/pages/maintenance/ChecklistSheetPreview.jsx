@@ -16,11 +16,11 @@ import ChecklistSheet from "./ChecklistSheet";
  * is not in a production build and there is no unauthenticated route to it on a
  * deployed site.
  *
- *     /sheet-preview?frequency=Daily     the tick-grid layout
- *     /sheet-preview?frequency=Yearly    the single-visit layout
+ *     /sheet-preview?frequency=Daily     thirty-one columns, landscape
+ *     /sheet-preview?frequency=Yearly    one column, portrait
  *
- * Which of the two layouts appears follows the frequency, exactly as it does
- * for a real checklist - Yearly is the only one that defaults to single-visit.
+ * There is one layout for every frequency; only the number of visit columns
+ * (and so the orientation) follows the frequency.
  */
 
 /**
@@ -33,7 +33,6 @@ const POINTS = [
   {
     point: "Machine isolated and locked out before opening any guard",
     howToCheck: "Isolator off, lock fitted, key held by the person working",
-    isSafety: 1,
   },
   {
     point: "Gearbox oil level",
@@ -72,7 +71,6 @@ const POINTS = [
   {
     // No section: the sheet has to cope with points that belong to no block.
     point: "Emergency stop tested and machine restarts only after reset",
-    isSafety: 1,
   },
 ];
 
@@ -83,13 +81,7 @@ const SAMPLE = {
   assetName: "Cracker Mill 1",
   assetKind: "machine",
   plant: "Manna Rubber Products",
-  area: "Size Reduction",
-  responsibility: "Operator",
-  estimatedMinutes: 20,
   revision: "1",
-  effectiveFrom: "2026-09-01",
-  safetyNote:
-    "Isolate at the local isolator and fit a personal lock before opening any guard. The mill coasts for about 40 seconds after power is removed - wait for it to stop.",
   notes: "Tick each point when done. A blank means it was not checked.",
   points: POINTS,
 };

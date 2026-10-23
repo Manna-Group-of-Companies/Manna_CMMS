@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ClipboardCheck, Hourglass, Loader2, Package, Pencil, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
+import { AlertTriangle, ClipboardCheck, Hourglass, Loader2, Package, Pencil, Plus, Send, Trash2 } from "lucide-react";
 
 import API from "../../services/api";
 import { useAuth, MAINTENANCE_MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
+import { useDialog } from "../../context/DialogContext";
 import { useNotifications } from "../../context/NotificationContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
+import { useErpRefresh } from "../../hooks/useErpRefresh";
 import { formatCurrency } from "../../utils/currency";
 import { hsnDigits, hsnProblem } from "../../utils/hsn";
 import GoodsReceiptModal from "./GoodsReceiptModal";
@@ -56,6 +58,7 @@ const day = (value) => {
 const GoodsReceipts = () => {
   const { user } = useAuth();
   const { showToast } = useNotifications();
+  const { confirm, prompt } = useDialog();
   // Mirrors the server: only the Maintenance Manager receives stock or re-sends it.
   // Maintenance, and since 14 Oct 2026 the plant heads - mirrors the server's guard.
   const canReceive = user?.role === MAINTENANCE_MANAGER || user?.role === PRODUCTION_MANAGER;
@@ -96,11 +99,14 @@ const GoodsReceipts = () => {
   const anyQueued = rows.some((r) => r.status === "Queued");
   useAutoRefresh(() => load(true), { enabled: anyQueued });
 
+  // The top bar's Refresh, in place of a button of the page's own.
+  useErpRefresh(() => load(true));
+
   const retry = async (id) => {
     setBusy(id);
     try {
       await API.post(`/goods-receipts/${id}/retry`);
-      showToast(`${id} sent to SAP again`, "success");
+      showToast("Receipt sent to SAP again", "success");
       load(true);
     } catch (err) {
       showToast(err.response?.data?.message || "That step was refused", "error");
@@ -123,18 +129,29 @@ const GoodsReceipts = () => {
     }
   };
 
-  const removeReceipt = (r) => {
+  const removeReceipt = async (r) => {
     const waiting = (r.hsnRequests || []).filter((h) => h.status === "Queued").length;
     const also = waiting ? ` and its ${waiting} waiting HSN request${waiting === 1 ? "" : "s"}` : "";
-    if (!window.confirm(`Delete ${r.id}${also}? It has not been posted to SAP.`)) return;
-    act(r.id, () => API.delete(`/goods-receipts/${r.id}`), `${r.id} deleted`);
+    const ok = await confirm({
+      title: "Delete this receipt?",
+      message: `This deletes the receipt${also}. It has not been posted to SAP.`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
+    act(r.id, () => API.delete(`/goods-receipts/${r.id}`), "Receipt deleted");
   };
 
   const resendHsn = (h) =>
     act(h.id, () => API.post(`/goods-receipts/hsn-requests/${h.id}/retry`), `HSN ${h.hsnCode} sent to SAP again`);
 
-  const correctHsn = (h) => {
-    const typed = window.prompt(`Correct HSN ${h.hsnCode} (${h.id}) to:`, h.hsnCode);
+  const correctHsn = async (h) => {
+    const typed = await prompt({
+      title: `Correct HSN ${h.hsnCode}`,
+      message: "Enter the HSN code from the bill. It is sent to SAP again.",
+      defaultValue: h.hsnCode,
+      confirmLabel: "Correct and resend",
+    });
     if (typed === null) return;
     const digits = hsnDigits(typed);
     const problem = digits ? hsnProblem(digits) : "enter the HSN code from the bill";
@@ -186,10 +203,6 @@ const GoodsReceipts = () => {
             <option value="Posted">Posted</option>
             <option value="Failed">Failed</option>
           </select>
-          <button className="btn btn-sm btn-neutral" onClick={() => load()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
           {canReceive && (
             <button className="btn btn-sm btn-primary" onClick={() => setReceiving(true)}>
               <Plus className="h-4 w-4" />
@@ -266,14 +279,12 @@ const ReceiptCard = ({ receipt: r, canRetry, canFix, busy, onRetry, onDelete, on
         r.sapRevaluation ? ` · revaluation ${r.sapRevaluation}` : ""
       }`
     : "";
-  const erpDoc = [r.erpStockEntry, r.erpReconciliation].filter(Boolean).join(" · ");
 
   return (
     <div className="card p-5">
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="mono text-xs text-slate-500">{r.id}</span>
             <span className={`badge badge-soft ${KIND_STYLE[r.kind] || "badge-slate"}`}>
               {KIND_LABEL[r.kind] || r.kind}
             </span>
@@ -297,8 +308,7 @@ const ReceiptCard = ({ receipt: r, canRetry, canFix, busy, onRetry, onDelete, on
               </>
             )}
             <KV label="SAP document" value={sapDoc} />
-            {erpDoc && <KV label="ERPNext" value={erpDoc} />}
-            <KV label="Raised by" value={`${r.raisedBy || "—"} · ${when(r.raisedAt)}`} />
+            <KV label="Raised by" value={`${r.raisedByName || r.raisedBy || "—"} · ${when(r.raisedAt)}`} />
             {r.postedAt && <KV label="Posted" value={when(r.postedAt)} />}
           </div>
 
@@ -310,10 +320,10 @@ const ReceiptCard = ({ receipt: r, canRetry, canFix, busy, onRetry, onDelete, on
               >
                 <span className="min-w-0 text-slate-800">
                   {l.name}{" "}
-                  <span className="mono text-[11px] text-slate-500">{l.sapItemCode || l.itemCode}</span>
+                  <span className="mono text-[11px] text-slate-500">{l.sapItemCode}</span>
                 </span>
                 <span className="whitespace-nowrap text-slate-700">
-                  × {l.qty} {l.unit} @ {Number(l.rate) > 0 ? formatCurrency(l.rate) : "nil"}
+                  × {l.qty} {l.unit} @ {Number(l.rate) > 0 ? formatCurrency(l.rate) : "Nil"}
                   {l.billUnit && (
                     <span className="ml-2 text-[11px] text-slate-500">
                       ({l.billQty} {l.billUnit} on the bill)
@@ -348,7 +358,6 @@ const ReceiptCard = ({ receipt: r, canRetry, canFix, busy, onRetry, onDelete, on
                 {hsnRequests.map((h) => (
                   <li key={h.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
                     <span className="mono font-semibold text-slate-800">{h.hsnCode}</span>
-                    <span className="mono text-[11px] text-slate-500">{h.id}</span>
                     <span className={`badge badge-soft ${HSN_STYLE[h.status] || "badge-slate"}`}>{h.status}</span>
                     {h.status === "Created" && h.sapChapterId && (
                       <span className="text-[12px] text-slate-600">SAP chapter ID {h.sapChapterId}</span>

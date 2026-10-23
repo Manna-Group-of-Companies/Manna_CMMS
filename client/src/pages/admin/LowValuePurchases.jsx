@@ -2,46 +2,63 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
+  Archive,
+  CalendarDays,
   ChevronDown,
+  CircleCheck,
+  CircleDashed,
+  CircleX,
+  ClipboardList,
+  Clock,
+  Copy,
+  EllipsisVertical,
+  Eye,
   FileSpreadsheet,
-  Filter,
+  FileText,
+  Flame,
+  Hourglass,
   Image as ImageIcon,
   Loader2,
-  Maximize2,
-  Minimize2,
   Paperclip,
   Plus,
   Printer,
   RefreshCw,
   Search,
+  ShoppingCart,
   Trash2,
   Upload,
+  Wrench,
   X,
 } from "lucide-react";
 
 import API from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
+import { useDialog } from "../../context/DialogContext";
 import { useNotifications } from "../../context/NotificationContext";
+import { useErpRefresh } from "../../hooks/useErpRefresh";
+import Pagination from "../../components/Pagination";
+import { pageSlice } from "../../utils/pageSlice";
 
 /**
- * The Purchase Request Sheet (20 Oct 2026).
+ * Miscellaneous Purchases - the purchasing team's request sheet.
  *
- * The purchasing team ran local buying and repairs off a Google Sheet, and asked
- * for "this style in the website" - so this is laid out as that sheet: the
- * the same fourteen columns in the same order, dropdown cells
- * shown as coloured chips, a row going green once the thing has arrived. Cells
- * are edited where they sit, one column per save, as they were in the sheet.
+ * Redesign (23 Oct 2026): the sheet was laid out as the Google Sheet it
+ * replaced, fourteen columns edited cell by cell. It is now a request list -
+ * a filter bar, a card per request showing what people scan by, and a panel
+ * per request (View) holding all fourteen fields,
+ * still edited where they sit and saved one field at a time.
  *
- * Which cells a person may change is the server's answer (`editable` on each
+ * Which fields a person may change is the server's answer (`editable` on each
  * row), never worked out here from the role.
  */
 
 /** The server refuses anything larger. */
 const MAX_BYTES = 15 * 1024 * 1024;
 
+/** The printed sheet still greens a row once the thing has arrived. */
 const DONE_GREEN = "#B7E1CD";
 
-/** The sheet's columns, in its order and with its headings. */
+/** Every field of a request, in the sheet's order and with its headings. */
 const COLUMNS = [
   { key: "date", header: "Date", kind: "date", width: 104 },
   { key: "type", header: "Type of Request", kind: "pick", from: "types", width: 140 },
@@ -64,9 +81,12 @@ const COLUMNS = [
   { key: "remarks", header: "Remarks", kind: "text", width: 260 },
 ];
 
+/** For the printed sheet, which keeps the original column proportions. */
 const SHEET_WIDTH = COLUMNS.reduce((sum, c) => sum + c.width, 0);
 
-/** Chip colours, as the sheet's dropdowns had them. */
+const COL = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
+
+/** Chip colours for the dropdown fields, as the sheet's dropdowns had them. */
 const CHIP = {
   // Status of Approval
   Approved: "bg-emerald-100 text-emerald-800",
@@ -107,6 +127,57 @@ const EMPTY_OPTIONS = {
   doneStatuses: ["Received", "Delivered"],
 };
 
+const NO_FILTERS = { company: "", type: "", approval: "", purchase: "" };
+
+const PAGE_SIZE = 10;
+
+/* ------------------------------------------------------------- Status model */
+
+const APPROVED = ["Approved", "Limited Quantity Approved"];
+
+/**
+ * Where a request stands, from its two status fields: approval first, then
+ * whether the buying or repair has started, then whether it is here.
+ */
+const stageOf = (r) => {
+  if (r.approvalStatus === "Rejected") return "rejected";
+  if (r.done) return "closed";
+  if (APPROVED.includes(r.approvalStatus)) {
+    return r.purchaseStatus && r.purchaseStatus !== "Not Ordered" ? "progress" : "approved";
+  }
+  return "pending";
+};
+
+const STAGE = {
+  pending: { icon: Hourglass, cls: "border-amber-200 bg-amber-50 text-amber-800" },
+  approved: { icon: CircleCheck, cls: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  progress: { icon: CircleDashed, cls: "border-sky-200 bg-sky-50 text-sky-700" },
+  closed: { icon: Archive, cls: "border-slate-200 bg-slate-100 text-slate-700" },
+  rejected: { icon: CircleX, cls: "border-rose-200 bg-rose-50 text-rose-700" },
+};
+
+const stageLabel = (r, stage) => {
+  if (stage === "pending") return r.approvalStatus || "Pending";
+  if (stage === "approved") return r.approvalStatus === "Approved" ? "Approved" : "Limited Qty Approved";
+  if (stage === "progress") return "In Progress";
+  if (stage === "closed") return "Closed";
+  return "Rejected";
+};
+
+/** The line under the chip: what the buying is actually at. */
+const stageDetail = (r, stage) => {
+  if (stage === "progress") return r.purchaseStatus;
+  if (stage === "closed") return r.receivedOn ? `${r.purchaseStatus} ${dmy(r.receivedOn)}` : r.purchaseStatus;
+  return "";
+};
+
+const TYPE_STYLE = {
+  "Purchase Request": { icon: ShoppingCart, cls: "border-blue-200/80 bg-blue-50 text-blue-700" },
+  "Repair Request": { icon: Wrench, cls: "border-orange-200/80 bg-orange-50 text-orange-700" },
+};
+
+/* ------------------------------------------------------------------ Helpers */
+
 const pad = (n) => String(n).padStart(2, "0");
 /** Local date; toISOString would give yesterday for the first hours of an Indian day. */
 const today = () => {
@@ -144,8 +215,10 @@ const uploadImage = (id, file) => {
   );
 };
 
-/** A single-row read comes back with its images; the sheet only keeps the count. */
+/** A single-row read comes back with its images; the list only keeps the count. */
 const asRow = ({ images, ...row }) => (Array.isArray(images) ? { ...row, files: images.length } : row);
+
+/* ------------------------------------------------------------- Small pieces */
 
 const Chip = ({ value, caret = false }) =>
   value ? (
@@ -155,11 +228,42 @@ const Chip = ({ value, caret = false }) =>
       }`}
     >
       <span className="truncate">{value}</span>
-      {caret && <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />}
+      {caret && <ChevronDown className="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />}
     </span>
   ) : null;
 
-/** URLs in the links column open; the rest of the cell still edits. */
+const TypeChip = ({ type }) => {
+  const style = TYPE_STYLE[type] || { icon: FileText, cls: "border-slate-200 bg-slate-50 text-slate-700" };
+  const Icon = style.icon;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[12px] font-semibold ${style.cls}`}
+    >
+      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+      {type || "Request"}
+    </span>
+  );
+};
+
+/** Icon and words both carry the state, so it never rests on colour alone. */
+const StatusChip = ({ row, detail = true, end = false }) => {
+  const stage = stageOf(row);
+  const { icon: Icon, cls } = STAGE[stage];
+  const sub = detail ? stageDetail(row, stage) : "";
+  return (
+    <span className={`inline-flex flex-col gap-1 ${end ? "items-start lg:items-end" : "items-start"}`}>
+      <span
+        className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[12px] font-semibold ${cls}`}
+      >
+        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+        {stageLabel(row, stage)}
+      </span>
+      {sub && <span className="pl-1 text-[11px] text-slate-500">{sub}</span>}
+    </span>
+  );
+};
+
+/** URLs in the links field open; the rest of the field still edits. */
 const Linkified = ({ text }) =>
   String(text)
     .split(/(https?:\/\/\S+)/g)
@@ -180,6 +284,32 @@ const Linkified = ({ text }) =>
       )
     );
 
+/** Today's date and the time, kept current while the page is open. */
+const Now = () => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const weekday = now.toLocaleDateString("en-GB", { weekday: "long" });
+  const date = now.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const time = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className="hidden items-center gap-6 pt-2 text-[14px] text-slate-600 md:flex">
+      <span className="flex items-center gap-2">
+        <CalendarDays className="h-[18px] w-[18px] text-slate-500" aria-hidden="true" />
+        {weekday}, {date}
+      </span>
+      <span className="flex items-center gap-2">
+        <Clock className="h-[18px] w-[18px] text-slate-500" aria-hidden="true" />
+        <time dateTime={now.toISOString()}>{time}</time>
+      </span>
+    </div>
+  );
+};
+
+/* -------------------------------------------------------------------- Page */
+
 const LowValuePurchases = () => {
   const { user } = useAuth();
   const { showToast } = useNotifications();
@@ -188,23 +318,14 @@ const LowValuePurchases = () => {
   const [options, setOptions] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [filters, setFilters] = useState({ company: "", type: "", approval: "", purchase: "" });
+  const [filters, setFilters] = useState(NO_FILTERS);
   const [openOnly, setOpenOnly] = useState(false);
   const [search, setSearch] = useState("");
-  // The filters fold away on a phone, where they would take the whole screen.
-  const [showFilters, setShowFilters] = useState(false);
+  const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null); // { id, key }
+  const [viewing, setViewing] = useState(null); // a row id
   const [imagesFor, setImagesFor] = useState(null); // a row
   const [raising, setRaising] = useState(false);
-  // The sheet over the whole window, menus and all hidden; Esc brings them back.
-  const [fullScreen, setFullScreen] = useState(false);
-
-  useEffect(() => {
-    if (!fullScreen) return undefined;
-    const onKey = (e) => e.key === "Escape" && !editing && setFullScreen(false);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [fullScreen, editing]);
 
   useEffect(() => {
     API.get("/low-value-purchases/options")
@@ -231,26 +352,34 @@ const LowValuePurchases = () => {
     load();
   }, [load]);
 
+  // The top bar's Refresh: read ERPNext again without leaving the screen.
+  useErpRefresh(() => load());
+
+  // The filters are applied by the server; the search box narrows what came back.
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter(
       (r) =>
         !q ||
-        [r.description, r.purpose, r.remarks, r.raisedByName, r.company].some((v) =>
+        [r.id, r.description, r.purpose, r.remarks, r.raisedByName, r.company, r.type].some((v) =>
           String(v || "").toLowerCase().includes(q)
         )
     );
   }, [rows, search]);
-  const activeFilters = Object.values(filters).filter(Boolean).length + (openOnly ? 1 : 0);
+
+  const { page: current, rows: pageRows } = pageSlice(shown, page, PAGE_SIZE);
+
+  const activeFilters =
+    Object.values(filters).filter(Boolean).length + (openOnly ? 1 : 0) + (search ? 1 : 0);
 
   const doneStatuses = options?.doneStatuses || EMPTY_OPTIONS.doneStatuses;
 
   const patchRow = (id, fn) => setRows((rs) => rs.map((r) => (r.id === id ? fn(r) : r)));
 
   /**
-   * One cell, saved on its own. Shown at once and put back if the server says
-   * no; only that column is put back, so a second edit to the same row that is
-   * still in flight is not undone with it.
+   * One field, saved on its own. Shown at once and put back if the server says
+   * no; only that field is put back, so a second edit to the same request that
+   * is still in flight is not undone with it.
    */
   const saveCell = async (row, key, value) => {
     setEditing(null);
@@ -270,188 +399,187 @@ const LowValuePurchases = () => {
     }
   };
 
-  const setFilter = (name) => (e) => setFilters((f) => ({ ...f, [name]: e.target.value }));
+  // Every change to what is shown starts again from the first page.
+  const setFilter = (name) => (e) => {
+    setFilters((f) => ({ ...f, [name]: e.target.value }));
+    setPage(1);
+  };
+
+  const clearAll = () => {
+    setFilters(NO_FILTERS);
+    setOpenOnly(false);
+    setSearch("");
+    setPage(1);
+  };
+
+  const copyId = (row) =>
+    navigator.clipboard
+      ?.writeText(row.id)
+      .then(() => showToast("Request ID copied", "success"))
+      .catch(() => showToast("Could not copy the request ID", "error"));
 
   const opts = options || EMPTY_OPTIONS;
+  const viewingRow = viewing ? rows.find((r) => r.id === viewing) : null;
 
   return (
-    <div className="space-y-4">
-      <div
-        className={`card flex flex-col overflow-hidden ${
-          fullScreen ? "fixed inset-0 z-50 rounded-none" : "md:h-[calc(100dvh-7.5rem)]"
-        }`}
-      >
-        <div className="shrink-0 space-y-2 border-b border-slate-200 bg-slate-50/60 p-3">
-          <div className="flex items-center gap-2">
-            <div className="relative min-w-0 flex-1 sm:max-w-sm">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search item, purpose, company, remarks…"
-                className="field field-sm field-search"
-                aria-label="Search the sheet"
-              />
-            </div>
-            <button
-              type="button"
-              className={`btn btn-sm btn-neutral md:hidden ${showFilters ? "ring-2 ring-brand-500" : ""}`}
-              onClick={() => setShowFilters((v) => !v)}
-              aria-expanded={showFilters}
-            >
-              <Filter className="h-4 w-4" />
-              {activeFilters ? <span className="font-bold">{activeFilters}</span> : null}
-            </button>
-            <span className="hidden whitespace-nowrap text-[12px] font-semibold text-slate-600 sm:inline">
-              {shown.length} {shown.length === 1 ? "row" : "rows"}
-            </span>
-            <div className="ml-auto flex shrink-0 gap-2">
-              <button
-                className="btn btn-sm btn-neutral hidden md:inline-flex"
-                onClick={() => setFullScreen((v) => !v)}
-                aria-label={fullScreen ? "Leave full screen" : "Full screen"}
-                title={fullScreen ? "Leave full screen (Esc)" : "Full screen"}
-              >
-                {fullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-              </button>
-              <button className="btn btn-sm btn-neutral" onClick={load} disabled={loading} aria-label="Refresh">
-                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-              </button>
-              <button
-                className="btn btn-sm btn-neutral hidden sm:inline-flex"
-                onClick={() => window.print()}
-                disabled={!shown.length}
-              >
-                <Printer className="h-4 w-4" />
-                Print
-              </button>
-              <button className="btn btn-sm btn-primary" onClick={() => setRaising(true)} disabled={!options}>
-                <Plus className="h-4 w-4" />
-                <span className="hidden sm:inline">New request</span>
-                <span className="sm:hidden">New</span>
-              </button>
-            </div>
-          </div>
-
-          <div className={`${showFilters ? "grid" : "hidden"} grid-cols-2 gap-2 md:flex md:flex-wrap md:items-center`}>
-            <FilterSelect label="All companies" value={filters.company} onChange={setFilter("company")} items={opts.companies} />
-            <FilterSelect label="All types" value={filters.type} onChange={setFilter("type")} items={opts.types} />
-            <FilterSelect label="Any approval" value={filters.approval} onChange={setFilter("approval")} items={opts.approvalStatuses} />
-            <FilterSelect
-              label="Any purchase status"
-              value={filters.purchase}
-              onChange={setFilter("purchase")}
-              items={opts.purchaseStatuses}
-            />
-            <label className="flex cursor-pointer items-center gap-1.5 text-[13px] text-slate-700">
-              <input
-                type="checkbox"
-                checked={openOnly}
-                onChange={(e) => setOpenOnly(e.target.checked)}
-                className="h-4 w-4 accent-brand-600"
-              />
-              Open only
-            </label>
-            {activeFilters > 0 && (
-              <button
-                type="button"
-                className="text-[13px] font-medium text-brand-700 hover:underline md:ml-1"
-                onClick={() => {
-                  setFilters({ company: "", type: "", approval: "", purchase: "" });
-                  setOpenOnly(false);
-                }}
-              >
-                Clear filters
-              </button>
-            )}
+    <div className="space-y-5 sm:space-y-6">
+      {/* ------------------------------------------------------------ Header */}
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-4">
+          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 sm:h-14 sm:w-14">
+            <ClipboardList className="h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-[22px] font-bold tracking-tight text-slate-900 sm:text-[28px]">
+              Miscellaneous Purchases
+            </h1>
+            <p className="mt-0.5 text-[13px] text-slate-500 sm:text-sm">
+              Purchase and repair requests for every company
+            </p>
           </div>
         </div>
+        <Now />
+      </header>
 
+      {/* ------------------------------------------------------------ Filters */}
+      <div className="card flex flex-col gap-3 p-3 sm:p-4 xl:flex-row xl:flex-wrap xl:items-center">
+        <div className="relative min-w-0 xl:min-w-[18rem] xl:flex-1">
+          <Search
+            className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+            aria-hidden="true"
+          />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Search by request ID, company, item, description…"
+            className="field field-search"
+            aria-label="Search requests"
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+          <FilterSelect label="All Companies" value={filters.company} onChange={setFilter("company")} items={opts.companies} />
+          <FilterSelect label="All Types" value={filters.type} onChange={setFilter("type")} items={opts.types} />
+          <FilterSelect label="Any Approval" value={filters.approval} onChange={setFilter("approval")} items={opts.approvalStatuses} />
+          <FilterSelect label="Any Status" value={filters.purchase} onChange={setFilter("purchase")} items={opts.purchaseStatuses} />
+          <label className="flex h-10 cursor-pointer select-none items-center gap-2 rounded-[10px] border border-slate-300/80 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:border-slate-400 max-sm:h-11">
+            <input
+              type="checkbox"
+              checked={openOnly}
+              onChange={(e) => {
+                setOpenOnly(e.target.checked);
+                setPage(1);
+              }}
+              className="h-4 w-4 cursor-pointer accent-brand-600"
+            />
+            Open only
+          </label>
+        </div>
+
+        <div className="flex items-center gap-2 xl:ml-auto">
+          {activeFilters > 0 && (
+            <button type="button" className="btn btn-subtle" onClick={clearAll}>
+              <X className="h-4 w-4" aria-hidden="true" />
+              Clear
+            </button>
+          )}
+          <button type="button" className="btn btn-neutral" onClick={load} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
+            Refresh
+          </button>
+          <button
+            type="button"
+            className="btn btn-neutral btn-icon"
+            onClick={() => window.print()}
+            disabled={!shown.length}
+            aria-label="Print the requests shown"
+            title="Print"
+          >
+            <Printer className="h-4 w-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary ml-auto xl:ml-0"
+            onClick={() => setRaising(true)}
+            disabled={!options}
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            New Request
+          </button>
+        </div>
+      </div>
+
+      {/* -------------------------------------------------------------- List */}
+      {/* One card per request, on every screen size: the item as the title,
+          who and where under it, the state and the actions on the right. */}
+      <div className="space-y-3">
         {error && (
-          <div className="note note-rose m-3">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
+          <div className="note note-rose">
+            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span>{error}</span>
           </div>
         )}
 
-        {/* Phones: one card per row, edited in place like the sheet's cells. */}
-        <div className="divide-y divide-slate-200 md:hidden">
-          {shown.map((row) => (
-            <RowCard
-              key={row.id}
-              row={row}
-              options={opts}
-              editing={editing?.id === row.id ? editing.key : null}
-              onEdit={(key) => setEditing({ id: row.id, key })}
-              onCancel={() => setEditing(null)}
-              onSave={(key, value) => saveCell(row, key, value)}
-              onImages={() => setImagesFor(row)}
-            />
-          ))}
-        </div>
-
-        {/* Wider screens: the sheet. It scrolls both ways inside itself, so the
-            header row and the Date column stay put. */}
-        <div className="hidden min-h-[16rem] flex-1 overflow-auto md:block">
-          <table
-            className="table-fixed border-separate border-spacing-0 text-[13px] text-slate-900"
-            style={{ width: SHEET_WIDTH, fontFamily: "Arial, Helvetica, sans-serif" }}
-          >
-            <colgroup>
-              {COLUMNS.map((c) => (
-                <col key={c.key} style={{ width: c.width }} />
-              ))}
-            </colgroup>
-            <thead>
-              <tr>
-                {COLUMNS.map((c, i) => (
-                  <th
-                    key={c.key}
-                    className={`sticky top-0 border-b-2 border-r border-b-slate-300 border-r-slate-200 bg-slate-100 px-2 py-2 text-left align-bottom text-[11px] font-bold uppercase leading-tight tracking-wide text-slate-600 ${
-                      i === 0 ? "left-0 z-30 shadow-[1px_0_0_#cbd5e1]" : "z-20"
-                    }`}
-                  >
-                    {c.header}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((row, index) => (
-                <SheetRow
-                  key={row.id}
-                  row={row}
-                  striped={index % 2 === 1}
-                  options={opts}
-                  editing={editing?.id === row.id ? editing.key : null}
-                  onEdit={(key) => setEditing({ id: row.id, key })}
-                  onCancel={() => setEditing(null)}
-                  onSave={(key, value) => saveCell(row, key, value)}
-                  onImages={() => setImagesFor(row)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {pageRows.length > 0 && (
+          <ul className="space-y-3">
+            {pageRows.map((row) => (
+              <RequestCard
+                key={row.id}
+                row={row}
+                onView={() => setViewing(row.id)}
+                onImages={() => setImagesFor(row)}
+                onCopy={() => copyId(row)}
+              />
+            ))}
+          </ul>
+        )}
 
         {!loading && !shown.length && !error && (
-          <div className="px-6 py-14 text-center">
-            <FileSpreadsheet className="mx-auto mb-2 h-8 w-8 text-slate-300" />
-            <p className="empty-title">Nothing on the sheet</p>
+          <div className="empty">
+            <FileSpreadsheet className="mx-auto mb-2 h-8 w-8 text-slate-300" aria-hidden="true" />
+            <p className="empty-title">No requests to show</p>
             <p className="empty-sub">
-              {rows.length ? "No row matches the search or filters." : "No request matches these filters yet."}
+              {rows.length ? "Nothing matches the search or filters." : "No request matches these filters yet."}
             </p>
+            {activeFilters > 0 && (
+              <button type="button" className="btn btn-sm btn-neutral mt-4" onClick={clearAll}>
+                Clear filters
+              </button>
+            )}
           </div>
         )}
         {loading && !rows.length && (
-          <div className="flex justify-center py-12 text-slate-400">
-            <Loader2 className="h-6 w-6 animate-spin" />
+          <div className="card flex justify-center py-12 text-slate-400" role="status" aria-label="Loading requests">
+            <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
           </div>
         )}
+
+        <Pagination page={current} total={shown.length} pageSize={PAGE_SIZE} onPage={setPage} noun="request" />
       </div>
 
       <PrintSheet rows={shown} />
+
+      {viewingRow && (
+        <RequestPanel
+          row={viewingRow}
+          options={opts}
+          editing={editing?.id === viewingRow.id ? editing.key : null}
+          covered={Boolean(imagesFor)}
+          onEdit={(key) => setEditing({ id: viewingRow.id, key })}
+          onCancel={() => setEditing(null)}
+          onSave={(key, value) => saveCell(viewingRow, key, value)}
+          onImages={() => setImagesFor(viewingRow)}
+          onCopy={() => copyId(viewingRow)}
+          onClose={() => {
+            setEditing(null);
+            setViewing(null);
+          }}
+        />
+      )}
 
       {imagesFor && (
         <ImagesPanel
@@ -469,7 +597,8 @@ const LowValuePurchases = () => {
           onDone={(row) => {
             setRaising(false);
             setRows((rs) => [row, ...rs]);
-            showToast("Request added to the sheet", "success");
+            setPage(1);
+            showToast("Request added", "success");
           }}
         />
       )}
@@ -477,11 +606,95 @@ const LowValuePurchases = () => {
   );
 };
 
+const Dot = () => (
+  <span className="text-slate-300" aria-hidden="true">
+    ·
+  </span>
+);
+
+/**
+ * One request in the list. The item is the title - it is what people look for
+ * - with the reference, date, company and who raised it under it, the purpose
+ * on its own line, and the state and actions to the right (below, on a phone).
+ */
+const RequestCard = ({ row, onView, onImages, onCopy }) => {
+  const style = TYPE_STYLE[row.type] || { icon: FileText, cls: "border-slate-200 bg-slate-50 text-slate-700" };
+  const Icon = style.icon;
+  const urgent = row.priority === "Emergency" && OPEN(row);
+
+  return (
+    <li
+      className={`card flex gap-4 p-4 transition-shadow hover:shadow-md sm:p-5 ${
+        urgent ? "border-l-4 border-l-rose-500" : ""
+      }`}
+    >
+      <span className={`hidden h-11 w-11 shrink-0 place-items-center rounded-xl border sm:grid ${style.cls}`}>
+        <Icon className="h-5 w-5" aria-hidden="true" />
+      </span>
+
+      <div className="flex min-w-0 flex-1 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
+        <div className="min-w-0 flex-1">
+          <button type="button" onClick={onView} className="group block w-full cursor-pointer text-left">
+            <h3 className="line-clamp-2 whitespace-pre-line break-words text-[15px] font-semibold leading-snug text-slate-900 group-hover:text-brand-700">
+              {row.description || "Untitled request"}
+            </h3>
+          </button>
+
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-slate-500">
+            <span className="mono text-slate-600">{row.id}</span>
+            <Dot />
+            <span>{dmy(row.date)}</span>
+            <Dot />
+            <span className="font-medium text-slate-700">{row.company}</span>
+            {row.raisedByName && (
+              <>
+                <Dot />
+                <span>Raised by {row.raisedByName}</span>
+              </>
+            )}
+            {row.files > 0 && (
+              <>
+                <Dot />
+                <span className="inline-flex items-center gap-1">
+                  <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />
+                  {row.files} image{row.files === 1 ? "" : "s"}
+                </span>
+              </>
+            )}
+          </p>
+
+          {row.purpose && (
+            <p className="mt-2 line-clamp-2 text-[13px] text-slate-600">
+              <span className="font-semibold text-slate-700">Purpose:</span> {row.purpose}
+            </p>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <TypeChip type={row.type} />
+            <PriorityFlag row={row} inline />
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-start justify-between gap-3 border-t border-slate-100 pt-3 lg:flex-col lg:items-end lg:border-0 lg:pt-0">
+          <StatusChip row={row} end />
+          <div className="flex items-center gap-1.5">
+            <button type="button" className="btn btn-sm btn-neutral" onClick={onView}>
+              <Eye className="h-4 w-4" aria-hidden="true" />
+              View
+            </button>
+            <RowMenu row={row} onView={onView} onImages={onImages} onCopy={onCopy} />
+          </div>
+        </div>
+      </div>
+    </li>
+  );
+};
+
 const FilterSelect = ({ label, value, onChange, items }) => (
   <select
     value={value}
     onChange={onChange}
-    className={`field field-sm w-full cursor-pointer md:w-auto md:max-w-[12rem] ${value ? "border-brand-400 bg-brand-50" : ""}`}
+    className={`field w-full cursor-pointer sm:w-44 ${value ? "border-brand-400 bg-brand-50" : ""}`}
     aria-label={label}
   >
     <option value="">{label}</option>
@@ -493,126 +706,250 @@ const FilterSelect = ({ label, value, onChange, items }) => (
   </select>
 );
 
-const SheetRow = ({ row, striped, options, editing, onEdit, onCancel, onSave, onImages }) => {
-  const editable = row.editable || [];
-  const urgent = row.priority === "Emergency" && OPEN(row);
-  // The cells take the row's ground (bg-inherit), so the sticky Date cell is
-  // solid and the hover tint covers the whole row.
-  const ground = row.done ? "bg-[#B7E1CD]" : striped ? "bg-slate-50" : "bg-white";
-
+/** Emergency and High are worth a flag while the request is still open. */
+const PriorityFlag = ({ row, inline = false }) => {
+  if (!OPEN(row) || !["Emergency", "High"].includes(row.priority)) return null;
+  const emergency = row.priority === "Emergency";
   return (
-    <tr className={`${ground} transition-colors hover:bg-blue-50 ${row.done ? "hover:bg-[#a6d8c0]" : ""}`}>
-      {COLUMNS.map((col, i) => (
-        <td
-          key={col.key}
-          className={`border-b border-r border-slate-200 bg-inherit p-0 align-top ${
-            i === 0 ? `sticky left-0 z-10 shadow-[1px_0_0_#cbd5e1] ${urgent ? "border-l-4 border-l-rose-500" : ""}` : ""
-          }`}
-        >
-          {col.kind === "images" ? (
-            <button
-              type="button"
-              onClick={onImages}
-              className="flex h-full min-h-[2rem] w-full cursor-pointer items-start gap-1 px-2 py-1.5 text-left text-slate-600 hover:bg-black/5"
-              aria-label={`Images for ${row.description || row.id}`}
-            >
-              <Paperclip className="mt-px h-3.5 w-3.5 shrink-0" />
-              <span className="text-[12px]">{row.files ? row.files : editable.length ? "Add" : "—"}</span>
-            </button>
-          ) : (
-            <Cell
-              row={row}
-              col={col}
-              items={col.from ? options[col.from] : null}
-              canEdit={editable.includes(col.key)}
-              isEditing={editing === col.key}
-              onEdit={() => onEdit(col.key)}
-              onCancel={onCancel}
-              onSave={(value) => onSave(col.key, value)}
-            />
-          )}
-        </td>
-      ))}
-    </tr>
+    <span
+      className={`${inline ? "inline-flex" : "mt-1 flex"} items-center gap-1 text-[11px] font-semibold ${
+        emergency ? "text-rose-700" : "text-orange-700"
+      }`}
+    >
+      <Flame className="h-3 w-3" aria-hidden="true" />
+      {row.priority}
+    </span>
   );
 };
 
-const COL = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
+/**
+ * The ⋮ on a row. The menu is placed on the page rather than inside the table,
+ * whose horizontal scroll would otherwise clip it on the last rows.
+ */
+const RowMenu = ({ row, onView, onImages, onCopy }) => {
+  const [at, setAt] = useState(null); // { top, right } while open
+  const buttonRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!at) return undefined;
+    menuRef.current?.querySelector("button")?.focus();
+    const close = () => setAt(null);
+    const onDown = (e) => {
+      if (!menuRef.current?.contains(e.target) && !buttonRef.current?.contains(e.target)) close();
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        close();
+        buttonRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [at]);
+
+  const toggle = () => {
+    if (at) return setAt(null);
+    const r = buttonRef.current.getBoundingClientRect();
+    setAt({ top: r.bottom + 4, right: window.innerWidth - r.right });
+  };
+
+  const item = (Icon, label, run) => (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={() => {
+        setAt(null);
+        run();
+      }}
+      className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-900 focus:bg-slate-100 focus:outline-none"
+    >
+      <Icon className="h-4 w-4 text-slate-500" aria-hidden="true" />
+      {label}
+    </button>
+  );
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={toggle}
+        className="icon-btn border border-slate-200 hover:border-slate-300"
+        aria-label={`More actions for ${row.id}`}
+        aria-haspopup="menu"
+        aria-expanded={Boolean(at)}
+      >
+        <EllipsisVertical className="h-4 w-4" aria-hidden="true" />
+      </button>
+      {at &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            className="card fixed z-40 w-52 p-1.5 shadow-xl animate-fade-in"
+            style={{ top: at.top, right: at.right }}
+          >
+            {item(Eye, (row.editable || []).length ? "View & edit" : "View details", onView)}
+            {item(Paperclip, row.files ? `Images (${row.files})` : "Images", onImages)}
+            {item(Copy, "Copy request ID", onCopy)}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+};
 
 /**
- * One row on a phone. The same cells as the sheet - so a tap edits a cell the
- * same way - laid out top to bottom instead of across.
+ * One request, every field, in a panel from the right. Fields the person may
+ * change are edited where they sit - a click turns the field into its editor,
+ * and leaving it saves - exactly as the sheet's cells were.
  */
-const RowCard = ({ row, options, editing, onEdit, onCancel, onSave, onImages }) => {
-  const [open, setOpen] = useState(false);
+const RequestPanel = ({ row, options, editing, covered, onEdit, onCancel, onSave, onImages, onCopy, onClose }) => {
+  const closeRef = useRef(null);
   const editable = row.editable || [];
-  const urgent = row.priority === "Emergency" && OPEN(row);
-  const cell = (key) => (
-    <Cell
-      row={row}
-      col={COL[key]}
-      items={COL[key].from ? options[COL[key].from] : null}
-      canEdit={editable.includes(key)}
-      isEditing={editing === key}
-      onEdit={() => onEdit(key)}
-      onCancel={onCancel}
-      onSave={(value) => onSave(key, value)}
-    />
-  );
-  const labelled = (key, label = COL[key].header) => (
-    <div className="min-w-0">
-      <div className="px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-      {cell(key)}
+  // Escape inside a field cancels that edit, and with the images window over
+  // the panel it belongs to that window; only a bare Escape closes the panel.
+  // Held in a ref so the listener is set up once.
+  const latest = useRef({ editing, covered, onClose });
+  latest.current = { editing, covered, onClose };
+
+  useEffect(() => {
+    const opener = document.activeElement;
+    closeRef.current?.focus();
+    const onKey = (e) => {
+      if (e.key === "Escape" && !latest.current.editing && !latest.current.covered) latest.current.onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      opener?.focus?.();
+    };
+  }, []);
+
+  const field = (key, label = COL[key].header, wide = false) => (
+    <div className={wide ? "sm:col-span-2" : ""}>
+      <div className="mb-1 text-[12px] font-semibold text-slate-500">{label}</div>
+      <div
+        className={`overflow-hidden rounded-lg border text-[14px] text-slate-900 ${
+          editable.includes(key) ? "border-slate-300/80 bg-white" : "border-slate-200 bg-slate-50"
+        }`}
+      >
+        <Cell
+          row={row}
+          col={COL[key]}
+          items={COL[key].from ? options[COL[key].from] : null}
+          canEdit={editable.includes(key)}
+          isEditing={editing === key}
+          onEdit={() => onEdit(key)}
+          onCancel={onCancel}
+          onSave={(value) => onSave(key, value)}
+        />
+      </div>
     </div>
+  );
+
+  const section = (title, children) => (
+    <section>
+      <h3 className="eyebrow mb-3">{title}</h3>
+      <div className="grid gap-4 sm:grid-cols-2">{children}</div>
+    </section>
   );
 
   return (
     <div
-      className={`px-2 py-3 ${urgent ? "border-l-4 border-l-rose-500" : ""}`}
-      style={row.done ? { backgroundColor: DONE_GREEN } : undefined}
+      className="fixed inset-0 z-50 flex justify-end bg-slate-950/45 backdrop-blur-[2px] animate-fade-in"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="flex flex-wrap items-center gap-1.5 px-2 text-[12px] text-slate-600">
-        <span className="font-semibold text-slate-800">{dmy(row.date)}</span>
-        <span>·</span>
-        <span className="truncate">{row.company}</span>
-        <span className="ml-auto flex gap-1">
-          <Chip value={row.type} />
-          <Chip value={row.priority} />
-        </span>
-      </div>
-      <div className="mt-1 text-[14px] font-semibold text-slate-900">{cell("description")}</div>
-      <div className="px-2 text-[12px] text-slate-500">Raised by {row.raisedByName || "—"}</div>
-
-      <div className="mt-2 grid grid-cols-2 gap-x-1 gap-y-1">
-        {labelled("approvalStatus", "Approval")}
-        {labelled("purchaseStatus", "Purchase / repair")}
-        {labelled("expectedOn", "Expected")}
-        {labelled("receivedOn", "Received")}
-      </div>
-
-      <div className="mt-1 flex items-center gap-2 px-2">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-1 text-[12px] font-medium text-brand-700"
-          aria-expanded={open}
-        >
-          <ChevronDown className={`h-3.5 w-3.5 transition ${open ? "rotate-180" : ""}`} />
-          {open ? "Less" : "Purpose, links, remarks"}
-        </button>
-        <button type="button" onClick={onImages} className="ml-auto flex items-center gap-1 text-[12px] text-slate-600">
-          <Paperclip className="h-3.5 w-3.5" />
-          {row.files ? `${row.files} image${row.files === 1 ? "" : "s"}` : editable.length ? "Add image" : "No images"}
-        </button>
-      </div>
-      {open && (
-        <div className="mt-1 space-y-1">
-          {labelled("purpose", "Purpose")}
-          {labelled("links", "Links / brands / vendor")}
-          {labelled("remarks")}
-          {labelled("raisedByName", "Raised by")}
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="request-panel-title"
+        className="flex h-dvh w-full max-w-xl flex-col bg-white shadow-2xl animate-rise-in"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
+          <div className="min-w-0">
+            <button
+              type="button"
+              onClick={onCopy}
+              className="mono inline-flex cursor-pointer items-center gap-1.5 text-slate-500 hover:text-slate-900"
+              title="Copy request ID"
+            >
+              {row.id}
+              <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+            <h2 id="request-panel-title" className="mt-1 line-clamp-2 text-[17px] font-bold tracking-tight text-slate-900">
+              {(row.description || "Request").split("\n")[0]}
+            </h2>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <TypeChip type={row.type} />
+              <StatusChip row={row} detail={false} />
+              <PriorityFlag row={row} inline />
+            </div>
+          </div>
+          <button ref={closeRef} type="button" className="modal-close" onClick={onClose} aria-label="Close">
+            <X className="h-5 w-5" aria-hidden="true" />
+          </button>
         </div>
-      )}
+
+        <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6">
+          {editable.length > 0 && (
+            <p className="note note-brand">Select a field to change it. Each change saves on its own.</p>
+          )}
+
+          {section(
+            "Request",
+            <>
+              {field("date")}
+              {field("type")}
+              {field("company")}
+              {field("raisedByName")}
+              {field("priority")}
+            </>
+          )}
+
+          {section(
+            "What and why",
+            <>
+              {field("description", "Description", true)}
+              {field("purpose", "Purpose of purchase / repair", true)}
+              {field("links", "Links / brands, or vendor contact", true)}
+            </>
+          )}
+
+          <section>
+            <h3 className="eyebrow mb-3">Image samples</h3>
+            <button type="button" className="btn btn-sm btn-neutral" onClick={onImages}>
+              <Paperclip className="h-4 w-4" aria-hidden="true" />
+              {row.files
+                ? `${row.files} image${row.files === 1 ? "" : "s"}`
+                : editable.length
+                  ? "Add an image"
+                  : "No images"}
+            </button>
+          </section>
+
+          {section(
+            "Progress",
+            <>
+              {field("approvalStatus", "Approval")}
+              {field("purchaseStatus", "Purchase / repair")}
+              {field("expectedOn", "Expected arrival")}
+              {field("receivedOn", "Received")}
+            </>
+          )}
+
+          {section("Remarks", field("remarks", "Remarks", true))}
+        </div>
+      </aside>
     </div>
   );
 };
@@ -621,23 +958,26 @@ const display = (row, col) => {
   const value = row[col.key];
   if (col.kind === "date") return dmy(value);
   if (col.kind === "pick") return <Chip value={value} />;
-  if (col.key === "links") return <Linkified text={value || ""} />;
+  if (col.key === "links") return value ? <Linkified text={value} /> : "";
   return value;
 };
 
-const Cell = ({ row, col, items, canEdit, isEditing, onEdit, onCancel, onSave }) => {
-  const wrap = "min-h-[2rem] px-2 py-1.5 whitespace-pre-wrap break-words leading-snug";
+const EMPTY = <span className="text-slate-400">—</span>;
 
-  if (!canEdit) return <div className={wrap}>{display(row, col)}</div>;
+const Cell = ({ row, col, items, canEdit, isEditing, onEdit, onCancel, onSave }) => {
+  const wrap = "min-h-[2.5rem] px-3 py-2 whitespace-pre-wrap break-words leading-snug";
+  const blank = row[col.key] == null || row[col.key] === "";
+
+  if (!canEdit) return <div className={wrap}>{blank ? EMPTY : display(row, col)}</div>;
 
   if (!isEditing) {
     return (
       <button
         type="button"
         onClick={onEdit}
-        className={`${wrap} block h-full w-full cursor-pointer text-left hover:bg-black/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500`}
+        className={`${wrap} block h-full w-full cursor-pointer text-left hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500`}
       >
-        {col.kind === "pick" ? <Chip value={row[col.key]} caret /> : display(row, col)}
+        {blank ? EMPTY : col.kind === "pick" ? <Chip value={row[col.key]} caret /> : display(row, col)}
       </button>
     );
   }
@@ -645,12 +985,12 @@ const Cell = ({ row, col, items, canEdit, isEditing, onEdit, onCancel, onSave })
   return <CellEditor value={row[col.key]} col={col} items={items} onCancel={onCancel} onSave={onSave} />;
 };
 
-/** The cell while it is being changed: a dropdown, a date or a text box, outlined blue as Sheets does. */
+/** The field while it is being changed: a dropdown, a date or a text box. */
 const CellEditor = ({ value, col, items, onCancel, onSave }) => {
   const [draft, setDraft] = useState(value ?? "");
   // Escape cancels; without this the blur that follows would save anyway.
   const cancelled = useRef(false);
-  const ring = "w-full rounded-none border-0 bg-white text-[13px] ring-2 ring-inset ring-blue-500 focus:outline-none";
+  const ring = "w-full rounded-none border-0 bg-white text-[14px] ring-2 ring-inset ring-brand-500 focus:outline-none";
 
   const commit = () => {
     if (!cancelled.current) onSave(col.kind === "text" ? draft.trim() : draft);
@@ -676,7 +1016,7 @@ const CellEditor = ({ value, col, items, onCancel, onSave }) => {
         }}
         onBlur={() => !cancelled.current && onCancel()}
         onKeyDown={onKeyDown}
-        className={`${ring} h-8 cursor-pointer px-1.5`}
+        className={`${ring} h-10 cursor-pointer px-2.5`}
       >
         {!items?.includes(draft) && <option value={draft}>{draft || "—"}</option>}
         {(items || []).map((v) => (
@@ -697,7 +1037,7 @@ const CellEditor = ({ value, col, items, onCancel, onSave }) => {
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={onKeyDown}
-        className={`${ring} h-8 px-1.5`}
+        className={`${ring} h-10 px-2.5`}
       />
     );
   }
@@ -711,7 +1051,7 @@ const CellEditor = ({ value, col, items, onCancel, onSave }) => {
       onBlur={commit}
       onKeyDown={onKeyDown}
       rows={Math.min(8, Math.max(3, String(draft).split("\n").length + 1))}
-      className={`${ring} block resize-y px-2 py-1.5 leading-snug`}
+      className={`${ring} block resize-y px-3 py-2 leading-snug`}
       title="Enter saves, Shift+Enter for a new line, Esc cancels"
     />
   );
@@ -720,6 +1060,7 @@ const CellEditor = ({ value, col, items, onCancel, onSave }) => {
 /** The images on one row: open them, and add or take away if the row is yours to change. */
 const ImagesPanel = ({ row, onClose, onCount }) => {
   const { showToast } = useNotifications();
+  const { confirm } = useDialog();
   const [images, setImages] = useState(null);
   const [busy, setBusy] = useState(false);
   const fileInput = useRef(null);
@@ -761,7 +1102,13 @@ const ImagesPanel = ({ row, onClose, onCount }) => {
   };
 
   const remove = async (image) => {
-    if (!window.confirm(`Remove ${image.fileName}?`)) return;
+    const ok = await confirm({
+      title: "Remove this image?",
+      message: image.fileName,
+      confirmLabel: "Remove",
+      tone: "danger",
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await API.delete(`/low-value-purchases/${row.id}/files/${image.id}`);
@@ -909,7 +1256,7 @@ const NewRequest = ({ options, defaultName, onClose, onDone }) => {
               <Plus className="h-[18px] w-[18px] shrink-0 text-brand-700" />
               New purchase / repair request
             </h3>
-            <p className="modal-sub">Adds a miscellaneous request.</p>
+            <p className="modal-sub">Adds a line to Miscellaneous Purchases.</p>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
             <X className="h-5 w-5" />
@@ -1004,7 +1351,7 @@ const PrintSheet = ({ rows }) =>
         className="border border-slate-400 py-1 text-center text-sm font-bold"
         style={{ fontFamily: "Arial, Helvetica, sans-serif" }}
       >
-        Miscellaneous Requests
+        Miscellaneous Purchases
       </div>
       <table
         className="w-full table-fixed border-collapse text-[7.5px] leading-tight text-black"

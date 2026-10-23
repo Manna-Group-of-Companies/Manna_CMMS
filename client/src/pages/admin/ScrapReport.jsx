@@ -232,7 +232,7 @@ const ScrapReport = () => {
                           {row.name}
                         </div>
                         <div className="text-[10px] font-mono text-brand-700">
-                          {row.code || "—"} • {row.quantity} pcs over {row.events}{" "}
+                          {row.quantity} pcs over {row.events}{" "}
                           {row.events === 1 ? "event" : "events"}
                         </div>
                       </div>
@@ -342,9 +342,6 @@ const ScrapReport = () => {
                         </td>
                         <td className="py-3.5 px-6">
                           <div className="font-bold text-slate-900">{row.productName}</div>
-                          <div className="text-[10px] font-mono text-brand-700">
-                            {row.productCode || "—"}
-                          </div>
                         </td>
                         <td className="py-3.5 px-6 text-center font-semibold">
                           {row.quantity} {row.unit}

@@ -638,7 +638,7 @@ class DuplicateMatchesCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '${match.code} · ${match.storeRoom}'
+                    '${match.storeRoom}'
                     '${match.rackNumber.isEmpty ? '' : ' · ${match.rackNumber}'} · '
                     '${match.quantity} ${match.unit} in stock',
                     style: const TextStyle(color: AppColors.textMuted, fontSize: 10.5),

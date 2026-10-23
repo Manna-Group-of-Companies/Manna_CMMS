@@ -85,6 +85,36 @@ abstract final class AppColors {
   static const accentDeep = Color(0xFF4A1FB8);
 
   static const white = Color(0xFFFFFFFF);
+
+  // ── Ink ───────────────────────────────────────────────────────────────────
+  /// The dark slate behind the dashboard header and the side drawer.
+  static const ink = Color(0xFF1D2330);
+
+  /// A raised panel on [ink]: the drawer's active row, header chips.
+  static const inkRaised = Color(0xFF2A3242);
+
+  /// Secondary text on [ink].
+  static const inkMuted = Color(0xFF9AA3B4);
+}
+
+/// Colours for where a breakdown or maintenance request has got to, so a
+/// list reads at a glance: amber waiting, blue being worked, green done.
+abstract final class WorkColors {
+  static Color ofState(String state) => switch (state) {
+        'Reported' || 'Requested' || 'Pending' => AppColors.warning,
+        'Attended' || 'Assigned' || 'Approved' => AppColors.info,
+        'Under Repair' || 'In Progress' || 'Ordered' => AppColors.accent,
+        'Repaired' || 'Completed' || 'Closed' || 'Received' => AppColors.success,
+        'Rejected' => AppColors.danger,
+        _ => AppColors.textMuted,
+      };
+
+  static Color ofPriority(String priority) => switch (priority) {
+        'Critical' || 'High' || 'Urgent' => AppColors.danger,
+        'Medium' => AppColors.warning,
+        'Low' => AppColors.success,
+        _ => AppColors.textMuted,
+      };
 }
 
 /// Semantic colours for the request/stock states.
@@ -122,5 +152,19 @@ abstract final class AppGradients {
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: [AppColors.primary, AppColors.primaryDarker],
+  );
+
+  /// The full-bleed splash: the logo orange easing into the deep brand shade.
+  static const splash = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [Color(0xFFE8601C), AppColors.primary, AppColors.primaryDarker],
+  );
+
+  /// The dashboard header and the side drawer.
+  static const ink = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF242B3A), AppColors.ink],
   );
 }

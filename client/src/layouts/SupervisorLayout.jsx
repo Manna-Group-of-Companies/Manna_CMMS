@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth, homePathFor, canSeeSupervisorConsole } from "../context/AuthContext";
 import Sidebar from "../components/Sidebar";
 import Navbar from "../components/Navbar";
+import { useErpRefreshFallback } from "../hooks/useErpRefresh";
 
 /**
  * The routes both consoles serve, under the same names.
@@ -19,9 +20,18 @@ const SHARED_WITH_CONSOLE = [
   "/assets",
   "/electrical",
   "/categories",
+  "/settings",
   "/breakdowns",
   "/maintenance-requests",
   "/preventive",
+];
+
+/** The store screens SAP is behind - the same rule as the shared console. */
+const SAP_SYNC_PATHS = [
+  "/supervisor/products",
+  "/supervisor/goods-receipts",
+  "/supervisor/purchase-requests",
+  "/supervisor/settings",
 ];
 
 const SupervisorLayout = () => {
@@ -29,12 +39,16 @@ const SupervisorLayout = () => {
   const location = useLocation();
   // The sidebar is a drawer below lg; this is what opens it.
   const [menuOpen, setMenuOpen] = useState(false);
+  // Refresh on a screen with no reload of its own remounts it, so every view
+  // offers the top bar's Refresh (23 Oct 2026).
+  const [reloadKey, setReloadKey] = useState(0);
+  useErpRefreshFallback(() => setReloadKey((k) => k + 1));
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-canvas text-slate-900 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-brand-500"></div>
+      <div className="min-h-dvh bg-canvas text-slate-900 flex items-center justify-center">
+        <div role="status" className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-brand-500" aria-hidden="true"></div>
           <span className="text-sm font-medium text-slate-600">Loading supervisor session...</span>
         </div>
       </div>
@@ -61,6 +75,7 @@ const SupervisorLayout = () => {
 
   const getPageTitle = () => {
     const path = location.pathname;
+    if (path.includes("/dashboard")) return "Dashboard";
     if (path.includes("/products")) return "Browse Engineering Stock Catalog";
     if (path.includes("/goods-receipts")) return "Goods Receipts";
     if (path.includes("/purchase-requests")) return "Purchase Requests";
@@ -70,20 +85,27 @@ const SupervisorLayout = () => {
     if (path.includes("/maintenance-requests")) return "Maintenance Requests";
     if (path.includes("/preventive")) return "Preventive Maintenance";
     if (path.includes("/assets")) return "Asset Management";
-    if (path.includes("/categories")) return "Categories";
+    if (path.includes("/settings") || path.includes("/categories")) return "Settings";
     return "Supervisor Stock Manager";
   };
 
   return (
-    <div className="min-h-screen bg-canvas flex">
+    <div className="min-h-dvh bg-canvas flex">
+      <a href="#main" className="skip-link">
+        Skip to content
+      </a>
       {/* Sidebar Navigation */}
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
 
       {/* Main Content Area */}
-      <div className="flex-1 min-w-0 flex flex-col h-screen max-h-[100dvh] overflow-hidden">
-        <Navbar title={getPageTitle()} onMenuClick={() => setMenuOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-canvas">
-          <Outlet />
+      <div className="flex-1 min-w-0 flex flex-col h-dvh overflow-hidden">
+        <Navbar
+          title={getPageTitle()}
+          onMenuClick={() => setMenuOpen(true)}
+          sapSync={SAP_SYNC_PATHS.some((p) => location.pathname.startsWith(p))}
+        />
+        <main id="main" tabIndex={-1} className="focus:outline-none flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-canvas">
+          <Outlet key={reloadKey} />
         </main>
       </div>
     </div>

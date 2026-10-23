@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import { useDialog } from "../../context/DialogContext";
 import { HardHat, Loader2, Plus, RotateCcw, UserMinus, Users } from "lucide-react";
+import { useErpRefresh } from "../../hooks/useErpRefresh";
 
 /**
  * The maintenance team: who may be named on a repair.
@@ -21,6 +23,7 @@ const TRADES = ["Fitter", "Electrician", "Helper", "Supervisor", "Contractor"];
 
 const Technicians = () => {
   const { showToast } = useNotifications();
+  const { confirm } = useDialog();
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +48,9 @@ const Technicians = () => {
     load();
   }, [load]);
 
+  // The top bar's Refresh: read ERPNext again without leaving the screen.
+  useErpRefresh(() => load({ silent: true }));
+
   const add = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
@@ -65,9 +71,12 @@ const Technicians = () => {
   const setActive = async (row, active) => {
     if (
       !active &&
-      !window.confirm(
-        `Record that ${row.name} has left?\n\nThey stay on every repair they already worked, and stop being offered on new ones.`
-      )
+      !(await confirm({
+        title: `Record that ${row.name} has left?`,
+        message: "They stay on every repair they already worked, and stop being offered on new ones.",
+        confirmLabel: "Record as left",
+        tone: "warning",
+      }))
     ) {
       return;
     }
@@ -107,10 +116,6 @@ const Technicians = () => {
           </span>
           <div>
             <h2 className="panel-title">Maintenance team</h2>
-            <p className="panel-sub">
-              The names offered under &ldquo;Repaired by&rdquo; on a breakdown or a maintenance
-              request.
-            </p>
           </div>
         </div>
       </div>

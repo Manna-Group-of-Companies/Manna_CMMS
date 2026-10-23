@@ -5,7 +5,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { MAINTENANCE_MANAGER, MANAGER, PRODUCTION_MANAGER, maySee, rolesFor } from "../config/access.js";
+import {
+  MAINTENANCE_MANAGER,
+  MANAGER,
+  PRODUCTION_MANAGER,
+  maySee,
+  maySeeItemValue,
+  rolesFor,
+} from "../config/access.js";
 
 describe("the release", () => {
   it("shows purchase requests to the Admin, maintenance, the plant heads and the purchase manager", () => {
@@ -26,6 +33,24 @@ describe("the release", () => {
     for (const role of [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER]) {
       assert.ok(maySee(role, "breakdowns"), role);
       assert.ok(maySee(role, "maintenanceRequests"), role);
+    }
+  });
+});
+
+describe("item value", () => {
+  it("is the Maintenance Manager's alone (23 Oct 2026)", () => {
+    assert.ok(maySeeItemValue(MAINTENANCE_MANAGER));
+    for (const role of [
+      MANAGER,
+      PRODUCTION_MANAGER,
+      "Supervisor",
+      "Higher Management",
+      "VP Operations",
+      "Purchase Manager",
+      "Maintenance Member",
+      undefined,
+    ]) {
+      assert.ok(!maySeeItemValue(role), String(role));
     }
   });
 });

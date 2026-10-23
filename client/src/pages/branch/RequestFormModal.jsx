@@ -103,7 +103,7 @@ const RequestFormModal = ({ items = [], preselected = null, onClose, onSubmitted
               <option value="">Select engineering stock from your room</option>
               {inStock.map((item) => (
                 <option key={item.productId} value={item.productId}>
-                  {item.name} ({item.code}) — {item.quantity} {item.unit} available
+                  {item.name} — {item.quantity} {item.unit} available
                 </option>
               ))}
             </select>

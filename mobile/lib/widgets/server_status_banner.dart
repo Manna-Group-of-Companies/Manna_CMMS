@@ -370,7 +370,6 @@ class _ServerSettingsSheetState extends State<_ServerSettingsSheet> {
               style: const TextStyle(fontSize: 14, color: AppColors.textStrong),
               onSubmitted: (_) => busy ? null : _save(),
               decoration: const InputDecoration(
-                hintText: '192.168.1.35',
                 prefixIcon: Icon(Icons.dns_outlined, size: 18),
               ),
             ),

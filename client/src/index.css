@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* `short:` - a laptop-height window (a 1366x768 screen leaves about 650px
+   under the browser bars). The sign-in tightens its spacing under it. */
+@custom-variant short (@media (max-height: 780px));
+
 /* Brand ramp — the Manna orange, taken from the group logo.
    Exposed to Tailwind as `bg-brand-600`, `text-brand-700`, …
 
@@ -30,10 +34,22 @@
      logo's second colour. The canvas carries a faint warm cast so it sits with
      the orange rather than reading as plain grey, and is a step deeper than
      the white cards so they separate without needing a heavier border. */
-  --color-canvas: #f5f2ef;
+  --color-canvas: #f4f5f7;
   --color-charcoal-800: #3a393c;
   --color-charcoal-900: #2e2d30;
   --color-charcoal-950: #232225;
+
+  /* The slate navy behind the sidebar and the dashboard header - the same
+     ink the phone app's drawer is drawn in, so the two read as one product. */
+  /* Redesign (22 Oct 2026): a near-black charcoal rather than navy, so the
+     orange is the only colour in the chrome and active items read at once. */
+  --color-ink-700: #2f343c;
+  --color-ink-800: #1e2228;
+  --color-ink-900: #181b20;
+  --color-ink-950: #121418;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
 
   /* One motion curve for the whole console, so panels, modals and drawers
      all decelerate the same way. */
@@ -41,6 +57,66 @@
 
   --animate-fade-in: fade-in 0.15s ease-out;
   --animate-rise-in: rise-in 0.2s var(--ease-out-soft);
+  --animate-toast-in: toast-in 0.28s var(--ease-out-soft);
+  --animate-drawer-in: drawer-in 0.28s var(--ease-out-soft);
+
+  /* Side panels slide in from the right edge they are attached to. */
+  @keyframes drawer-in {
+    from {
+      transform: translateX(32px);
+      opacity: 0.4;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+
+  /* Toasts slide in from the edge they live on, and a thin bar along the
+     bottom runs down the time left before one closes itself. */
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateX(24px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes toast-timer {
+    from {
+      transform: scaleX(1);
+    }
+    to {
+      transform: scaleX(0);
+    }
+  }
+  /* The login's background glows: slow enough to read as light moving, never
+     as something asking to be looked at. */
+  --animate-drift: drift 18s ease-in-out infinite;
+  --animate-bob: bob 7s ease-in-out infinite;
+
+  @keyframes drift {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    50% {
+      transform: translate3d(24px, -32px, 0) scale(1.08);
+    }
+  }
+
+  @keyframes bob {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
 
   @keyframes fade-in {
     from {
@@ -68,7 +144,8 @@
 @layer base {
   body {
     @apply bg-canvas text-slate-800 antialiased;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
   }
 
   /* Numbers in tables and metric cards line up column-wise, and a stat that
@@ -83,6 +160,17 @@
   :focus-visible {
     outline: 2px solid var(--color-brand-500);
     outline-offset: 2px;
+  }
+
+  /* No double-tap zoom wait on controls: a tap on a phone acts at once. */
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  label,
+  [role="button"] {
+    touch-action: manipulation;
   }
 }
 
@@ -141,34 +229,45 @@
   .panel,
   .table-card,
   .empty {
-    @apply rounded-2xl border border-slate-200 bg-white;
+    /* Garage-dashboard look (23 Oct 2026): softer, rounder cards that float
+       on the canvas on a shadow rather than sit inside a hard border. */
+    @apply rounded-2xl border border-slate-200/60 bg-white;
     box-shadow:
-      0 4px 14px rgba(15, 33, 41, 0.04),
-      0 1px 2px rgba(15, 33, 41, 0.03);
+      0 1px 2px rgba(16, 24, 40, 0.04),
+      0 8px 24px -12px rgba(16, 24, 40, 0.1);
+  }
+
+  /* ---------- Skip link ---------------------------------------------------- */
+
+  /* First thing a keyboard reaches on every console page: jumps past the
+     fifteen-odd sidebar links straight to the page. Hidden until focused. */
+  .skip-link {
+    @apply fixed left-3 top-3 z-[60] -translate-y-24 rounded-lg bg-brand-600 px-4 py-2.5 text-sm
+           font-semibold text-white shadow-lg transition-transform focus:translate-y-0;
   }
 
   /* ---------- Panel header (the bar at the top of most pages) -------------- */
 
   .panel {
-    @apply flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5;
+    @apply flex flex-col gap-3 px-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-5;
   }
 
   .panel-icon {
-    @apply grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-brand-500/15 bg-brand-50 text-brand-700;
+    @apply grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-700;
   }
 
   .panel-title {
-    @apply text-[15px] font-semibold leading-tight tracking-tight text-slate-900 sm:text-base;
+    @apply text-base font-bold leading-tight tracking-tight text-slate-900 sm:text-[17px];
   }
 
   .panel-sub {
-    @apply mt-0.5 text-xs leading-relaxed text-slate-500;
+    @apply mt-0.5 text-[13px] leading-relaxed text-slate-500;
   }
 
   /* ---------- Section heading inside a card -------------------------------- */
 
   .section-title {
-    @apply flex items-center gap-2 text-[15px] font-semibold tracking-tight text-slate-900;
+    @apply flex items-center gap-2 text-base font-semibold tracking-tight text-slate-900;
   }
 
   .eyebrow {
@@ -179,13 +278,13 @@
 
   .btn {
     @apply inline-flex h-10 shrink-0 cursor-pointer select-none items-center justify-center gap-2
-           whitespace-nowrap rounded-xl px-4 text-[13px] font-semibold
+           whitespace-nowrap rounded-xl px-4 text-sm font-semibold max-sm:h-11
            transition-colors duration-150 active:scale-[0.98]
            disabled:pointer-events-none disabled:opacity-50;
   }
 
   .btn-sm {
-    @apply h-9 gap-1.5 rounded-lg px-3 text-xs;
+    @apply h-9 gap-1.5 rounded-lg px-3 text-[13px] max-sm:h-10;
   }
 
   /* Square icon-only button; pair with `.btn-sm` for the table-row size. */
@@ -202,19 +301,22 @@
   }
 
   .btn-neutral {
-    @apply border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900;
+    @apply border border-slate-300/80 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50 hover:text-slate-900;
   }
 
   .btn-subtle {
     @apply bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900;
   }
 
+  /* White on emerald-600 is 3.8:1 and on rose-500 3.7:1, so both fills sit a
+     step darker and hover darkens further - a hover that lightens a filled
+     button takes its label below AA (emerald-500 was 2.5:1). */
   .btn-success {
-    @apply bg-emerald-600 text-white shadow-sm hover:bg-emerald-500;
+    @apply bg-emerald-700 text-white shadow-sm hover:bg-emerald-800;
   }
 
   .btn-danger {
-    @apply bg-rose-600 text-white shadow-sm hover:bg-rose-500;
+    @apply bg-rose-600 text-white shadow-sm hover:bg-rose-700;
   }
 
   /* Destructive but not yet confirmed — reads quiet until hovered. */
@@ -224,7 +326,7 @@
 
   /* Bare icon affordance for row actions. */
   .icon-btn {
-    @apply grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-500
+    @apply grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-500
            transition-colors hover:bg-slate-100 hover:text-slate-900
            disabled:pointer-events-none disabled:opacity-30;
   }
@@ -239,29 +341,48 @@
 
   /* ---------- Tabs / segmented control ------------------------------------ */
 
+  /* Separate pills rather than a segmented bar: the filter row the phone
+     app's lists open with. */
   .tabs {
-    @apply inline-flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1;
+    @apply inline-flex flex-wrap gap-2;
   }
 
   .tab {
-    @apply cursor-pointer rounded-lg px-3.5 py-1.5 text-xs font-semibold text-slate-600
-           transition-colors hover:text-slate-900;
+    @apply inline-flex h-9 cursor-pointer items-center rounded-full border border-slate-300/80 bg-white px-4 text-[13px]
+           font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:text-slate-900;
   }
 
   .tab-active {
-    @apply bg-brand-600 text-white shadow-sm hover:text-white;
+    @apply border-slate-900 bg-slate-900 text-white
+           hover:border-slate-900 hover:text-white;
+  }
+
+  /* ---------- Work rows ----------------------------------------------------- */
+
+  /* The square at the start of a breakdown or request row: a tinted tile with
+     the icon for the kind of work, coloured by priority. */
+  .thumb {
+    @apply grid h-11 w-11 shrink-0 place-items-center rounded-[10px] border;
+  }
+
+  /* Dashboard figure: icon chip, big number, small label. */
+  .stat-tile {
+    @apply rounded-2xl border border-slate-200/60 bg-white p-4 sm:p-5;
+    box-shadow:
+      0 1px 2px rgba(16, 24, 40, 0.04),
+      0 8px 24px -12px rgba(16, 24, 40, 0.1);
   }
 
   /* ---------- Form controls ------------------------------------------------ */
 
   .field {
-    @apply h-10 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900
-           placeholder-slate-400 transition-colors
+    @apply h-10 w-full rounded-xl border border-slate-300/80 bg-white px-3.5 text-sm text-slate-900
+           placeholder-slate-400 transition-colors hover:border-slate-400 max-sm:h-11 max-sm:text-base
            focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/15;
   }
 
   .field-sm {
-    @apply h-9 rounded-lg px-3 text-[13px];
+    @apply h-9 rounded-lg px-3 text-[13px] max-sm:h-10;
   }
 
   .field-area {
@@ -269,7 +390,7 @@
   }
 
   .field-label {
-    @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-500;
+    @apply mb-1.5 block text-[13px] font-semibold text-slate-700;
   }
 
   /* Search box: the icon is absolutely placed, so the input needs the room. */
@@ -288,16 +409,16 @@
   }
 
   .tbl {
-    @apply w-full border-collapse text-left text-[13px] text-slate-700;
+    @apply w-full border-collapse text-left text-sm text-slate-700;
   }
 
   .tbl thead th {
-    @apply whitespace-nowrap border-b border-slate-200 bg-slate-50 px-4 py-3
+    @apply whitespace-nowrap border-b border-slate-200 bg-slate-50/80 px-4 py-3
            text-[11px] font-semibold uppercase tracking-wider text-slate-500;
   }
 
   .tbl tbody td {
-    @apply border-b border-slate-100 px-4 py-3 align-middle;
+    @apply border-b border-slate-100 px-4 py-3.5 align-middle;
   }
 
   .tbl thead th:first-child,
@@ -315,7 +436,7 @@
   }
 
   .tbl tbody tr {
-    @apply transition-colors hover:bg-slate-50;
+    @apply transition-colors hover:bg-brand-50/40;
   }
 
   /* Compact density for the dashboard's preview tables. */
@@ -326,7 +447,7 @@
 
   /* Reference numbers, product codes: quieter than the name they sit under. */
   .mono {
-    @apply font-mono text-[11px] tracking-tight;
+    @apply font-mono text-[12px] tracking-tight;
   }
 
   .cell-title {
@@ -335,9 +456,11 @@
 
   /* ---------- Badges ------------------------------------------------------- */
 
+  /* Soft rounded chips in sentence case - the status and priority chips the
+     phone app draws, so a record reads the same on both. */
   .badge {
-    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-0.5
-           text-[10px] font-bold uppercase tracking-wider;
+    @apply inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-full border px-2.5
+           text-[12px] font-semibold tracking-normal;
   }
 
   .badge-pill {
@@ -354,23 +477,23 @@
   }
 
   .badge-emerald {
-    @apply border-emerald-500/20 bg-emerald-500/10 text-emerald-600;
+    @apply border-emerald-500/20 bg-emerald-500/10 text-emerald-700;
   }
 
   .badge-rose {
-    @apply border-rose-500/20 bg-rose-500/10 text-rose-600;
+    @apply border-rose-500/20 bg-rose-500/10 text-rose-700;
   }
 
   .badge-amber {
-    @apply border-amber-500/20 bg-amber-500/10 text-amber-600;
+    @apply border-amber-500/20 bg-amber-500/10 text-amber-800;
   }
 
   .badge-orange {
-    @apply border-orange-500/20 bg-orange-500/10 text-orange-600;
+    @apply border-orange-500/20 bg-orange-500/10 text-orange-700;
   }
 
   .badge-indigo {
-    @apply border-indigo-500/20 bg-indigo-500/10 text-indigo-600;
+    @apply border-indigo-500/20 bg-indigo-500/10 text-indigo-700;
   }
 
   .badge-violet {
@@ -392,17 +515,17 @@
   }
 
   .kv-label {
-    @apply mb-0.5 block text-[11px] text-slate-500;
+    @apply mb-0.5 block text-[12px] text-slate-500;
   }
 
   .kv-value {
-    @apply text-[13px] font-semibold text-slate-800;
+    @apply text-sm font-semibold text-slate-800;
   }
 
   /* ---------- Inline notes ------------------------------------------------- */
 
   .note {
-    @apply flex gap-2 rounded-xl border p-3 text-[12px] leading-relaxed;
+    @apply flex gap-2 rounded-[10px] border p-3 text-[13px] leading-relaxed;
   }
 
   .note-amber {
@@ -443,7 +566,7 @@
   }
 
   .empty-sub {
-    @apply text-xs text-slate-500;
+    @apply text-[13px] text-slate-500;
   }
 
   /* Same idea, but nested inside a card that already has a border. */
@@ -454,15 +577,15 @@
   /* ---------- Modals ------------------------------------------------------- */
 
   .modal-backdrop {
-    @apply fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm;
+    @apply fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-[2px] max-sm:p-0;
     animation: var(--animate-fade-in);
   }
 
   /* A column so the header and footer stay put while the body scrolls, rather
      than the whole dialog scrolling its own title away. */
   .modal {
-    @apply flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200
-           bg-white text-left shadow-2xl;
+    @apply flex max-h-[90vh] w-full flex-col overflow-hidden rounded-xl border border-slate-200
+           bg-white text-left shadow-2xl max-sm:max-h-[100dvh] max-sm:rounded-none;
     animation: var(--animate-rise-in);
   }
 
@@ -475,7 +598,7 @@
   }
 
   .modal-sub {
-    @apply mt-0.5 text-xs text-slate-500;
+    @apply mt-0.5 text-[13px] text-slate-500;
   }
 
   .modal-body {

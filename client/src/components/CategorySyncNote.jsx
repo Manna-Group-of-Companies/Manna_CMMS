@@ -60,8 +60,9 @@ const CategorySyncNote = ({ compact = false, refreshKey = 0 }) => {
       ? `Waiting for the SAP server to pick up the change${status.requestedAt ? ` (asked ${fmt(status.requestedAt)})` : ""}.`
       : status.status === "Running"
         ? "The SAP server is updating SAP now."
-        : status.lastResult
-          ? `Last SAP sync ${fmt(status.lastSyncAt || status.lastRunStartedAt)}: ${status.lastResult}`
+        : status.lastSyncAt || status.lastRunStartedAt
+          ? // Only when it last ran; the run's tally of counts read as noise.
+            `Last SAP sync ${fmt(status.lastSyncAt || status.lastRunStartedAt)}`
           : "No SAP category sync has run yet.";
 
   if (!compact || status.pendingCount || status.status !== "Idle") {
@@ -80,7 +81,7 @@ const CategorySyncNote = ({ compact = false, refreshKey = 0 }) => {
             <>
               {" "}
               <b>{status.failedCount}</b> failed last time
-              {!compact && status.failed?.length ? `: ${status.failed.map((f) => `${f.code} (${f.error})`).join("; ")}` : ""}.
+              {!compact && status.failed?.length ? `: ${status.failed.map((f) => `${f.name || "an item"} (${f.error})`).join("; ")}` : ""}.
             </>
           )}
         </span>

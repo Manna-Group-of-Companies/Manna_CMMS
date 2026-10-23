@@ -261,7 +261,6 @@ const StockRooms = () => {
                         <div className="font-semibold text-slate-900 text-sm truncate">
                           {item.name}
                         </div>
-                        <div className="text-[10px] font-mono text-rose-600">{item.code}</div>
                       </div>
                       {item.inOpenMerge > 0 && (
                         <span
@@ -333,7 +332,6 @@ const StockRooms = () => {
                         <div className="font-semibold text-slate-900 text-sm truncate">
                           {item.name}
                         </div>
-                        <div className="text-[10px] font-mono text-brand-700">{item.code}</div>
                       </div>
                       <span
                         className={`text-sm font-bold px-2 py-0.5 rounded ${
@@ -483,7 +481,7 @@ const StockRooms = () => {
                   type="text"
                   value={form.note}
                   onChange={(e) => setForm({ ...form, note: e.target.value })}
-                  placeholder="e.g. Quarterly stock take"
+                 
                   className="w-full px-4 py-2.5 text-sm rounded-xl bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-brand-500"
                 />
               </div>

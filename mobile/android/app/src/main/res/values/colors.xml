@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- AppColors.canvas from lib/core/palette.dart. The app ships a light
-         theme only, so this is deliberately not overridden in values-night —
-         the launch screen should match the UI it hands over to, not the
-         system's dark setting. -->
-    <color name="launch_background">#F4F6F7</color>
+    <!-- The orange of the Flutter splash (AppColors.primary in
+         lib/core/palette.dart), so the native launch screen hands over to it
+         without a flash. Not overridden in values-night: the launch screen
+         should match the UI it hands over to, not the system's dark setting. -->
+    <color name="launch_background">#D14A0C</color>
 </resources>

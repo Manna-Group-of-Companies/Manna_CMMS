@@ -6,7 +6,6 @@ import TaxonomySelect, {
   useSubCategoryOptions,
   useSubCategoryBOptions,
 } from "../../components/TaxonomySelect";
-import CategorySyncNote from "../../components/CategorySyncNote";
 import ItemNameBuilder, { EMPTY_NAMING, isNamingBlank } from "../../components/ItemNameBuilder";
 import { useFormDraft, describeWhen } from "../../hooks/useFormDraft";
 import Select from "../../components/Select";
@@ -66,6 +65,10 @@ const EMPTY = {
 const NAME_MAX = 100;
 const SUB_MAX = 50;
 
+/** The company's "Engineering Stocks" item group in SAP - where every item goes. */
+const engineeringGroupOf = (company) =>
+  company?.groups.find((g) => g.name.trim().toLowerCase() === "engineering stocks")?.name || "";
+
 /** Only a form with something typed into it is worth keeping as a draft. */
 const isWorthKeeping = ({ form } = {}) =>
   Boolean(form && (form.name || form.foreignName || form.brand || form.subCategory));
@@ -93,9 +96,13 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
     () => (companies || []).find((c) => c.abbr === form.company) || null,
     [companies, form.company]
   );
-  const group = company?.groups.find((g) => g.name === form.itemGroup) || null;
-  const subOptions = useSubCategoryOptions(form.itemGroup);
-  const subBOptions = useSubCategoryBOptions(form.itemGroup, form.subCategory);
+  // Every engineering item lives in the company's "Engineering Stocks" item
+  // group, so the group is no longer asked for: an item being edited keeps
+  // the group it has, and a new one takes Engineering Stocks.
+  const itemGroup = form.itemGroup || engineeringGroupOf(company);
+  const group = company?.groups.find((g) => g.name === itemGroup) || null;
+  const subOptions = useSubCategoryOptions(itemGroup);
+  const subBOptions = useSubCategoryBOptions(itemGroup, form.subCategory);
 
   // The SAP lists, per company.
   useEffect(() => {
@@ -178,7 +185,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
     e.preventDefault();
     setProblem("");
     if (!form.company) return setProblem("Choose the SAP company.");
-    if (!form.itemGroup) return setProblem("Choose the item group.");
+    if (!itemGroup) return setProblem("This company has no Engineering Stocks item group in SAP.");
     if (!form.name.trim()) return setProblem("Type the description.");
     if (form.name.trim().length > NAME_MAX) return setProblem(`The description can be at most ${NAME_MAX} characters - SAP's limit.`);
     if (form.subCategoryB && !form.subCategory) return setProblem("Sub-category B needs a Sub-category A above it.");
@@ -187,7 +194,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
     if (!isEdit && (!Number.isFinite(openingQty) || openingQty < 0)) return setProblem("The opening quantity must be zero or more.");
 
     const payload = {
-      itemGroup: form.itemGroup,
+      itemGroup,
       subCategory: form.subCategory,
       subCategoryB: form.subCategoryB,
       foreignName: form.foreignName,
@@ -206,7 +213,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       if (isEdit) {
         await API.put(`/products/${encodeURIComponent(product.code)}`, {
           ...payload,
-          category: form.itemGroup,
+          category: itemGroup,
           name: form.name.trim(),
         });
         showToast("Saved. The name, categories, HSN and tax rate are sent to SAP by the item master sync.", "success");
@@ -240,7 +247,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       <div className="modal-head">
         <h3 className="modal-title truncate">
           <Boxes className="h-[18px] w-[18px] text-brand-700 shrink-0" />
-          <span className="truncate">{isEdit ? `Edit ${product.name}` : "New engineering item (SAP item master)"}</span>
+          <span className="truncate">{isEdit ? `Edit ${product.name}` : "New engineering item"}</span>
         </h3>
         <button onClick={onClose} className="modal-close" aria-label="Close">
           <X className="h-5 w-5" />
@@ -266,8 +273,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
               This item is not in SAP, so it cannot be edited here. Items are created and edited as SAP items now.
             </div>
           )}
-
-          {isEdit && !notSap && <CategorySyncNote compact />}
 
           {loadError && <div className="note note-rose text-sm">{loadError}</div>}
           {!companies && !loadError && (
@@ -296,20 +301,8 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                   )}
                 </div>
                 <div>
-                  <label className={label} htmlFor="sap-group">Item group *</label>
-                  <Select
-                    id="sap-group"
-                    value={form.itemGroup}
-                    onChange={bind("itemGroup")}
-                    disabled={!company}
-                    options={(company?.groups || []).map((g) => g.name)}
-                    placeholder={company ? "Choose…" : "Choose the company first"}
-                    required
-                  />
-                </div>
-                <div>
                   <label className={label} htmlFor="sap-sub-a">Sub-category A</label>
-                  <TaxonomySelect id="sap-sub-a" value={form.subCategory} options={subOptions} onChange={(v) => set("subCategory", v.slice(0, SUB_MAX))} placeholder="None" disabled={!form.itemGroup} />
+                  <TaxonomySelect id="sap-sub-a" value={form.subCategory} options={subOptions} onChange={(v) => set("subCategory", v.slice(0, SUB_MAX))} placeholder="None" disabled={!itemGroup} />
                 </div>
                 <div>
                   <label className={label} htmlFor="sap-sub-b">Sub-category B</label>
@@ -322,18 +315,19 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                 <Hash className="h-4 w-4 text-slate-400 shrink-0" />
                 {isEdit ? (
                   <span>
-                    Item code <span className="mono text-brand-700">{product.sap?.code || product.code}</span> (SAP) · <span className="mono">{product.code}</span> here
+                    Item code{" "}
+                    <span className="mono text-brand-700">{product.sap?.code || "not assigned yet"}</span>
                   </span>
                 ) : group ? (
                   group.automatic ? (
-                    <span>Item code: assigned by SAP's automatic numbering when the item is created.</span>
+                    <span>Item code: assigned by SAP</span>
                   ) : (
                     <span>
-                      Item code will be <span className="mono font-semibold text-brand-700">{group.nextCode}</span>, or the next free one - SAP confirms it when the item is created.
+                      Item code <span className="mono font-semibold text-brand-700">{group.nextCode}</span>
                     </span>
                   )
                 ) : (
-                  <span className="text-slate-500">The item code follows the company's SAP numbering once the group is chosen.</span>
+                  <span className="text-slate-500">Item code: choose the company</span>
                 )}
               </div>
 
@@ -374,7 +368,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="sm:col-span-2">
                   <label className={label} htmlFor="sap-foreign">
-                    Foreign name{isEdit && <span className="text-slate-400 font-normal"> (CMMS only — not sent to SAP)</span>}
+                    Foreign name
                   </label>
                   <input id="sap-foreign" className="field" value={form.foreignName} onChange={bind("foreignName")} maxLength={NAME_MAX} />
                 </div>
@@ -395,7 +389,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                 </div>
                 <div>
                   <label className={label} htmlFor="sap-bill-unit">
-                    Bill unit <span className="text-slate-400 font-normal">(only if the supplier bills in another unit)</span>
+                    Bill unit
                   </label>
                   <Select
                     id="sap-bill-unit"
@@ -405,12 +399,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                     options={(company?.units || []).filter((u) => u.toLowerCase() !== String(form.unit).toLowerCase())}
                     placeholder="Same as unit"
                   />
-                  {form.billUnit && (
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      Goods receipts ask for the quantity on the bill in {form.billUnit} and the quantity received in{" "}
-                      {form.unit}.
-                    </p>
-                  )}
                 </div>
                 {/*
                   HSN and tax rate come off a bill, so adding an item no longer
@@ -447,7 +435,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                 )}
                 <div>
                   <label className={label} htmlFor="sap-min">
-                    Minimum stock{isEdit && <span className="text-slate-400 font-normal"> (CMMS only — not sent to SAP)</span>}
+                    Minimum stock
                   </label>
                   <input id="sap-min" type="number" min="0" step="any" className="field" value={form.minStock} onChange={bind("minStock")} />
                 </div>

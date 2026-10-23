@@ -7,6 +7,8 @@
 // manager converts it to a Purchase Order in SAP; the sync sees the PO (its lines carry BaseType 1470000113 =
 // the request) and records the PO number, and the PO appears in the CMMS goods receipt form.
 //   status Queued -> In SAP -> Ordered -> Closed, or Failed.
+// Completed (23 Oct 2026) is set by the CMMS server once the goods receipts cover the request; the sync never
+// writes it and never reads a Completed request. server/scripts/syncPurchasing.js adds it to an existing site.
 // Since 20 Oct 2026 the purchase manager can also make the PO in the CMMS: its po_* fields are Custom Fields
 // added by server/scripts/syncPurchasing.js, and PASS G of the sync posts it (post_purchase_orders).
 const erp = require('./erp.js');
@@ -38,7 +40,7 @@ const REQUEST = {
   permissions: PERMS.slice(0, 1),
   fields: [
     f('company', 'SAP Company', 'Data', { length: 10, reqd: 1, in_list_view: 1 }),
-    f('status', 'Status', 'Select', { options: 'Queued\nIn SAP\nOrdered\nClosed\nFailed', default: 'Queued', read_only: 1, in_list_view: 1 }),
+    f('status', 'Status', 'Select', { options: 'Queued\nIn SAP\nOrdered\nCompleted\nClosed\nFailed', default: 'Queued', read_only: 1, in_list_view: 1 }),
     f('required_by', 'Required By', 'Date', { reqd: 1, in_list_view: 1 }),
     f('reason', 'Reason', 'Small Text', { reqd: 1 }),
     f('col_a', '', 'Column Break'),

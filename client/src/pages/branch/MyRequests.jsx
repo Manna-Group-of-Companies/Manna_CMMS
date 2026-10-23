@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
+import { useDialog } from "../../context/DialogContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import RequestFormModal from "./RequestFormModal";
 import {
@@ -35,6 +36,7 @@ const FILTERS = [
  */
 const MyRequests = () => {
   const { showToast } = useNotifications();
+  const { confirm } = useDialog();
 
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState([]);
@@ -83,7 +85,13 @@ const MyRequests = () => {
   }, [requests, filter]);
 
   const withdraw = async (request) => {
-    if (!window.confirm(`Withdraw request ${request.requestNumber}?`)) return;
+    const ok = await confirm({
+      title: `Withdraw request ${request.requestNumber}?`,
+      message: "The store will no longer see it.",
+      confirmLabel: "Withdraw",
+      tone: "danger",
+    });
+    if (!ok) return;
     try {
       await API.delete(`/branch-requests/${request._id}`);
       showToast(`Request ${request.requestNumber} withdrawn`, "success");
@@ -258,10 +266,6 @@ const MyRequests = () => {
                         Details
                       </h5>
                       <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <p className="text-slate-500">Engineering Stock code</p>
-                          <p className="font-semibold text-slate-900">{request.productCode}</p>
-                        </div>
                         <div>
                           <p className="text-slate-500">Room stock when raised</p>
                           <p className="font-semibold text-slate-900">{request.stockAtRequest}</p>

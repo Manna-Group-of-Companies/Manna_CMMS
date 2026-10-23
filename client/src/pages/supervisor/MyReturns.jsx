@@ -303,7 +303,6 @@ const MyReturns = () => {
                         <div>
                           <div className="font-bold text-slate-900">{item.productName}</div>
                           <div className="text-[10px] font-mono text-brand-700 flex items-center gap-1">
-                            {item.productCode || "—"}
                             {item.sourceRoom && (
                               <>
                                 <Building2 className="h-2.5 w-2.5 opacity-70" />

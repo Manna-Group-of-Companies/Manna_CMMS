@@ -67,6 +67,85 @@ const toSummary = (row) => ({
   updatedAt: row.modified,
 });
 
+/** The breakdown states in which the machine is actually stopped. */
+const DOWN_STATES = ["Reported", "Attended", "Under Repair"];
+
+/**
+ * The condition the register shows, taken from the breakdowns.
+ *
+ * The machine's own `status` is written as a side effect of a breakdown - set to
+ * Under Repair when one is reported, back to Running when it is repaired - and
+ * that write is allowed to fail quietly, and is wrong for a machine with two
+ * breakdowns open (repairing one set it Running while the other was still
+ * open). So the register and the breakdown screen disagreed. Read-only: the
+ * stored field is left as it is, and only what is shown follows the breakdowns.
+ *
+ * - An open breakdown (Reported, Attended, Under Repair) means Under Repair,
+ *   whatever is stored, and the breakdown is named so the screen can say why.
+ * - Stored Under Repair with no open breakdown, where a breakdown was finished
+ *   after the machine was last saved, is the write that never happened: Running.
+ *   Under Repair set by hand with no breakdown behind it is left alone.
+ * - Stopped and Retired are a person's call and are never overridden.
+ *
+ * A failure to read the breakdowns falls back to the stored field rather than
+ * taking the register down with it.
+ */
+const withBreakdownStatus = async (assets) => {
+  if (!assets.length) return assets;
+  const ids = assets.map((a) => a.id);
+
+  const open = await listAll("CMMS Breakdown", {
+    fields: ["name", "machine", "workflow_state", "stopped_at"],
+    filters: [
+      ["CMMS Breakdown", "machine", "in", ids],
+      ["CMMS Breakdown", "workflow_state", "in", DOWN_STATES],
+    ],
+    orderBy: "stopped_at desc",
+  }).catch(() => null);
+  if (!open) return assets;
+
+  const openFor = new Map();
+  for (const b of open) {
+    if (!openFor.has(b.machine)) openFor.set(b.machine, b);
+  }
+
+  // Only the machines stored as Under Repair with nothing open need asking
+  // whether a breakdown has since been finished - normally none of them.
+  const stale = assets
+    .filter((a) => a.status === "Under Repair" && !openFor.has(a.id))
+    .map((a) => a.id);
+  const finished = stale.length
+    ? await listAll("CMMS Breakdown", {
+        fields: ["machine", "modified"],
+        filters: [
+          ["CMMS Breakdown", "machine", "in", stale],
+          ["CMMS Breakdown", "workflow_state", "in", ["Repaired", "Closed", "Cancelled"]],
+        ],
+        orderBy: "modified desc",
+      }).catch(() => [])
+    : [];
+  const lastFinished = new Map();
+  for (const b of finished) {
+    if (!lastFinished.has(b.machine)) lastFinished.set(b.machine, b.modified);
+  }
+
+  return assets.map((a) => {
+    const breakdown = openFor.get(a.id);
+    if (breakdown) {
+      return {
+        ...a,
+        status: a.status === "Retired" ? a.status : "Under Repair",
+        openBreakdown: { id: breakdown.name, state: breakdown.workflow_state },
+      };
+    }
+    const done = lastFinished.get(a.id);
+    if (a.status === "Under Repair" && done && String(done) >= String(a.updatedAt || "")) {
+      return { ...a, status: "Running", openBreakdown: null };
+    }
+    return { ...a, openBreakdown: null };
+  });
+};
+
 /**
  * The register, optionally narrowed to one plant.
  *
@@ -87,15 +166,18 @@ export const listAssets = async ({
   if (onlyPlants) {
     filters.push(["CMMS Machine", "plant", "in", onlyPlants.length ? onlyPlants : ["__none__"]]);
   }
-  if (status) filters.push(["CMMS Machine", "status", "=", status]);
-
   const rows = await listAll("CMMS Machine", {
     fields: FIELDS,
     filters: filters.length ? filters : undefined,
     orderBy: "name asc",
   });
 
-  const assets = rows.map(toSummary);
+  // The status filter is applied after the breakdowns have had their say, not
+  // as a Frappe filter, or "Under Repair" would miss a machine whose breakdown
+  // is open but whose stored field still says Running.
+  const assets = (await withBreakdownStatus(rows.map(toSummary))).filter(
+    (a) => !status || a.status === status
+  );
 
   const term = String(search).trim().toLowerCase();
   if (!term) return assets;
@@ -125,8 +207,9 @@ export const getAsset = async (id) => {
   });
   if (!doc) return null;
 
+  const [summary] = await withBreakdownStatus([toSummary(doc)]);
   return {
-    ...toSummary(doc),
+    ...summary,
     shiftsPerDay: doc.shifts_per_day || 0,
     runningHoursPerDay: Number(doc.running_hours_per_day || 0),
     // What the machine makes in an hour, and the unit it is counted in. This

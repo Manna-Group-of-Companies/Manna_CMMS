@@ -2,8 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stockmaster/router.dart';
 
 void main() {
-  test('manager@mannarubber.com (Production Manager) lands on Breakdowns, not the store', () {
-    expect(homePathFor('Production Manager'), breakdownsHome);
+  test('manager@mannarubber.com (Production Manager) lands on the Dashboard, not the store', () {
+    expect(homePathFor('Production Manager'), dashboardHome);
   });
 
   test('every role the server matrix names is served by the app', () {
@@ -68,7 +68,7 @@ void main() {
   });
 
   test('Higher Management sees Breakdowns only, so that is home', () {
-    expect(homePathFor('Higher Management'), breakdownsHome);
+    expect(homePathFor('Higher Management'), dashboardHome);
   });
 
   test('a Maintenance Member lands on Attendance, which is their whole app', () {
@@ -83,7 +83,7 @@ void main() {
     for (final role in ['Maintenance Manager', 'Manager']) {
       expect(canSeeAttendance(role), isFalse, reason: role);
       expect(isMaintenanceMember(role), isFalse, reason: role);
-      expect(homePathFor(role), breakdownsHome, reason: role);
+      expect(homePathFor(role), dashboardHome, reason: role);
     }
     for (final role in ['Supervisor', 'Production Manager', 'Higher Management', 'VP Operations']) {
       expect(canApproveAttendance(role), isFalse, reason: role);

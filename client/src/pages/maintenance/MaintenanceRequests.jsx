@@ -4,7 +4,6 @@ import {
   ClipboardList,
   Hammer,
   Plus,
-  RefreshCw,
   X,
 } from "lucide-react";
 
@@ -12,6 +11,8 @@ import API from "../../services/api";
 import MaintenanceRequestDetail from "./MaintenanceRequestDetail";
 import { useAuth, MANAGER, PRODUCTION_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
+import { WorkThumb } from "../../components/WorkUi";
+import { useErpRefresh } from "../../hooks/useErpRefresh";
 
 /**
  * Maintenance requests — the planned work.
@@ -40,28 +41,15 @@ const STATE_STYLE = {
   Cancelled: "badge-slate",
 };
 
-const PRIORITY_STYLE = {
-  High: "badge-orange",
+/**
+ * Urgency is the request's priority field (High / Medium / Low), shown under
+ * the name the plant uses for it - the raise form asks "How urgent".
+ */
+const URGENCY_STYLE = {
+  High: "badge-rose",
   Medium: "badge-amber",
   Low: "badge-slate",
 };
-
-/**
- * The kinds of work, in the order they are asked for.
- *
- * Kept in step with the Select on CMMS Maintenance Request. ERPNext refuses a
- * value that is not in its own list, so a type added here and not there is
- * refused on save — which is the right way round: the record is the authority.
- */
-const TYPES = [
-  "Fabrication",
-  "Preventive Maintenance",
-  "Scheduled Routine",
-  "Improvement / Modification",
-  "Installation",
-  "Inspection",
-  "Other",
-];
 
 /**
  * What the row's button offers.
@@ -106,15 +94,12 @@ const MaintenanceRequests = () => {
   const canRaise = user?.role === MANAGER || user?.role === PRODUCTION_MANAGER;
 
   const [rows, setRows] = useState([]);
-  const [summary, setSummary] = useState(null);
   const [machines, setMachines] = useState([]);
   const [plants, setPlants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const [showOpen, setShowOpen] = useState(true);
-  const [type, setType] = useState("");
-  const [mine, setMine] = useState(false);
   const [opened, setOpened] = useState("");
   const [raising, setRaising] = useState(false);
 
@@ -123,10 +108,9 @@ const MaintenanceRequests = () => {
       if (!silent) setLoading(true);
       try {
         const { data } = await API.get("/maintenance-requests", {
-          params: { open: showOpen, type, mine },
+          params: { open: showOpen },
         });
         setRows(data.rows || []);
-        setSummary(data.summary || null);
         setError("");
       } catch (err) {
         setError(
@@ -136,12 +120,15 @@ const MaintenanceRequests = () => {
         setLoading(false);
       }
     },
-    [showOpen, type, mine]
+    [showOpen]
   );
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // The top bar's Refresh: read ERPNext again without leaving the screen.
+  useErpRefresh(() => load(true));
 
   useEffect(() => {
     API.get("/breakdowns/machines").then(({ data }) => setMachines(data)).catch(() => setMachines([]));
@@ -160,31 +147,14 @@ const MaintenanceRequests = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn btn-sm btn-neutral" onClick={() => setShowOpen((v) => !v)}>
-            {showOpen ? "Showing open" : "Showing all"}
-          </button>
-          <button
-            className={`btn btn-sm ${mine ? "btn-primary" : "btn-neutral"}`}
-            onClick={() => setMine((v) => !v)}
-          >
-            {mine ? "Mine only" : "Everyone's"}
-          </button>
-          <select
-            className="field field-sm w-auto cursor-pointer"
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-          >
-            <option value="">All types</option>
-            {TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-          <button className="btn btn-sm btn-neutral" onClick={() => load()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
+          <div className="tabs">
+            <button className={`tab ${showOpen ? "tab-active" : ""}`} onClick={() => setShowOpen(true)}>
+              Open
+            </button>
+            <button className={`tab ${showOpen ? "" : "tab-active"}`} onClick={() => setShowOpen(false)}>
+              All
+            </button>
+          </div>
           {canRaise && (
             <button className="btn btn-sm btn-primary" onClick={() => setRaising(true)}>
               <Plus className="h-4 w-4" />
@@ -201,38 +171,15 @@ const MaintenanceRequests = () => {
         </div>
       )}
 
-      {summary && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Stat label="Open" value={summary.open} />
-          <Stat
-            label="Not started"
-            value={summary.notStarted}
-            tone={summary.notStarted ? "amber" : ""}
-          />
-          {/* The two halves of a backlog. One is maintenance's to clear and the
-              other is the requesters' — and a single "open" figure hides which
-              of the two anybody should be chased about. */}
-          <Stat label="Being worked on" value={summary.inProgress} />
-          <Stat
-            label="Waiting to be closed"
-            value={summary.awaitingClosure}
-            sub="done, unsigned"
-            tone={summary.awaitingClosure ? "amber" : ""}
-          />
-        </div>
-      )}
-
       <div className="table-card">
         <div className="table-scroll">
           <table className="tbl">
             <thead>
               <tr>
                 <th>Request</th>
-                <th>Type</th>
                 <th>For</th>
                 <th>Status</th>
-                <th>Waiting on</th>
-                <th>Priority</th>
+                <th>Urgency</th>
                 <th>Waiting</th>
                 <th></th>
               </tr>
@@ -252,10 +199,14 @@ const MaintenanceRequests = () => {
                     onClick={() => setOpened(r.id)}
                   >
                     <td>
-                      <span className="cell-title">{r.title}</span>
-                      <div className="mono text-xs text-slate-500">{r.id}</div>
+                      <div className="flex items-center gap-3">
+                        <WorkThumb icon={Hammer} priority={r.priority} />
+                        <div className="min-w-0">
+                          <span className="cell-title">{r.title}</span>
+                          <div className="mono text-xs text-slate-500">{r.id}</div>
+                        </div>
+                      </div>
                     </td>
-                    <td className="text-slate-600">{r.requestType || "—"}</td>
                     <td>
                       {r.machine ? (
                         <>
@@ -271,10 +222,9 @@ const MaintenanceRequests = () => {
                         {r.state}
                       </span>
                     </td>
-                    <td className="text-slate-500">{r.waitingOn || "—"}</td>
                     <td>
                       {r.priority ? (
-                        <span className={`badge ${PRIORITY_STYLE[r.priority] || "badge-slate"}`}>
+                        <span className={`badge ${URGENCY_STYLE[r.priority] || "badge-slate"}`}>
                           {r.priority}
                         </span>
                       ) : (
@@ -340,20 +290,6 @@ const MaintenanceRequests = () => {
     </div>
   );
 };
-
-const Stat = ({ label, value, sub, tone = "" }) => (
-  <div className="card p-4">
-    <p className="eyebrow">{label}</p>
-    <p
-      className={`mt-1 text-2xl font-bold tracking-tight ${
-        tone === "rose" ? "text-rose-600" : tone === "amber" ? "text-amber-600" : "text-slate-900"
-      }`}
-    >
-      {value}
-    </p>
-    {sub && <p className="text-[11px] text-slate-500">{sub}</p>}
-  </div>
-);
 
 /**
  * Raising a request.
