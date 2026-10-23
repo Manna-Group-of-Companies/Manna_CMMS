@@ -32,6 +32,7 @@ Read `C:\Users\eldhose\sap-tools\BRIEFING.md` before changing anything here.
 | `snapshots/2026-09-24/` | The SAP reads everything above was built from. |
 | `apply-mrppl-cleanup.js`, `verify-mrppl-cleanup.js`, `cancel-mrppl-po.js` | 10 Oct: the Manna Rubber physical-count clean-up, applied through the Service Layer (see below). Done 10 Oct 2026. |
 | `pull-mrppl-from-sap.js` | 11 Oct: PASS E (fetch from SAP) for Manna Rubber only, as a script that needs no `config.json` (SAP read from `sap-treads-stock-sync\config.json`, ERPNext via `erp.js`). Dry run by default, `--apply` writes ERPNext only, backs it up first and compares both sides after. Run 11 Oct 2026 (see below). |
+| `Move-ToEngineeringStocks.ps1` | 23 Oct: one engineering item group per company, "Engineering Stocks", and `default_group` on `item_master_options` for the CMMS form. One company per run, preview by default, `-Apply`, `-RenameGroup <code>`, `-Rollback <results csv>`; backups and results in `logs\engineering-stocks-*`. Run 23 Oct 2026 on all four: MRPPL 108 (already the name), MT new 123 (79 moved from 110), HRI 108 renamed (22 moved from 106 / 109), MTR 115 renamed (20 moved from 116). The old groups are empty and kept, in SAP and in the options. Items take their accounts from the warehouse (`GLMethod = glm_WH`), so a move posts nothing. |
 
 ## Company mapping (set by the user, 24 Sep 2026)
 
