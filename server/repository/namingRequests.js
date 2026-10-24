@@ -14,7 +14,6 @@ import { storeForCompany } from "../integrations/erpnext/stores.js";
 import {
   SAP_NAME_MAX,
   itemMasterOptions,
-  pickBillUnit,
   pickFrom,
   pickHsn,
   raiseSapFlag,
@@ -28,8 +27,7 @@ import {
  *   1. The Maintenance Manager fills in the SAP item master fields - SAP
  *      company, item group, Sub-category A/B, the description from the SOP
  *      naming builder, foreign name, unit, HSN code, tax rate - plus minimum
- *      stock, brand, the bill unit (when the supplier bills in another unit)
- *      and any opening quantity, and saves it.
+ *      stock, brand and any opening quantity, and saves it.
  *   2. Saving approves it at once (no approval step since 9 Oct 2026; before
  *      that the VP Operations approved it), marks it `sap_create_status =
  *      Queued` and raises the flag on "SAP Item Category Sync Control".
@@ -76,7 +74,6 @@ const FIELDS = [
   "sap_sub_type_b",
   "foreign_name",
   "sap_uom",
-  "bill_uom",
   "hsn_code",
   "tax_rate",
   "sap_create_status",
@@ -116,7 +113,6 @@ const toSummary = (row) => ({
   companyName: storeForCompany(row.sap_company)?.label || row.plant || "",
   foreignName: row.foreign_name || "",
   unit: row.sap_uom || row.uom,
-  billUnit: row.bill_uom || "",
   hsnCode: row.hsn_code || "",
   taxRate: row.tax_rate || "",
   brand: row.brand || "",
@@ -209,7 +205,7 @@ export const requestOptions = async () => {
  * Checks the SAP item master fields against the chosen company's published
  * SAP lists, returning SAP's own spellings.
  */
-const checkSapFields = async ({ company, itemGroup, subCategory, subCategoryB, foreignName, unit, billUnit, hsnCode, taxRate, minStock }) => {
+const checkSapFields = async ({ company, itemGroup, subCategory, subCategoryB, foreignName, unit, hsnCode, taxRate, minStock }) => {
   const abbr = tidy(company).toUpperCase();
   const options = (await itemMasterOptions())[abbr];
   if (!options) throw badRequest("Choose the SAP company the item belongs to.");
@@ -228,8 +224,6 @@ const checkSapFields = async ({ company, itemGroup, subCategory, subCategoryB, f
 
   const sapUnit = pickFrom(options.units, unit, "unit", label);
   if (!sapUnit) throw badRequest("Choose a unit.");
-  // CMMS only, not an SAP item master field: the sync copies it onto the Item.
-  const sapBillUnit = pickBillUnit(options.units, billUnit, sapUnit, label);
 
   const min = Number(minStock || 0);
   if (!Number.isFinite(min) || min < 0) throw badRequest("Minimum stock must be zero or more.");
@@ -244,7 +238,6 @@ const checkSapFields = async ({ company, itemGroup, subCategory, subCategoryB, f
       sap_sub_type_b: b,
       foreign_name: foreign,
       sap_uom: sapUnit,
-      bill_uom: sapBillUnit,
       hsn_code: pickHsn(options.hsn, hsnCode, label),
       tax_rate: pickFrom(options.tax_rates, taxRate, "tax rate", label),
       min_stock: min,
@@ -331,7 +324,6 @@ export const updateRequest = async (id, body = {}) => {
     subCategoryB: body.subCategoryB ?? doc.sap_sub_type_b,
     foreignName: body.foreignName ?? doc.foreign_name,
     unit: body.unit ?? doc.sap_uom,
-    billUnit: body.billUnit ?? doc.bill_uom,
     hsnCode: body.hsnCode ?? doc.hsn_code,
     taxRate: body.taxRate ?? doc.tax_rate,
     minStock: body.minStock ?? doc.min_stock,

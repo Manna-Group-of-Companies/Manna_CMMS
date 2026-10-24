@@ -1,6 +1,6 @@
 import express from "express";
 
-import { list, detail, raise, retry, companies, vendors, order, retryOrder } from "../controllers/purchaseRequestController.js";
+import { list, detail, raise, retry, companies, vendors, retryOrder, dropLine, reopenLine } from "../controllers/purchaseRequestController.js";
 import { protect, requireRole } from "../middleware/session.js";
 import { requireView } from "../config/access.js";
 
@@ -12,8 +12,8 @@ router.use(protect);
 // Manager's, as receiving and adding items are (9 Oct 2026).
 // Maintenance, and since 14 Oct 2026 the plant heads.
 const WRITE = requireRole("Maintenance Manager", "Production Manager");
-// Making the PO is the purchase manager's (20 Oct 2026); the Admin as the
-// usual fallback. Nobody else: a PO commits the company's money.
+// The purchase manager's (20 Oct 2026); the Admin as the usual fallback.
+// Nobody else: what is bought, and from whom, commits the company's money.
 const BUY = requireRole("Purchase Manager", "Manager");
 
 router.get("/", requireView("purchaseRequests"), list);
@@ -23,7 +23,12 @@ router.get("/vendors", BUY, vendors);
 router.get("/:id", requireView("purchaseRequests"), detail);
 router.post("/", WRITE, raise);
 router.post("/:id/retry", WRITE, retry);
-router.post("/:id/order", BUY, order);
+// The PO is made from a quotation since 24 Oct 2026 (purchaseQuotationRoutes.js),
+// not on the request. One made here before then that SAP refused can still be
+// sent again, so none is stranded.
 router.post("/:id/order/retry", BUY, retryOrder);
+// A line nobody will quote is dropped with a reason, or opened again.
+router.post("/:id/lines/:line/drop", BUY, dropLine);
+router.post("/:id/lines/:line/reopen", BUY, reopenLine);
 
 export default router;

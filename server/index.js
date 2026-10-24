@@ -37,6 +37,8 @@ import technicianRoutes from "./routes/technicianRoutes.js";
 import namingRequestRoutes from "./routes/namingRequestRoutes.js";
 import goodsReceiptRoutes from "./routes/goodsReceiptRoutes.js";
 import purchaseRequestRoutes from "./routes/purchaseRequestRoutes.js";
+import purchaseQuotationRoutes from "./routes/purchaseQuotationRoutes.js";
+import purchaseOrderRoutes from "./routes/purchaseOrderRoutes.js";
 import lowValuePurchaseRoutes from "./routes/lowValuePurchaseRoutes.js";
 import assetRoutes from "./routes/assetRoutes.js";
 import electricalRoutes from "./routes/electricalRoutes.js";
@@ -136,6 +138,9 @@ app.use("/api/goods-receipts", goodsReceiptRoutes);
 // Purchase requests for engineering stock, posted to SAP by the same sync;
 // the purchase manager converts them to POs in SAP.
 app.use("/api/purchase-requests", purchaseRequestRoutes);
+// The chosen vendor's quotation for a request, and the PO made from it (24 Oct 2026).
+app.use("/api/purchase-quotations", purchaseQuotationRoutes);
+app.use("/api/purchase-orders", purchaseOrderRoutes);
 // Low value purchase requests: ERPNext only, never posted to SAP (20 Oct 2026).
 app.use("/api/low-value-purchases", lowValuePurchaseRoutes);
 app.use("/api/assets", assetRoutes);

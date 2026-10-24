@@ -7,26 +7,30 @@ import { AlertCircle, Loader2, RefreshCw, Truck, X } from "lucide-react";
 import { hsnDigits, hsnProblem } from "../../utils/hsn";
 
 /**
- * Goods receipt: stock in from a supplier's bill, against an open SAP purchase
+ * Goods receipt: stock in from a supplier's bill, against an open purchase
  * order (decided 9 Oct 2026).
  *
- * Vendor, price and SAP tax code come from the PO; the store enters the bill
- * number and date, the quantity received on each line, and each line's HSN and
+ * Two kinds of PO are offered:
+ *
+ *   SAP POs        the open POs a snapshot from the SAP server lists - made in
+ *                  SAP, or on a request before quotations. Vendor, price and
+ *                  SAP tax code come from the PO; the store enters the quantity
+ *                  received on each line, in the item's own unit.
+ *   CMMS POs       made from a quotation (24 Oct 2026, phase 4), in the
+ *                  vendor's unit. Per line the store enters the billed qty and
+ *                  the bill price per vendor unit (the quoted price unless the
+ *                  bill says otherwise), and what came in: the quantity in the
+ *                  item's own unit, or how many of those per vendor unit. The
+ *                  cost per unit follows from the bill, and the bill is the
+ *                  value booked.
+ *
+ * Either way the store enters the bill number and date and each line's HSN and
  * tax rate as the bill states them. The record is queued and the SAP server
  * posts the GRPO and the ERPNext receipt within about a minute. An item at nil
- * value takes this receipt's price as its value.
+ * value takes this receipt's cost as its value.
  *
- * The open POs are a snapshot the SAP server writes; "Refresh from SAP" asks it
- * for a new one and waits for it to land.
- *
- * An item billed in another unit than it is stocked in (its bill unit - flex
- * billed in KGS, stocked in MTR) also takes the quantity on the bill. The
- * quantity received stays in the stock unit, as on every other line.
+ * "Refresh from SAP" asks the SAP server for a new snapshot and waits for it.
  */
-
-/** Units counted in whole things, in SAP's and ERPNext's spellings. */
-const COUNTED = new Set(["nos", "no", "pcs", "pc", "pair", "pairs", "prs", "set", "sets", "box", "boxes", "roll", "rolls", "rol", "pkt", "packet", "unit", "units"]);
-const isCountUnit = (unit) => COUNTED.has(String(unit || "").trim().toLowerCase());
 
 /** Today as YYYY-MM-DD in local time; toISOString would give yesterday's date
     for the first five and a half hours of an Indian day. */
@@ -40,14 +44,52 @@ const POLL_MS = 5000;
 // About two minutes of waiting for the SAP server before giving up on it.
 const POLL_TRIES = 24;
 
+/** A box left empty, or a number. */
+const num = (value) => (String(value ?? "").trim() === "" ? null : Number(value));
+/** ERPNext keeps quantities to 3 decimals; the server rounds the same way. */
+const qty3 = (value) => Math.round(value * 1000) / 1000;
+const keyOf = (p) => String(p.order || p.entry);
+
+/**
+ * What a CMMS PO line comes to, as typed: the received qty (typed, or billed x
+ * ratio), the bill price (the quote when left empty), the line value and the
+ * cost per inventory unit. Null fields where nothing usable is typed yet.
+ */
+const orderLine = (l, e = {}) => {
+  const vendorQty = num(e.vendorQty);
+  const price = num(e.billPrice) ?? Number(l.price || 0);
+  const ratio = num(e.ratio);
+  const typedQty = num(e.receivedQty);
+  const receivedQty =
+    e.mode === "ratio"
+      ? vendorQty > 0 && ratio > 0
+        ? qty3(vendorQty * ratio)
+        : null
+      : typedQty > 0
+        ? qty3(typedQty)
+        : null;
+  const value = vendorQty > 0 && price > 0 ? Math.round(vendorQty * price * 100) / 100 : null;
+  return {
+    vendorQty,
+    price,
+    receivedQty,
+    value,
+    cost: value !== null && receivedQty ? value / receivedQty : null,
+    started: [e.vendorQty, e.receivedQty, e.ratio].some((v) => num(v)),
+    changed: Math.abs(price - Number(l.price || 0)) >= 0.005,
+  };
+};
+
 const GoodsReceiptModal = ({ onClose, onSaved }) => {
   const { showToast } = useNotifications();
   const [companies, setCompanies] = useState(null);
   const [company, setCompany] = useState("");
   const [snapshot, setSnapshot] = useState(null);
   const [poLoading, setPoLoading] = useState(false);
-  const [poEntry, setPoEntry] = useState("");
-  // Per PO line: { qty, billQty, hsnCode, taxRate }, keyed by line number.
+  // The CMMS PO name for a PO made from a quotation, else the SAP DocEntry.
+  const [poKey, setPoKey] = useState("");
+  // Per PO line, keyed by its line: { qty, hsnCode, taxRate }, or for a CMMS PO
+  // { vendorQty, billPrice, receivedQty, ratio, mode, hsnCode, taxRate }.
   const [entries, setEntries] = useState({});
   const [billNo, setBillNo] = useState("");
   const [billDate, setBillDate] = useState(today());
@@ -61,10 +103,8 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
     () => (companies || []).find((c) => c.abbr === company) || null,
     [companies, company]
   );
-  const po = useMemo(
-    () => (snapshot?.pos || []).find((p) => String(p.entry) === String(poEntry)) || null,
-    [snapshot, poEntry]
-  );
+  const po = useMemo(() => (snapshot?.pos || []).find((p) => keyOf(p) === poKey) || null, [snapshot, poKey]);
+  const isOrder = Boolean(po?.order);
 
   // The companies, with each one's HSN and tax-rate lists.
   useEffect(() => {
@@ -88,7 +128,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
 
   useEffect(() => {
     setSnapshot(null);
-    setPoEntry("");
+    setPoKey("");
     setEntries({});
     if (!company) return undefined;
     let live = true;
@@ -103,19 +143,27 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
   }, [company]);
 
   // Pre-fill each line from the PO: the HSN and tax rate SAP has for the item,
-  // corrected by hand where the bill says otherwise. Entries already typed for
-  // a line that is still there are kept, so a refresh does not wipe them.
+  // corrected by hand where the bill says otherwise, and on a CMMS PO the
+  // quoted price. Entries already typed for a line that is still there are
+  // kept, so a refresh does not wipe them.
   useEffect(() => {
     if (!po) return;
     setEntries((prev) => {
       const next = {};
       for (const l of po.lines) {
-        next[l.line] = prev[l.line] || {
-          qty: "",
-          billQty: "",
-          hsnCode: l.hsnCode || "",
-          taxRate: l.taxRate || "",
-        };
+        next[l.line] =
+          prev[l.line] ||
+          (po.order
+            ? {
+                vendorQty: "",
+                billPrice: String(l.price ?? ""),
+                receivedQty: "",
+                ratio: "",
+                mode: "qty",
+                hsnCode: l.hsnCode || "",
+                taxRate: l.taxRate || "",
+              }
+            : { qty: "", hsnCode: l.hsnCode || "", taxRate: l.taxRate || "" });
       }
       return next;
     });
@@ -123,19 +171,22 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
 
   // A refresh can close the chosen PO (received in full, or cancelled in SAP).
   useEffect(() => {
-    if (snapshot && poEntry && !po) {
-      setPoEntry("");
+    if (snapshot && poKey && !po) {
+      setPoKey("");
       setEntries({});
     }
-  }, [snapshot, poEntry, po]);
+  }, [snapshot, poKey, po]);
 
   const handlePoChange = (value) => {
-    setPoEntry(value);
+    setPoKey(value);
     setEntries({});
   };
 
   const setEntry = (line, key, value) =>
     setEntries((prev) => ({ ...prev, [line]: { ...prev[line], [key]: value } }));
+  // The received qty and the ratio are two ways of saying one thing: the last one typed counts.
+  const setReceived = (line, key, value) =>
+    setEntries((prev) => ({ ...prev, [line]: { ...prev[line], [key]: value, mode: key === "ratio" ? "ratio" : "qty" } }));
 
   /** Asks the SAP server to re-read the open POs, then waits for the new
       snapshot: done when it is no longer refreshing and its time has moved. */
@@ -176,12 +227,14 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
     pollTimer.current = setTimeout(poll, POLL_MS);
   };
 
-  const entered = useMemo(
-    () => (po ? po.lines.filter((l) => Number(entries[l.line]?.qty) > 0) : []),
-    [po, entries]
-  );
+  const entered = useMemo(() => {
+    if (!po) return [];
+    if (po.order) return po.lines.filter((l) => orderLine(l, entries[l.line]).started);
+    return po.lines.filter((l) => Number(entries[l.line]?.qty) > 0);
+  }, [po, entries]);
   const billValue = entered.reduce(
-    (sum, l) => sum + Number(entries[l.line].qty) * Number(l.price || 0),
+    (sum, l) =>
+      sum + (isOrder ? orderLine(l, entries[l.line]).value || 0 : Number(entries[l.line].qty) * Number(l.price || 0)),
     0
   );
 
@@ -190,6 +243,23 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
     if (!billNo.trim()) return "Enter the bill number.";
     if (!billDate) return "Enter the bill date.";
     if (billDate > today()) return "The bill date cannot be in the future.";
+    if (isOrder) {
+      if (entered.length === 0) return "Enter the billed quantity on at least one line.";
+      for (const l of entered) {
+        const e = entries[l.line];
+        const c = orderLine(l, e);
+        if (!(c.vendorQty > 0)) return `${l.name}: enter the quantity on the bill, in ${l.vendorUnit}.`;
+        if (c.vendorQty > Number(l.receivableQty) + 1e-9) {
+          return `${l.name}: only ${l.receivableQty} ${l.vendorUnit} is still pending on this PO.`;
+        }
+        if (!(c.price > 0)) return `${l.name}: the bill price must be more than zero.`;
+        if (!c.receivedQty) return `${l.name}: enter what came in, in ${l.unit}, or the ${l.unit} per ${l.vendorUnit}.`;
+        const hsn = hsnCheck(l, e);
+        if (hsn.error) return `${l.name}: ${hsn.error}`;
+        if (!e.taxRate) return `${l.name}: pick the tax rate from the bill.`;
+      }
+      return "";
+    }
     for (const l of po.lines) {
       const raw = entries[l.line]?.qty;
       if (raw !== "" && raw !== undefined && !(Number(raw) >= 0)) {
@@ -201,12 +271,6 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
       const e = entries[l.line];
       if (Number(e.qty) > Number(l.receivableQty)) {
         return `${l.name}: only ${l.receivableQty} ${l.unit || ""} is still open on this PO.`;
-      }
-      if (l.billUnit) {
-        if (!(Number(e.billQty) > 0)) return `${l.name}: enter the quantity on the bill, in ${l.billUnit}.`;
-        if (isCountUnit(l.unit) && !Number.isInteger(Number(e.qty))) {
-          return `${l.name}: ${l.unit} is counted in whole numbers.`;
-        }
       }
       const hsn = hsnCheck(l, e);
       if (hsn.error) return `${l.name}: ${hsn.error}`;
@@ -220,22 +284,37 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
     const problem = validate();
     setError(problem);
     if (problem) return;
+    const head = { company, billNo: billNo.trim(), billDate, remarks: remarks.trim() };
+    const body = isOrder
+      ? {
+          ...head,
+          purchaseOrder: po.order,
+          lines: entered.map((l) => {
+            const en = entries[l.line];
+            const c = orderLine(l, en);
+            return {
+              orderLine: l.line,
+              vendorQty: c.vendorQty,
+              billPrice: c.price,
+              ...(en.mode === "ratio" ? { ratio: num(en.ratio) } : { receivedQty: num(en.receivedQty) }),
+              hsnCode: hsnDigits(en.hsnCode),
+              taxRate: en.taxRate,
+            };
+          }),
+        }
+      : {
+          ...head,
+          poEntry: po.entry,
+          lines: entered.map((l) => ({
+            poLine: l.line,
+            qty: Number(entries[l.line].qty),
+            hsnCode: hsnDigits(entries[l.line].hsnCode),
+            taxRate: entries[l.line].taxRate,
+          })),
+        };
     try {
       setSaving(true);
-      await API.post("/goods-receipts", {
-        company,
-        poEntry: po.entry,
-        billNo: billNo.trim(),
-        billDate,
-        remarks: remarks.trim(),
-        lines: entered.map((l) => ({
-          poLine: l.line,
-          qty: Number(entries[l.line].qty),
-          ...(l.billUnit ? { billQty: Number(entries[l.line].billQty) } : {}),
-          hsnCode: hsnDigits(entries[l.line].hsnCode),
-          taxRate: entries[l.line].taxRate,
-        })),
-      });
+      await API.post("/goods-receipts", body);
       showToast(
         "Goods receipt saved. SAP posts it within a minute; the stock shows once it is posted.",
         "success"
@@ -266,8 +345,17 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
 
   const pos = snapshot?.pos || [];
   const taxRates = companyOptions?.taxRates || [];
-  // The bill column only when this PO has an item billed in another unit.
-  const anyBillUnit = Boolean(po?.lines.some((l) => l.billUnit));
+  const billCells = (l, e, closed) => (
+    <BillTaxCells
+      line={l}
+      entry={e}
+      closed={closed}
+      company={company}
+      taxRates={taxRates}
+      hsnShown={String(e.hsnCode || "").trim() ? hsnCheck(l, e) : {}}
+      onChange={(key, value) => setEntry(l.line, key, value)}
+    />
+  );
 
   return (
     <div className="modal max-w-6xl">
@@ -277,9 +365,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
             <Truck className="h-[18px] w-[18px] text-brand-700 shrink-0" />
             Goods receipt
           </h3>
-          <p className="modal-sub">
-            Stock in from a supplier's bill, against an open SAP purchase order.
-          </p>
+          <p className="modal-sub">Stock in from a supplier's bill, against an open purchase order.</p>
         </div>
         <button onClick={onClose} className="modal-close" aria-label="Close">
           <X className="h-5 w-5" />
@@ -322,7 +408,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                 </label>
                 <select
                   id="gr-po"
-                  value={poEntry}
+                  value={poKey}
                   onChange={(e) => handlePoChange(e.target.value)}
                   disabled={!company || pos.length === 0}
                   className="field cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
@@ -332,8 +418,9 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                     {poLoading ? "Loading…" : pos.length ? "Pick a purchase order" : "No open purchase orders"}
                   </option>
                   {pos.map((p) => (
-                    <option key={p.entry} value={p.entry}>
-                      PO {p.number} — {p.vendorName} — {p.date}
+                    <option key={keyOf(p)} value={keyOf(p)}>
+                      PO {p.number}
+                      {p.order ? ` (${p.order}, from a quotation)` : ""} — {p.vendorName} — {p.date}
                     </option>
                   ))}
                 </select>
@@ -365,9 +452,9 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
             <div className="note note-slate">
               <AlertCircle className="h-4 w-4 shrink-0 mt-px" />
               <span>
-                No open purchase orders for this company. Purchase raises the PO in SAP; once it is
-                there, use Refresh from SAP to bring it in. Stock that came without a bill goes in as
-                the opening quantity when the item is added with Add Engineering Stock.
+                No open purchase orders for this company. A PO made from a quotation shows here once SAP
+                has it; one raised in SAP comes in with Refresh from SAP. Stock that came without a bill
+                goes in as the opening quantity when the item is added with Add Engineering Stock.
               </span>
             </div>
           )}
@@ -376,145 +463,195 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
             <>
               <div className="text-[13px] text-slate-700">
                 <span className="font-semibold">{po.vendorName}</span>{" "}
-                <span className="mono text-slate-500">{po.vendorCode}</span> · PO {po.number} ·{" "}
-                {po.date}
+                <span className="mono text-slate-500">{po.vendorCode}</span> · PO {po.number}
+                {po.order && ` · ${po.order}`}
+                {po.request && ` · ${po.request}`} · {po.date}
               </div>
 
               <div className="table-card">
                 <div className="table-scroll">
-                  <table className="tbl tbl-compact">
-                    <thead>
-                      <tr>
-                        <th>Item</th>
-                        <th className="text-right">Open</th>
-                        <th className="text-right">PO price</th>
-                        <th>Tax code</th>
-                        <th>Qty received</th>
-                        {anyBillUnit && <th>Qty on bill</th>}
-                        <th>HSN</th>
-                        <th>Tax rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {po.lines.map((l) => {
-                        const e = entries[l.line] || { qty: "", billQty: "", hsnCode: "", taxRate: "" };
-                        const closed = Number(l.receivableQty) <= 0;
-                        // Said as it is typed, but only once there is something to say.
-                        const hsnShown = String(e.hsnCode || "").trim() ? hsnCheck(l, e) : {};
-                        const rates =
-                          e.taxRate && !taxRates.includes(e.taxRate) ? [e.taxRate, ...taxRates] : taxRates;
-                        return (
-                          <tr key={l.line}>
-                            <td>
-                              <div className="min-w-[180px] max-w-[300px]">
-                                <div className="cell-title break-words leading-snug">{l.name}</div>
-                                <div className="mono text-[11px] text-slate-500">
-                                  {l.sapItemCode}
+                  {isOrder ? (
+                    <table className="tbl tbl-compact">
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th className="text-right">Pending</th>
+                          <th>Billed qty</th>
+                          <th>Bill price</th>
+                          <th>Received</th>
+                          <th className="text-right">Cost</th>
+                          <th>HSN</th>
+                          <th>Tax rate</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {po.lines.map((l) => {
+                          const e = entries[l.line] || {};
+                          const c = orderLine(l, e);
+                          const closed = Number(l.receivableQty) <= 0;
+                          const diff = c.price - Number(l.price || 0);
+                          return (
+                            <tr key={l.line}>
+                              <td>
+                                <ItemCell line={l} />
+                                <div className="mono text-[11px] text-slate-500">{l.taxCode || ""}</div>
+                              </td>
+                              <td className="text-right whitespace-nowrap">
+                                {l.receivableQty} {l.vendorUnit}
+                                <div className="text-[11px] text-slate-500">
+                                  of {l.orderedQty}
+                                  {Number(l.waitingQty) > 0 && ` · ${l.waitingQty} entered`}
                                 </div>
-                                {!l.inCatalog && (
-                                  <span className="badge badge-slate badge-soft text-[10px] mt-0.5">
-                                    Not in the catalog yet
-                                  </span>
-                                )}
-                                {Number(l.itemValue) === 0 && (
-                                  <div className="text-[11px] text-amber-700 mt-0.5">
-                                    Nil value now — this price becomes its value
+                              </td>
+                              <td>
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={l.receivableQty}
+                                    step="any"
+                                    inputMode="decimal"
+                                    value={e.vendorQty ?? ""}
+                                    onChange={(ev) => setEntry(l.line, "vendorQty", ev.target.value)}
+                                    disabled={closed}
+                                    placeholder={closed ? "Entered" : ""}
+                                    className="field field-sm w-20 disabled:cursor-not-allowed disabled:opacity-60"
+                                    aria-label={`Quantity billed of ${l.name}, in ${l.vendorUnit}`}
+                                  />
+                                  <span className="text-[12px] text-slate-500">{l.vendorUnit}</span>
+                                </div>
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  inputMode="decimal"
+                                  value={e.billPrice ?? ""}
+                                  onChange={(ev) => setEntry(l.line, "billPrice", ev.target.value)}
+                                  disabled={closed}
+                                  className={`field field-sm w-24 disabled:opacity-60 ${c.changed ? "border-amber-400" : ""}`}
+                                  aria-label={`Bill price of ${l.name}, per ${l.vendorUnit}`}
+                                />
+                                <div className="mt-0.5 text-[11px] leading-tight text-slate-500">
+                                  per {l.vendorUnit} · quoted {formatCurrency(l.price)}
+                                </div>
+                                {c.changed && Number(l.price) > 0 && (
+                                  <div className="text-[11px] leading-tight text-amber-700">
+                                    {diff > 0 ? "+" : ""}
+                                    {formatCurrency(diff)} ({diff > 0 ? "+" : ""}
+                                    {((diff / Number(l.price)) * 100).toFixed(2)}%)
                                   </div>
                                 )}
-                              </div>
-                            </td>
-                            <td className="text-right whitespace-nowrap">
-                              {l.receivableQty} {l.unit}
-                              {Number(l.waitingQty) > 0 && (
-                                <div className="text-[11px] text-slate-500">
-                                  {l.waitingQty} already entered
-                                </div>
-                              )}
-                            </td>
-                            <td className="text-right whitespace-nowrap">{formatCurrency(l.price)}</td>
-                            <td className="mono text-slate-600">{l.taxCode || "—"}</td>
-                            <td>
-                              <input
-                                type="number"
-                                min="0"
-                                max={l.receivableQty}
-                                step="any"
-                                inputMode="decimal"
-                                value={e.qty}
-                                onChange={(ev) => setEntry(l.line, "qty", ev.target.value)}
-                                disabled={closed}
-                                placeholder={closed ? "Fully entered" : ""}
-                                className="field field-sm w-28 disabled:cursor-not-allowed disabled:opacity-60"
-                                aria-label={`Quantity received of ${l.name}`}
-                              />
-                              {l.billUnit && <div className="mt-0.5 text-[11px] text-slate-500">{l.unit} received</div>}
-                            </td>
-                            {anyBillUnit && (
+                              </td>
                               <td>
-                                {l.billUnit && (
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    inputMode="decimal"
+                                    value={e.mode === "ratio" ? (c.receivedQty ?? "") : (e.receivedQty ?? "")}
+                                    onChange={(ev) => setReceived(l.line, "receivedQty", ev.target.value)}
+                                    disabled={closed}
+                                    className={`field field-sm w-20 disabled:opacity-60 ${e.mode === "ratio" ? "text-slate-500" : ""}`}
+                                    aria-label={`Quantity received of ${l.name}, in ${l.unit}`}
+                                  />
+                                  <span className="text-[12px] text-slate-500">{l.unit}</span>
+                                </div>
+                                <div className="mt-1 flex items-center gap-1">
+                                  <span className="text-[11px] text-slate-500">or</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    inputMode="decimal"
+                                    value={
+                                      e.mode === "ratio"
+                                        ? (e.ratio ?? "")
+                                        : c.receivedQty && c.vendorQty > 0
+                                          ? String(Math.round((c.receivedQty / c.vendorQty) * 10000) / 10000)
+                                          : ""
+                                    }
+                                    onChange={(ev) => setReceived(l.line, "ratio", ev.target.value)}
+                                    disabled={closed}
+                                    className={`field field-sm w-16 disabled:opacity-60 ${e.mode === "ratio" ? "" : "text-slate-500"}`}
+                                    aria-label={`${l.unit} per ${l.vendorUnit} of ${l.name}`}
+                                  />
+                                  <span className="text-[11px] text-slate-500">
+                                    {l.unit}/{l.vendorUnit}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="text-right whitespace-nowrap">
+                                {c.cost !== null ? (
                                   <>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="any"
-                                      inputMode="decimal"
-                                      value={e.billQty}
-                                      onChange={(ev) => setEntry(l.line, "billQty", ev.target.value)}
-                                      disabled={closed}
-                                      className="field field-sm w-28 disabled:cursor-not-allowed disabled:opacity-60"
-                                      aria-label={`Quantity on the bill of ${l.name}, in ${l.billUnit}`}
-                                    />
-                                    <div className="mt-0.5 text-[11px] text-slate-500">{l.billUnit} on the bill</div>
+                                    {formatCurrency(c.cost)}
+                                    <span className="text-[11px] text-slate-500"> /{l.unit}</span>
+                                    <div className="text-[11px] text-slate-500">{formatCurrency(c.value)}</div>
                                   </>
+                                ) : (
+                                  "—"
                                 )}
                               </td>
-                            )}
-                            <td>
-                              <input
-                                type="text"
-                                list={`gr-hsn-${company}`}
-                                value={e.hsnCode}
-                                onChange={(ev) => setEntry(l.line, "hsnCode", ev.target.value)}
-                                disabled={closed}
-                                inputMode="numeric"
-                                className={`field field-sm w-32 mono disabled:opacity-60 ${
-                                  hsnShown.error ? "border-rose-400" : ""
-                                }`}
-                                aria-label={`HSN code of ${l.name}`}
-                                aria-invalid={Boolean(hsnShown.error)}
-                              />
-                              {hsnShown.error && (
-                                <div className="mt-0.5 max-w-[10rem] text-[11px] leading-tight text-rose-700">
-                                  {hsnShown.error}
-                                </div>
-                              )}
-                              {!hsnShown.error && hsnShown.isNew && (
-                                <div className="mt-0.5 max-w-[10rem] text-[11px] leading-tight text-amber-700">
-                                  New HSN - will be added to SAP
-                                </div>
-                              )}
-                            </td>
-                            <td>
-                              <select
-                                value={e.taxRate}
-                                onChange={(ev) => setEntry(l.line, "taxRate", ev.target.value)}
-                                disabled={closed}
-                                className="field field-sm w-24 cursor-pointer disabled:opacity-60"
-                                aria-label={`Tax rate of ${l.name}`}
-                              >
-                                <option value="">—</option>
-                                {rates.map((r) => (
-                                  <option key={r} value={r}>
-                                    {r}
-                                  </option>
-                                ))}
-                              </select>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                              {billCells(l, e, closed)}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <table className="tbl tbl-compact">
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th className="text-right">Open</th>
+                          <th className="text-right">PO price</th>
+                          <th>Tax code</th>
+                          <th>Qty received</th>
+                          <th>HSN</th>
+                          <th>Tax rate</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {po.lines.map((l) => {
+                          const e = entries[l.line] || { qty: "", hsnCode: "", taxRate: "" };
+                          const closed = Number(l.receivableQty) <= 0;
+                          return (
+                            <tr key={l.line}>
+                              <td>
+                                <ItemCell line={l} />
+                              </td>
+                              <td className="text-right whitespace-nowrap">
+                                {l.receivableQty} {l.unit}
+                                {Number(l.waitingQty) > 0 && (
+                                  <div className="text-[11px] text-slate-500">{l.waitingQty} already entered</div>
+                                )}
+                              </td>
+                              <td className="text-right whitespace-nowrap">{formatCurrency(l.price)}</td>
+                              <td className="mono text-slate-600">{l.taxCode || "—"}</td>
+                              <td>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={l.receivableQty}
+                                  step="any"
+                                  inputMode="decimal"
+                                  value={e.qty}
+                                  onChange={(ev) => setEntry(l.line, "qty", ev.target.value)}
+                                  disabled={closed}
+                                  placeholder={closed ? "Fully entered" : ""}
+                                  className="field field-sm w-28 disabled:cursor-not-allowed disabled:opacity-60"
+                                  aria-label={`Quantity received of ${l.name}`}
+                                />
+                              </td>
+                              {billCells(l, e, closed)}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </div>
 
@@ -572,7 +709,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
               {entered.length > 0 && (
                 <p className="text-[12px] text-slate-600">
                   {entered.length} line{entered.length === 1 ? "" : "s"} · {formatCurrency(billValue)}{" "}
-                  at PO prices, before tax
+                  {isOrder ? "at bill prices" : "at PO prices"}, before tax
                 </p>
               )}
             </>
@@ -592,6 +729,61 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
         </div>
       </form>
     </div>
+  );
+};
+
+const ItemCell = ({ line: l }) => (
+  <div className="min-w-[180px] max-w-[300px]">
+    <div className="cell-title break-words leading-snug">{l.name}</div>
+    <div className="mono text-[11px] text-slate-500">{l.sapItemCode}</div>
+    {!l.inCatalog && <span className="badge badge-slate badge-soft text-[10px] mt-0.5">Not in the catalog yet</span>}
+    {Number(l.itemValue) === 0 && (
+      <div className="text-[11px] text-amber-700 mt-0.5">Nil value now — this receipt's cost becomes its value</div>
+    )}
+  </div>
+);
+
+/** The HSN and tax rate a line takes from the bill. */
+const BillTaxCells = ({ line: l, entry: e, closed, company, taxRates, hsnShown, onChange }) => {
+  const rates = e.taxRate && !taxRates.includes(e.taxRate) ? [e.taxRate, ...taxRates] : taxRates;
+  return (
+    <>
+      <td>
+        <input
+          type="text"
+          list={`gr-hsn-${company}`}
+          value={e.hsnCode ?? ""}
+          onChange={(ev) => onChange("hsnCode", ev.target.value)}
+          disabled={closed}
+          inputMode="numeric"
+          className={`field field-sm w-32 mono disabled:opacity-60 ${hsnShown.error ? "border-rose-400" : ""}`}
+          aria-label={`HSN code of ${l.name}`}
+          aria-invalid={Boolean(hsnShown.error)}
+        />
+        {hsnShown.error && (
+          <div className="mt-0.5 max-w-[10rem] text-[11px] leading-tight text-rose-700">{hsnShown.error}</div>
+        )}
+        {!hsnShown.error && hsnShown.isNew && (
+          <div className="mt-0.5 max-w-[10rem] text-[11px] leading-tight text-amber-700">New HSN - will be added to SAP</div>
+        )}
+      </td>
+      <td>
+        <select
+          value={e.taxRate ?? ""}
+          onChange={(ev) => onChange("taxRate", ev.target.value)}
+          disabled={closed}
+          className="field field-sm w-24 cursor-pointer disabled:opacity-60"
+          aria-label={`Tax rate of ${l.name}`}
+        >
+          <option value="">—</option>
+          {rates.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+      </td>
+    </>
   );
 };
 

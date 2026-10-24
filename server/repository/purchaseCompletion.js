@@ -16,6 +16,13 @@ import { erpNow } from "../integrations/erpnext/time.js";
  *   Completed -> Ordered    if they no longer do (a receipt taken out of
  *                           ERPNext by hand); the sync then follows it again.
  *
+ * A request whose POs were made from quotations (24 Oct 2026) is judged by its
+ * POs instead: Completed once every line is either Dropped or on a CMMS PO, and
+ * every such PO is Purchased - every line received in the vendor's unit. Its
+ * received inventory quantities are not compared with the request, because
+ * goods that weigh in under it (59.4 Kg against 60) would leave it Ordered for
+ * good.
+ *
  * Nothing else ever moves: Queued, In SAP, Failed and Closed (every PO
  * cancelled in SAP) are never completed. Completed is the CMMS's own status,
  * on its own doctype; the sync reads only In SAP and Ordered requests, so
@@ -31,6 +38,17 @@ const REQUEST = "CMMS Purchase Request";
 const REQUEST_LINE = "CMMS Purchase Request Line";
 const RECEIPT = "CMMS Goods Receipt";
 const RECEIPT_LINE = "CMMS Goods Receipt Line";
+const ORDER = "CMMS Purchase Order";
+const ORDER_LINE = "CMMS Purchase Order Line";
+const PURCHASED = "Purchased";
+/**
+ * A PO is done once every line is received (Purchased), or once SAP closed it
+ * (Closed): the purchase manager closing a PO in SAP says nothing more is
+ * coming for it, and the request would otherwise wait for good.
+ */
+const DONE = [PURCHASED, "Closed"];
+/** Closed because SAP cancelled it, as the sync notes it - not done, gone. */
+const cancelledInSap = (order) => order.status === "Closed" && /^Cancelled in SAP/.test(String(order.error || ""));
 
 export const COMPLETED = "Completed";
 /** Only an ordered request has a PO to receive against. */
@@ -81,6 +99,30 @@ export const receiptProgress = (request, receipts = []) => {
 };
 
 /**
+ * How far a request made through quotations has got, by its CMMS POs. Pure.
+ *
+ * @param request { name, lines: [{ name, item, qty, coverage }] }
+ * @param orders  the request's CMMS POs: [{ name, status, sap_doc_number, lines: [{ pr_line }] }]
+ * @returns { orders, lines: [{ item, requested, order, status }], complete }
+ */
+export const orderProgress = (request, orders = []) => {
+  // A PO SAP cancelled orders nothing (rule 7, 25 Oct 2026); its lines wait for the next PO.
+  const live = orders.filter((o) => !cancelledInSap(o));
+  const lines = (request.lines || [])
+    .filter((l) => l.coverage !== "Dropped")
+    .map((l) => {
+      const po = live.find((o) => (o.lines || []).some((ol) => ol.pr_line === l.name));
+      return { item: l.item, requested: Number(l.qty || 0), order: po?.name || "", status: po?.status || "" };
+    });
+  return {
+    orders: live,
+    lines,
+    complete: lines.length > 0 && lines.every((l) => DONE.includes(l.status)),
+    byOrders: true,
+  };
+};
+
+/**
  * The status a request should move to, or null to leave it. Pure.
  */
 export const nextStatus = (request, progress) => {
@@ -96,6 +138,12 @@ const receiptLabel = (r) =>
 
 /** The history entry for a move. */
 export const historyNote = (from, to, progress, at) => {
+  if (progress.byOrders) {
+    const pos = progress.orders.map((o) => `${o.name}${o.sap_doc_number ? ` (SAP ${o.sap_doc_number})` : ""} ${o.status}`).join("; ") || "none";
+    if (to === COMPLETED) return `Completed by the CMMS at ${at}: every purchase order made from its quotations is Purchased or closed in SAP. POs: ${pos}.`;
+    const short = progress.lines.filter((l) => !DONE.includes(l.status)).map((l) => `${l.item} ${l.order || "no PO"}`).join(", ");
+    return `Back to ${to} from ${from} by the CMMS at ${at}: not every line is on a Purchased or closed PO (${short}). POs: ${pos}.`;
+  }
   const names = progress.receipts.map(receiptLabel).join("; ") || "none";
   if (to === COMPLETED) {
     return `Completed by the CMMS from ERPNext goods receipts at ${at}: every item received in full. Receipts: ${names}.`;
@@ -153,6 +201,23 @@ export const receiptsAgainst = async (requests, api = erp) => {
   return rows.map((r) => ({ ...r, lines: lines.get(r.name) || [] }));
 };
 
+/** The CMMS POs made from these requests' quotations, with the request line each PO line answers. */
+const ordersFor = async (requestNames, api = erp) => {
+  const rows = [];
+  for (let i = 0; i < requestNames.length; i += 100) {
+    rows.push(
+      ...(await api.listDocs(ORDER, {
+        fields: ["name", "purchase_request", "status", "sap_doc_number", "error"],
+        filters: [[ORDER, "purchase_request", "in", requestNames.slice(i, i + 100)]],
+        limit: 2000,
+      })),
+    );
+  }
+  if (!rows.length) return [];
+  const lines = await linesByParent(api, ORDER_LINE, ORDER, rows.map((r) => r.name), ["pr_line"]);
+  return rows.map((r) => ({ ...r, lines: lines.get(r.name) || [] }));
+};
+
 /** The receipts shown on a request, newest last. */
 export const toReceiptSummary = (r) => ({
   id: r.name,
@@ -179,13 +244,16 @@ export const reconcileCompletion = async ({ api = erp, now = erpNow } = {}) => {
     limit: 2000,
   });
   if (!requests.length) return [];
-  const lines = await linesByParent(api, REQUEST_LINE, REQUEST, requests.map((r) => r.name), ["item", "qty"]);
+  const names = requests.map((r) => r.name);
+  const lines = await linesByParent(api, REQUEST_LINE, REQUEST, names, ["name", "item", "qty", "coverage"]);
   for (const r of requests) r.lines = lines.get(r.name) || [];
   const receipts = await receiptsAgainst(requests, api);
+  const orders = await ordersFor(names, api);
 
   const moved = [];
   for (const request of requests) {
-    const progress = receiptProgress(request, receipts);
+    const mine = orders.filter((o) => o.purchase_request === request.name);
+    const progress = mine.length ? orderProgress(request, mine) : receiptProgress(request, receipts);
     const to = nextStatus(request, progress);
     if (!to) continue;
     try {

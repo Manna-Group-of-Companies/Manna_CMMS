@@ -27,9 +27,6 @@ import Combobox from "../../components/Combobox";
  *   U_TaxRate            Tax rate              (edit only)
  *   MinInventory         Minimum stock         (also the CMMS low-stock limit)
  *   -                    Brand                 (the CMMS's own)
- *   -                    Bill unit             (the CMMS's own: the unit the supplier bills in,
- *                                               when not the item's unit - flex billed in KGS,
- *                                               stocked in MTR; a goods receipt then asks for both)
  *   -                    Opening quantity      (add only: stock on the shelf with no bill)
  *
  * Since 9 Oct 2026 there is no approval: adding saves the item approved and
@@ -53,7 +50,6 @@ const EMPTY = {
   name: "",
   foreignName: "",
   unit: "NOS",
-  billUnit: "",
   hsnCode: "",
   taxRate: "",
   minStock: 0,
@@ -122,7 +118,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         name: product.name || "",
         foreignName: product.foreignName || "",
         unit: product.unit || "",
-        billUnit: product.billUnit || "",
         hsnCode: product.hsnCode || "",
         taxRate: product.taxRate || "",
         minStock: product.minStock ?? 0,
@@ -168,10 +163,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
         next.subCategory = "";
         next.subCategoryB = "";
         next.hsnCode = "";
-        next.billUnit = "";
       }
-      // Billed in the unit it is stocked in is no bill unit at all.
-      if (field === "unit" && value === prev.billUnit) next.billUnit = "";
       if (field === "itemGroup") {
         next.subCategory = "";
         next.subCategoryB = "";
@@ -205,7 +197,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       taxRate: isEdit ? form.taxRate : "",
       minStock: Number(form.minStock) || 0,
       brand: form.brand,
-      billUnit: form.billUnit,
     };
 
     try {
@@ -386,19 +377,6 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                       required
                     />
                   )}
-                </div>
-                <div>
-                  <label className={label} htmlFor="sap-bill-unit">
-                    Bill unit
-                  </label>
-                  <Select
-                    id="sap-bill-unit"
-                    value={form.billUnit}
-                    onChange={bind("billUnit")}
-                    disabled={!company}
-                    options={(company?.units || []).filter((u) => u.toLowerCase() !== String(form.unit).toLowerCase())}
-                    placeholder="Same as unit"
-                  />
                 </div>
                 {/*
                   HSN and tax rate come off a bill, so adding an item no longer

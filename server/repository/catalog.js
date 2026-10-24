@@ -259,8 +259,6 @@ const toProduct = (item, group, warehouses) => {
     taxRate: item.custom_sap_tax_rate || "",
     brand: item.brand || "",
     unit: item.stock_uom || "",
-    // The unit the supplier bills in, when not `unit` (CMMS only; "" = the same).
-    billUnit: item.custom_bill_uom || "",
     unitCost: Number(item.valuation_rate || 0),
     minStock: Number(item.safety_stock || 0),
     quantity,
@@ -304,7 +302,6 @@ const readCatalog = async () => {
         "custom_sap_foreign_name",
         "custom_sap_hsn_code",
         "custom_sap_tax_rate",
-        "custom_bill_uom",
         "image",
         "disabled",
         "modified",
@@ -456,7 +453,7 @@ export const pendingItems = async () => {
   const rows = await listDocs("CMMS Item Naming Request", {
     fields: [
       "name", "proposed_name", "sap_company", "sap_item_group",
-      "sap_sub_type_a", "sap_sub_type_b", "foreign_name", "sap_uom", "bill_uom",
+      "sap_sub_type_a", "sap_sub_type_b", "foreign_name", "sap_uom",
       "hsn_code", "tax_rate", "brand", "min_stock", "opening_qty",
       "description", "modified",
     ],
@@ -482,7 +479,6 @@ export const pendingItems = async () => {
       taxRate: r.tax_rate || "",
       brand: r.brand || "",
       unit: r.sap_uom || "",
-      billUnit: r.bill_uom || "",
       unitCost: 0,
       minStock: Number(r.min_stock || 0),
       quantity: Number(r.opening_qty || 0),

@@ -63,6 +63,12 @@ const AdminLayout = () => {
       "Purchase Requests",
       "Requests sent to SAP, and the purchase orders raised from them",
     ],
+    [
+      "/admin/purchase-quotations",
+      "Purchase Quotations",
+      "The chosen vendor's quotation for each request, printed for signature",
+    ],
+    ["/admin/purchase-orders", "Purchase Orders", "Made from quotations, and where each stands with SAP"],
     // Titled by the page itself (its header carries the date and time too), so
     // the bar above stays empty rather than saying it twice.
     ["/admin/low-value-purchases", "", ""],
@@ -103,6 +109,8 @@ const AdminLayout = () => {
     "/admin/products",
     "/admin/goods-receipts",
     "/admin/purchase-requests",
+    "/admin/purchase-quotations",
+    "/admin/purchase-orders",
     "/admin/low-stock",
     "/admin/settings",
   ];

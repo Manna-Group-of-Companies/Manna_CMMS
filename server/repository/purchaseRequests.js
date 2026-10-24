@@ -1,4 +1,5 @@
 import {
+  callMethod,
   createDoc,
   getDoc,
   listChildRows,
@@ -45,6 +46,13 @@ import { COMPLETED, receiptProgress, receiptsAgainst, toReceiptSummary } from ".
  * the CMMS's own, read only: nothing can be ordered or sent again from it.
  *
  *   Ordered -> Completed (every item received), and back if that stops holding
+ *
+ * Since 24 Oct 2026 the PO is no longer made on the request. The purchase
+ * manager enters the chosen vendor's quotation against it instead
+ * (purchaseQuotations.js) and makes the PO from that. Each line is open until a
+ * quotation takes it (Quoted) or the purchase manager drops it with a reason
+ * (Dropped). The po_* fields stay as the record of POs made here before, and
+ * one of those that SAP refused can still be sent again.
  */
 
 const DOCTYPE = "CMMS Purchase Request";
@@ -52,7 +60,8 @@ const LINE = "CMMS Purchase Request Line";
 
 const FIELDS = ["name", "company", "status", "required_by", "reason", "raised_by", "raised_at", "sap_doc_entry", "sap_doc_number", "po_numbers", "posted_at", "error", "modified",
   "po_status", "po_vendor_code", "po_vendor_name", "po_date", "po_due_date", "po_remarks", "po_raised_by", "po_raised_at", "po_doc_entry", "po_doc_number", "po_error"];
-const LINE_FIELDS = ["parent", "idx", "item", "item_name", "sap_item_code", "qty", "uom", "remarks", "po_qty", "po_price", "po_tax_code"];
+const LINE_FIELDS = ["parent", "idx", "name", "item", "item_name", "sap_item_code", "qty", "uom", "remarks", "po_qty", "po_price", "po_tax_code",
+  "coverage", "quotation", "drop_reason"];
 
 const tidy = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
 const badRequest = (message) => Object.assign(new Error(message), { status: 400 });
@@ -62,11 +71,11 @@ const notFound = (message) => Object.assign(new Error(message), { status: 404 })
 const REASON_MAX = 250;
 /** SAP's line FreeText is 100. */
 const REMARKS_MAX = 100;
-/** The PO's remarks go to SAP's Comments with the request number, which hold 254. */
-const PO_REMARKS_MAX = 200;
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** Why a line was dropped, said on the request card. */
+const DROP_REASON_MAX = 140;
 
 const toLine = (row, received = null) => ({
+  lineId: row.name,
   itemCode: row.item,
   name: row.item_name || row.item,
   sapItemCode: row.sap_item_code || "",
@@ -78,6 +87,9 @@ const toLine = (row, received = null) => ({
   taxCode: row.po_tax_code || "",
   // What the goods receipts posted against its PO have brought in, once ordered.
   received: received ? received.get(row.item) || 0 : null,
+  coverage: row.coverage || "",
+  quotation: row.quotation || "",
+  dropReason: row.drop_reason || "",
 });
 
 /** The purchase order made from it in the app, or null. */
@@ -101,11 +113,27 @@ const toOrder = (row, lines) => {
 };
 
 /**
- * A PO can be made from it: in SAP, no PO yet (one made in SAP itself turns it
- * Ordered), and no order of ours queued or posted. A failed one is made again.
+ * A quotation can be entered against it: in SAP, no PO made on the request the
+ * old way (one made in SAP itself turns it Ordered), and a line still open.
+ * `row.lines` are the request's line rows.
  */
-export const mayOrder = (row) =>
-  row.status === "In SAP" && Boolean(row.sap_doc_entry) && ["", null, undefined, "Failed"].includes(row.po_status);
+/**
+ * Statuses a request may be quoted from: In SAP, and Ordered once a PO from one
+ * of its quotations is in SAP (25 Oct 2026) - quoted in parts, a request would
+ * otherwise be stuck with its other lines open.
+ */
+export const QUOTING = ["In SAP", "Ordered"];
+
+/**
+ * Whether its open lines can still be quoted or dropped. Ordered counts only
+ * through a quotation (a line already Quoted): one ordered in SAP itself, or on
+ * the request the old way, is not quoted.
+ */
+export const linesOpenFor = (row) =>
+  !row.po_status &&
+  (row.status === "In SAP" || (row.status === "Ordered" && (row.lines || []).some((l) => l.coverage === "Quoted")));
+
+export const mayQuote = (row) => linesOpenFor(row) && Boolean(row.sap_doc_entry) && (row.lines || []).some((l) => !l.coverage);
 
 /** Statuses whose goods can be coming in, so their receipts are looked up. */
 const RECEIVING = ["Ordered", COMPLETED];
@@ -126,7 +154,7 @@ const receiptsOf = async (rows) => {
   return out;
 };
 
-const toRequest = (row, lines = [], got = null) => ({
+const toRequest = (row, lines = [], got = null, quotations = []) => ({
   id: row.name,
   company: row.company,
   companyName: storeForCompany(row.company)?.label || row.company,
@@ -143,7 +171,8 @@ const toRequest = (row, lines = [], got = null) => ({
   lines: lines.map((l) => toLine(l, got?.received)),
   receipts: got?.receipts || [],
   order: toOrder(row, lines),
-  mayOrder: mayOrder(row),
+  quotations,
+  mayQuote: mayQuote({ ...row, lines }),
   updatedAt: row.modified,
 });
 
@@ -182,7 +211,8 @@ export const listRequests = async ({ status = "", limit = 100, onlyCompanies = n
     console.error("Goods receipts for purchase requests not read:", error.message);
     return new Map();
   });
-  return rows.map((r) => toRequest(r, r.lines, got.get(r.name)));
+  const quotations = await quotationsForRequests(rows.map((r) => r.name));
+  return rows.map((r) => toRequest(r, r.lines, got.get(r.name), quotations.get(r.name) || []));
 };
 
 export const getRequest = async (id) => {
@@ -192,7 +222,8 @@ export const getRequest = async (id) => {
   });
   if (!doc) return null;
   const got = await receiptsOf([doc]).catch(() => new Map());
-  return toRequest(doc, doc.lines || [], got.get(doc.name));
+  const quotations = await quotationsForRequests([doc.name]);
+  return toRequest(doc, doc.lines || [], got.get(doc.name), quotations.get(doc.name) || []);
 };
 
 /**
@@ -277,92 +308,6 @@ export const vendorsFor = async (company) => {
   };
 };
 
-/**
- * Checks an order against the request and the published SAP lists, and gives
- * back what to write. Pure, so the rules can be tested without ERPNext.
- *
- * @param doc       the CMMS Purchase Request, with its lines
- * @param body      { vendorCode, poDate, dueDate, remarks, lines: [{ itemCode, qty, price, taxCode }] }
- * @param published { vendors: [{ code, name }], taxCodes: [{ code, name, rate }] }
- * @param today     YYYY-MM-DD
- */
-export const checkOrder = (doc, body = {}, published = {}, today = erpToday()) => {
-  if (["Queued", "Posted"].includes(doc.po_status)) throw badRequest("A purchase order has already been made from this request.");
-  if (!mayOrder(doc)) {
-    if (["Queued", "Failed"].includes(doc.status)) throw badRequest("The request is not in SAP yet, so a PO cannot be made from it. Wait for the sync.");
-    throw badRequest(`This request is ${doc.status}; only one in SAP without a PO can be ordered.`);
-  }
-
-  const vendorCode = tidy(body.vendorCode);
-  if (!vendorCode) throw badRequest("Choose the vendor.");
-  const vendor = (published.vendors || []).find((v) => tidy(v.code) === vendorCode);
-  if (!vendor) throw badRequest(`That vendor is not among the SAP suppliers for ${doc.company}.`);
-
-  const poDate = tidy(body.poDate) || today;
-  const dueDate = tidy(body.dueDate);
-  if (!DAY.test(poDate)) throw badRequest("Give the PO date.");
-  if (!DAY.test(dueDate)) throw badRequest("Give the delivery date.");
-  if (dueDate < poDate) throw badRequest("The delivery date cannot be before the PO date.");
-  const remarks = tidy(body.remarks);
-  if (remarks.length > PO_REMARKS_MAX) throw badRequest(`The remarks can be at most ${PO_REMARKS_MAX} characters.`);
-
-  const taxCodes = (published.taxCodes || []).map((t) => t.code);
-  const wanted = new Map((Array.isArray(body.lines) ? body.lines : []).map((w) => [tidy(w?.itemCode), w]));
-  let ordered = 0;
-  const lines = (doc.lines || []).map((line) => {
-    const w = wanted.get(line.item);
-    const label = line.item_name || line.item;
-    const qty = Number(w?.qty || 0);
-    if (!w || !(qty > 0)) return { ...line, po_qty: 0, po_price: 0, po_tax_code: "" };
-    if (qty > Number(line.qty || 0)) throw badRequest(`Only ${Number(line.qty)} of ${label} was requested.`);
-    const price = Number(w.price);
-    if (!Number.isFinite(price) || price <= 0) throw badRequest(`Give the price for ${label}.`);
-    const taxCode = tidy(w.taxCode);
-    if (taxCode && taxCodes.length && !taxCodes.includes(taxCode)) throw badRequest(`The tax code for ${label} is not one SAP has.`);
-    ordered += 1;
-    return { ...line, po_qty: qty, po_price: price, po_tax_code: taxCode };
-  });
-  if (!ordered) throw badRequest("Order at least one item.");
-
-  return {
-    po_status: "Queued",
-    po_vendor_code: vendorCode,
-    po_vendor_name: tidy(vendor.name),
-    po_date: poDate,
-    po_due_date: dueDate,
-    po_remarks: remarks,
-    po_error: "",
-    lines,
-  };
-};
-
-/** The purchase manager makes the PO; the sync posts it to SAP. */
-export const orderRequest = async (id, body, user) => {
-  const doc = await getDoc(DOCTYPE, id).catch(() => null);
-  if (!doc) throw notFound("Purchase request not found");
-  const edits = checkOrder(doc, body, await vendorsFor(doc.company));
-  await updateDoc(DOCTYPE, id, {
-    ...edits,
-    po_raised_by: user?.email || "",
-    po_raised_at: erpNow(),
-    // The whole table, as Frappe replaces a child table it is given.
-    lines: edits.lines.map((l) => ({
-      name: l.name,
-      item: l.item,
-      item_name: l.item_name,
-      sap_item_code: l.sap_item_code,
-      qty: l.qty,
-      uom: l.uom,
-      remarks: l.remarks,
-      po_qty: l.po_qty,
-      po_price: l.po_price,
-      po_tax_code: l.po_tax_code,
-    })),
-  });
-  await raiseSapFlag(user?.email);
-  return getRequest(id);
-};
-
 /** Sends a PO that SAP refused back to the SAP server. */
 export const retryOrder = async (id, user) => {
   const doc = await getDoc(DOCTYPE, id).catch(() => null);
@@ -370,5 +315,78 @@ export const retryOrder = async (id, user) => {
   if (doc.po_status !== "Failed") throw badRequest("Only a purchase order that failed can be sent again.");
   await updateDoc(DOCTYPE, id, { po_status: "Queued", po_error: "" });
   await raiseSapFlag(user?.email);
+  return getRequest(id);
+};
+
+/**
+ * The quotations entered against these requests, by request, for the request
+ * cards - so maintenance and the plant heads can follow a request to its PO
+ * without the purchase manager's screens.
+ */
+const quotationsForRequests = async (requestIds) => {
+  const out = new Map();
+  for (let i = 0; i < requestIds.length; i += 100) {
+    const rows = await listDocs("CMMS Purchase Quotation", {
+      fields: ["name", "purchase_request", "status", "vendor_name", "purchase_order", "sap_doc_number"],
+      filters: [["CMMS Purchase Quotation", "purchase_request", "in", requestIds.slice(i, i + 100)]],
+      orderBy: "creation asc",
+      limit: 1000,
+    });
+    for (const r of rows) {
+      if (!out.has(r.purchase_request)) out.set(r.purchase_request, []);
+      out.get(r.purchase_request).push({
+        id: r.name,
+        status: r.status,
+        vendorName: r.vendor_name || "",
+        purchaseOrder: r.purchase_order || "",
+        sapDocNumber: r.sap_doc_number || "",
+      });
+    }
+  }
+  return out;
+};
+
+/**
+ * Writes some fields of one request line. frappe.client.set_value saves the
+ * line through its request, so the rest of the table is left as it is - a
+ * PUT of the request would have to send every line back.
+ */
+export const setLineFields = (lineId, fields) =>
+  callMethod("frappe.client.set_value", { doctype: LINE, name: lineId, fieldname: fields });
+
+/**
+ * Checks dropping a request line - nobody will quote it - and gives back what
+ * to write. Pure, so the rule can be tested without ERPNext.
+ */
+export const checkDrop = (doc, lineId, reason) => {
+  const line = (doc.lines || []).find((l) => l.name === lineId);
+  if (!line) throw notFound("That line is not on this purchase request.");
+  const label = line.item_name || line.item;
+  if (!linesOpenFor(doc)) throw badRequest(`This request is ${doc.po_status ? "ordered on the request" : doc.status}; its lines are not quoted or dropped.`);
+  if (line.coverage === "Quoted") throw badRequest(`${label} is on quotation ${line.quotation}. Delete the quotation, or cancel it in SAP, first.`);
+  if (line.coverage === "Dropped") throw badRequest(`${label} is already dropped.`);
+  const why = tidy(reason);
+  if (!why) throw badRequest(`Say why ${label} is dropped.`);
+  if (why.length > DROP_REASON_MAX) throw badRequest(`Keep the reason to ${DROP_REASON_MAX} characters.`);
+  return { coverage: "Dropped", quotation: "", drop_reason: why };
+};
+
+/** The purchase manager drops a line nobody will quote, with the reason. */
+export const dropLine = async (id, lineId, reason) => {
+  const doc = await getDoc(DOCTYPE, id).catch(() => null);
+  if (!doc) throw notFound("Purchase request not found");
+  await setLineFields(lineId, checkDrop(doc, lineId, reason));
+  return getRequest(id);
+};
+
+/** A line dropped by mistake is open for a quotation again. */
+export const reopenLine = async (id, lineId) => {
+  const doc = await getDoc(DOCTYPE, id).catch(() => null);
+  if (!doc) throw notFound("Purchase request not found");
+  const line = (doc.lines || []).find((l) => l.name === lineId);
+  if (!line) throw notFound("That line is not on this purchase request.");
+  if (line.coverage !== "Dropped") throw badRequest(`${line.item_name || line.item} is not dropped.`);
+  if (!linesOpenFor(doc)) throw badRequest(`This request is ${doc.status}; its lines cannot be opened again.`);
+  await setLineFields(lineId, { coverage: "", drop_reason: "" });
   return getRequest(id);
 };

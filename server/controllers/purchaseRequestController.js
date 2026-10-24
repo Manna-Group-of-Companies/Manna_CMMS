@@ -74,7 +74,7 @@ export const companies = async (req, res) => {
   }
 };
 
-/** @route GET /api/purchase-requests/vendors?company=HRI - the SAP suppliers, for the PO form */
+/** @route GET /api/purchase-requests/vendors?company=HRI - the SAP suppliers and tax codes */
 export const vendors = async (req, res) => {
   try {
     res.json(await requests.vendorsFor(req.query.company));
@@ -83,16 +83,25 @@ export const vendors = async (req, res) => {
   }
 };
 
-/** @route POST /api/purchase-requests/:id/order - the purchase manager makes the PO */
-export const order = async (req, res) => {
+/** @route POST /api/purchase-requests/:id/lines/:line/drop - nobody will quote it */
+export const dropLine = async (req, res) => {
   try {
-    res.json(await requests.orderRequest(req.params.id, req.body, req.user));
+    res.json(await requests.dropLine(req.params.id, req.params.line, req.body?.reason));
   } catch (error) {
-    fail(res, error, "Could not save the purchase order");
+    fail(res, error, "Could not drop the line");
   }
 };
 
-/** @route POST /api/purchase-requests/:id/order/retry */
+/** @route POST /api/purchase-requests/:id/lines/:line/reopen */
+export const reopenLine = async (req, res) => {
+  try {
+    res.json(await requests.reopenLine(req.params.id, req.params.line));
+  } catch (error) {
+    fail(res, error, "Could not open the line again");
+  }
+};
+
+/** @route POST /api/purchase-requests/:id/order/retry - a PO made on the request before 24 Oct 2026 */
 export const retryOrder = async (req, res) => {
   try {
     res.json(await requests.retryOrder(req.params.id, req.user));

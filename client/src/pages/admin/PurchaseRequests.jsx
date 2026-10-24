@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  Ban,
   Eye,
   FileText,
   Loader2,
   Plus,
+  RotateCcw,
   Send,
   ShoppingCart,
   Truck,
@@ -20,11 +22,12 @@ import {
   PURCHASE_MANAGER,
 } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
+import { useDialog } from "../../context/DialogContext";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import { useSapSyncDone } from "../../hooks/useSapSync";
 import { useErpRefresh } from "../../hooks/useErpRefresh";
 import PurchaseRequestModal from "./PurchaseRequestModal";
-import PurchaseOrderModal from "./PurchaseOrderModal";
+import PurchaseQuotationModal from "./PurchaseQuotationModal";
 import { formatCurrency } from "../../utils/currency";
 import Pagination from "../../components/Pagination";
 import { pageSlice } from "../../utils/pageSlice";
@@ -43,7 +46,21 @@ const PAGE_SIZE = 10;
  *
  * Since 20 Oct 2026 the purchase manager can make that PO here instead of in
  * SAP; the sync posts it, and the request goes Ordered as for one made in SAP.
+ *
+ * Since 24 Oct 2026 the purchase manager enters the chosen vendor's quotation
+ * against it instead, and makes the PO from the quotation on its own page.
+ * Each line shows whether it is quoted, dropped (and why), or still open; the
+ * details list its quotations and the PO made from each. A PO made on the
+ * request before then, and refused by SAP, can still be sent again.
  */
+
+/** A quotation, as it stands with the sync. */
+const QUOTE_STYLE = {
+  Queued: "badge-amber",
+  Posted: "badge-emerald",
+  Failed: "badge-rose",
+  Cancelled: "badge-slate",
+};
 
 /** The PO made here, as it stands with the sync. */
 const ORDER_STYLE = {
@@ -83,11 +100,12 @@ const day = (value) => {
 const PurchaseRequests = () => {
   const { user } = useAuth();
   const { showToast } = useNotifications();
+  const { prompt } = useDialog();
   // Mirrors the server: only the Maintenance Manager raises a request or re-sends it.
   // Maintenance, and since 14 Oct 2026 the plant heads - mirrors the server's guard.
   const canRaise = user?.role === MAINTENANCE_MANAGER || user?.role === PRODUCTION_MANAGER;
-  // Making the PO commits the company's money: the purchase manager, and the
-  // Admin as the usual fallback - mirrors the server's guard.
+  // Quoting and dropping lines commit the company's money: the purchase manager,
+  // and the Admin as the usual fallback - mirrors the server's guard.
   const canBuy = user?.role === PURCHASE_MANAGER || user?.role === MANAGER;
 
   const [rows, setRows] = useState([]);
@@ -99,7 +117,7 @@ const PurchaseRequests = () => {
   const [sapCompanies, setSapCompanies] = useState([]);
   const [busy, setBusy] = useState("");
   const [raising, setRaising] = useState(false);
-  const [ordering, setOrdering] = useState(null);
+  const [quoting, setQuoting] = useState(null);
   // The request whose full details are open, by id, so a background reload
   // shows the fresh copy rather than the one the eye was pressed on.
   const [viewing, setViewing] = useState("");
@@ -140,12 +158,14 @@ const PurchaseRequests = () => {
 
   // Only worth polling while the SAP server still has something to create.
   // Paused while the dialog is open, so the list does not shift under it.
-  const anyQueued = rows.some((r) => r.status === "Queued" || r.order?.status === "Queued");
-  useAutoRefresh(() => load(true), { enabled: anyQueued && !raising && !ordering });
+  const anyQueued = rows.some(
+    (r) => r.status === "Queued" || r.order?.status === "Queued" || r.quotations?.some((q) => q.status === "Queued")
+  );
+  useAutoRefresh(() => load(true), { enabled: anyQueued && !raising && !quoting });
 
   // A finished run is what moves a request off Queued, so the row it moved is
   // the one on screen. Not while the dialog is open - the list would shift.
-  useSapSyncDone(() => !raising && !ordering && load(true));
+  useSapSyncDone(() => !raising && !quoting && load(true));
 
   const retry = async (id) => {
     setBusy(id);
@@ -165,6 +185,35 @@ const PurchaseRequests = () => {
     try {
       await API.post(`/purchase-requests/${id}/order/retry`);
       showToast("Purchase order sent to SAP again", "success");
+      load(true);
+    } catch (err) {
+      showToast(err.response?.data?.message || "That step was refused", "error");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  // A line nobody will quote is dropped with a reason, or opened again.
+  const lineStep = async (r, l, step) => {
+    let body = {};
+    if (step === "drop") {
+      const reason = await prompt({
+        title: `Drop ${l.name}?`,
+        message: "Nobody will quote it, and the request can close without it. Say why.",
+        placeholder: "Bought locally, no longer needed...",
+        confirmLabel: "Drop line",
+      });
+      if (reason === null) return;
+      if (!reason.trim()) {
+        showToast("Say why the line is dropped", "error");
+        return;
+      }
+      body = { reason: reason.trim() };
+    }
+    setBusy(r.id);
+    try {
+      await API.post(`/purchase-requests/${r.id}/lines/${encodeURIComponent(l.lineId)}/${step}`, body);
+      showToast(step === "drop" ? `${l.name} dropped` : `${l.name} is open for a quotation again`, "success");
       load(true);
     } catch (err) {
       showToast(err.response?.data?.message || "That step was refused", "error");
@@ -216,11 +265,12 @@ const PurchaseRequests = () => {
     canBuy,
     busy: busy === r.id,
     onRetry: () => retry(r.id),
-    onOrder: () => {
+    onQuote: () => {
       setViewing("");
-      setOrdering(r);
+      setQuoting(r);
     },
     onRetryOrder: () => retryOrder(r.id),
+    onLine: (l, step) => lineStep(r, l, step),
   });
 
   return (
@@ -331,13 +381,9 @@ const PurchaseRequests = () => {
         </div>
       )}
 
-      {ordering && (
+      {quoting && (
         <div className="modal-backdrop">
-          <PurchaseOrderModal
-            request={ordering}
-            onClose={() => setOrdering(null)}
-            onSaved={() => load(true)}
-          />
+          <PurchaseQuotationModal request={quoting} onClose={() => setQuoting(null)} onSaved={() => load(true)} />
         </div>
       )}
     </div>
@@ -364,8 +410,8 @@ const itemsSummary = (lines = []) => {
   return lines.length > 1 ? `${first}, +${lines.length - 1} more` : first;
 };
 
-/** Send again, change or make the PO - offered on the row and in the popup alike. */
-const RowActions = ({ request: r, canRetry, canBuy, busy, onRetry, onOrder, onRetryOrder }) => {
+/** Send again, or make the quotation - offered on the row and in the popup alike. */
+const RowActions = ({ request: r, canRetry, canBuy, busy, onRetry, onQuote, onRetryOrder }) => {
   const o = r.order;
   return (
     <>
@@ -375,21 +421,17 @@ const RowActions = ({ request: r, canRetry, canBuy, busy, onRetry, onOrder, onRe
           {busy ? "…" : "Send again"}
         </button>
       )}
-      {/* A refused PO can go back as it was, or be changed first. */}
+      {/* A PO made on the request before 24 Oct 2026, refused by SAP. */}
       {canBuy && o?.status === "Failed" && (
         <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetryOrder}>
           <Send className="h-4 w-4" />
           {busy ? "…" : "Send PO again"}
         </button>
       )}
-      {canBuy && r.mayOrder && (
-        <button
-          className={`btn btn-sm ${o?.status === "Failed" ? "btn-neutral" : "btn-primary"}`}
-          disabled={busy}
-          onClick={onOrder}
-        >
+      {canBuy && r.mayQuote && (
+        <button className="btn btn-sm btn-primary" disabled={busy} onClick={onQuote}>
           <FileText className="h-4 w-4" />
-          {o?.status === "Failed" ? "Change PO" : "Make PO"}
+          Make quotation
         </button>
       )}
     </>
@@ -474,6 +516,12 @@ const RequestList = ({ rows, onView }) => (
 /** Everything about one request: the popup behind the eye. */
 const RequestDetails = ({ request: r, onClose, ...actions }) => {
   const o = r.order;
+  // Lines are quoted or dropped only on a request in SAP with no PO made on it the old way - and still once
+  // it is Ordered through a quotation's PO, so a request quoted in parts is not stuck (the server's QUOTING).
+  const linesOpen =
+    actions.canBuy &&
+    !o &&
+    (r.status === "In SAP" || (r.status === "Ordered" && (r.lines || []).some((l) => l.coverage === "Quoted")));
   return (
     <div className="modal max-w-2xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
       <div className="modal-head">
@@ -536,13 +584,52 @@ const RequestDetails = ({ request: r, onClose, ...actions }) => {
                     · Received {l.received}
                   </span>
                 )}
+                {l.coverage === "Quoted" && <span className="ml-2 text-[12px] text-slate-500">· Quoted on {l.quotation}</span>}
+                {l.coverage === "Dropped" && (
+                  <span className="ml-2 text-[12px] text-slate-500">· Dropped{l.dropReason ? `: ${l.dropReason}` : ""}</span>
+                )}
               </span>
+              {linesOpen && !l.coverage && (
+                <button
+                  className="btn btn-sm btn-neutral"
+                  disabled={actions.busy}
+                  onClick={() => actions.onLine(l, "drop")}
+                  title="Nobody will quote this line"
+                >
+                  <Ban className="h-3.5 w-3.5" />
+                  Drop
+                </button>
+              )}
+              {linesOpen && l.coverage === "Dropped" && (
+                <button className="btn btn-sm btn-neutral" disabled={actions.busy} onClick={() => actions.onLine(l, "reopen")}>
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Reopen
+                </button>
+              )}
             </li>
           ))}
         </ul>
         </div>
 
         {o && <OrderState order={o} />}
+
+        {r.quotations?.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-[12px] font-medium text-slate-500">Quotations</p>
+            <ul className="space-y-1.5">
+              {r.quotations.map((q) => (
+                <li key={q.id} className="flex flex-wrap items-center gap-2 text-[13px]">
+                  <span className={`badge ${QUOTE_STYLE[q.status] || "badge-slate"}`}>
+                    {q.status === "Posted" ? `SAP quotation ${q.sapDocNumber || "posted"}` : `Quotation ${q.status.toLowerCase()}`}
+                  </span>
+                  <span className="mono text-xs text-slate-500">{q.id}</span>
+                  <span className="text-slate-800">{q.vendorName}</span>
+                  {q.purchaseOrder && <span className="text-slate-600">→ {q.purchaseOrder}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {r.status === "Ordered" && (
           <p className="flex items-center gap-1.5 text-xs text-emerald-700">

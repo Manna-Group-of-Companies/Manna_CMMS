@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { historyNote, nextStatus, receiptProgress, receivesFor, reconcileCompletion } from "../repository/purchaseCompletion.js";
-import { checkOrder, mayOrder } from "../repository/purchaseRequests.js";
+import { mayQuote } from "../repository/purchaseRequests.js";
+import { checkQuotation } from "../repository/purchaseQuotations.js";
 
 const request = (extra = {}) => ({
   name: "PR-2026-00400",
@@ -105,20 +106,23 @@ describe("when a request is Completed", () => {
     assert.ok(!receiptProgress(request({ lines: [] }), []).complete);
   });
 
-  it("is read only: no PO can be made from it", () => {
-    const pr = { ...request({ status: "Completed", sap_doc_entry: 77 }), lines: [] };
-    assert.ok(!mayOrder(pr));
-    assert.throws(() => checkOrder(pr, {}, {}, "2026-10-23"), (e) => e.status === 400);
+  // Since 24 Oct 2026 the PO is made from a quotation, so "no PO" is "no quotation".
+  it("is read only: no quotation can be entered against it", () => {
+    const pr = { ...request({ status: "Completed", sap_doc_entry: 77 }), lines: [{ name: "l1", item: "ENG-0001", qty: 10, coverage: "" }] };
+    assert.ok(!mayQuote(pr));
+    assert.throws(() => checkQuotation(pr, {}, {}, "2026-10-23"), (e) => e.status === 400 && /Completed/.test(e.message));
   });
 });
 
 /** ERPNext, in memory: the doctypes the completion check reads and writes. */
-const fakeErp = ({ requests, receipts }) => {
+const fakeErp = ({ requests, receipts, orders = [] }) => {
   const docs = {
     "CMMS Purchase Request": requests.map(({ lines, ...r }) => ({ ...r })),
     "CMMS Purchase Request Line": requests.flatMap((r) => r.lines.map((l) => ({ ...l, parent: r.name }))),
     "CMMS Goods Receipt": receipts.map(({ lines, ...r }) => ({ ...r })),
     "CMMS Goods Receipt Line": receipts.flatMap((r) => r.lines.map((l) => ({ ...l, parent: r.name }))),
+    "CMMS Purchase Order": orders.map(({ lines, ...o }) => ({ ...o })),
+    "CMMS Purchase Order Line": orders.flatMap((o) => o.lines.map((l) => ({ ...l, parent: o.name }))),
     Comment: [],
   };
   const match = (row, [, field, op, value]) => {
