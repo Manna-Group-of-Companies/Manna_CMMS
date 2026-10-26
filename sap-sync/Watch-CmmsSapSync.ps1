@@ -166,8 +166,10 @@ function Invoke-SyncOnce {
         Set-Control @{ status = 'Running'; last_run_started_at = (Now-Str); sync_requested = 0 }
         # In this same process: & returns, exit in the sync ends the sync only, $LASTEXITCODE is set.
         # Working directory stays wherever the task runs it from; the sync uses $PSScriptRoot for its own files.
-        $syncArgs = @('-Mode', $Mode, '-ConfigPath', $cfg.sync_config, '-ResultJsonPath', $resultJson)
-        if ($NoRoutineFallback) { $syncArgs += '-NoRoutineFallback' }
+        # Hashtable splatting, not an array (dev PC, 27 Oct 2026): in Windows PowerShell 5.1, array elements of a
+        # script call bind positionally - "-ConfigPath" landed in the int $Limit and every run failed.
+        $syncArgs = @{ Mode = $Mode; ConfigPath = "$($cfg.sync_config)"; ResultJsonPath = $resultJson }
+        if ($NoRoutineFallback) { $syncArgs.NoRoutineFallback = $true }
         & $cfg.sync_script @syncArgs
         $exit = [int]$LASTEXITCODE
         $elapsed = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)

@@ -600,6 +600,9 @@ try {
         }
     }
 
+    # The refused-login reasons seen this run, appended to the final summary AFTER it is built (the summary
+    # builder at the end would otherwise overwrite them - dev PC, 27 Oct 2026).
+    $blockedReasons = @()
     foreach ($db in $work.Keys) {
         $w = $work[$db]; $abbr = $w.abbr; $opt = $w.opt
         if ($skipDbs -contains "$db".ToUpper()) { Log WARN ("{0}: skipped (skip_companies) - not logged in; its CMMS work stays Queued" -f $db); continue }
@@ -608,7 +611,7 @@ try {
             $reason = Login-Reason $db
             $when = "$($loginBlocked[$dbUp].at)"
             Log ERROR ("{0}: {1} (first refused at {2})" -f $db, $reason, $when)
-            if (-not $result.summary) { $result.summary = $reason } else { $result.summary = "$($result.summary); $reason" }
+            $blockedReasons += $reason
             & $noteBlocked $db $w $reason
             $result.failures++
             continue
@@ -639,7 +642,7 @@ try {
                     Save-LoginBlocked
                     $reason = Login-Reason $db
                     Log ERROR ("{0}: {1} (HTTP {2}: {3})" -f $db, $reason, $httpCode, $sapBody)
-                    if (-not $result.summary) { $result.summary = $reason } else { $result.summary = "$($result.summary); $reason" }
+                    $blockedReasons += $reason
                     & $noteBlocked $db $w $reason
                     $result.failures++
                     continue
@@ -2114,6 +2117,7 @@ try {
     $tag = "mode $Mode"
     $result.summary = if ($DryRun) { "DRY RUN ($tag): $wouldC item(s) would be created, $wouldP would change, $wouldR receipt(s) would post, $wouldG item group(s) would be created, $wouldQ purchase request(s) would post, $wouldO purchase order(s) would post, $wouldS quotation(s) would post, $wouldN PO(s) from quotations would post, $wouldI spares issue(s) would post, $($result['fetched']) change(s) would be fetched from SAP, $same already match, $($result.failures) failed." }
                       else { "$tag`: $($result.created) item(s) created in SAP, $($result.changed - $result.created - $result['receipts'] - $result['groups'] - $result['prs'] - $result['issues'] - $result['pos'] - $result['quotes'] - $result['qpos']) updated, $($result['receipts']) receipt(s) posted, $($result['groups']) item group(s) created, $($result['prs']) purchase request(s) posted, $($result['pos']) purchase order(s) posted, $($result['quotes']) quotation(s) posted, $($result['qpos']) PO(s) from quotations posted, $($result['issues']) spares issue(s) posted, $($result['fetched']) change(s) fetched from SAP, $same already matched, $($result.failures) failed." }
+    if ($blockedReasons.Count) { $result.summary += ' ' + (@($blockedReasons | Select-Object -Unique) -join ' ') }
     Log INFO $result.summary
     # Routine stamps (27 Oct 2026): the app shows when the last routine run finished. A Routine run that fell through
     # from an empty Job still counts, so the user's Sync press is reported this way too.

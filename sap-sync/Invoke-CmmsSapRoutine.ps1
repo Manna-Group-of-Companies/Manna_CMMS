@@ -22,7 +22,9 @@ $scriptDir = $PSScriptRoot; if (-not $scriptDir) { $scriptDir = Split-Path -Pare
 $watcher = Join-Path $scriptDir 'Watch-CmmsSapSync.ps1'
 if (-not (Test-Path -LiteralPath $watcher)) { Write-Error "watcher not found: $watcher"; exit 2 }
 
-$pass = @('-Routine')
-if ($ConfigPath) { $pass += @('-ConfigPath', $ConfigPath) }
+# Hashtable splatting, not an array (dev PC, 27 Oct 2026): in Windows PowerShell 5.1, array elements of a
+# script call bind positionally - "-Routine" became the watcher's ConfigPath.
+$pass = @{ Routine = $true }
+if ($ConfigPath) { $pass.ConfigPath = $ConfigPath }
 & $watcher @pass
 exit $LASTEXITCODE
