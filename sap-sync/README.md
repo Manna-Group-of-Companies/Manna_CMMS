@@ -200,6 +200,92 @@ A kind that is off is left `Queued` and goes the run after it is turned on. The 
 off by default because the agent's edit switching them on was stopped by the auto-mode classifier - turning
 them on is your call, after a dry run.
 
+## Fast sync (job and routine runs, 27 Oct 2026)
+
+What was three PowerShell processes per run (watcher → poller → sync, 2-minute cooldown, 5-second flag
+check, every bulk read on every flag) is now **one process** running a Job: 2-second flag check, a 3-second
+coalesce wait so several saves go in one run, no cooldown. A document saved in the CMMS reaches SAP in
+**about 5-10 seconds** instead of minutes. The SAP → CMMS reads (PASS E, open PO lines, cancelled-in-SAP,
+HSN list, units, next codes, suppliers and tax codes) move to a **routine run three times a day** at
+**07:00, 13:00 and 19:00** (`-RoutineTimes` on the registration script).
+
+### What runs
+
+| Mode | Who starts it | Does |
+|---|---|---|
+| **Job** | the watcher, on the flag | logs in only to companies with queued work; runs only the passes that have work (PASS H, 0, A, B, D, Q, G, P, C, F); skips PASS E, the open PO lines read, the cancelled-in-SAP checks, the HSN list / units / next codes refresh, and the hourly supplier refresh (unless the company is in `vendor_refresh_requested`). Marks a purchase request **Ordered** in-run after PASS G / PASS P, with the PO number in `po_numbers`. |
+| **Routine** | Task Scheduler, 3x a day | everything today's run does, for every company. Writes `routine_last_at` and `routine_last_result` on the control Single. |
+
+A Job run with **nothing queued and no vendor refresh asked for falls through to a Routine** so today's
+app's Sync / "Fetch from SAP" buttons still do what they did. The compatibility fallback goes away when
+the app drops those buttons.
+
+`-DryRun -Mode Job` with one queued record logs in to that one company only; `-DryRun -Mode Routine` logs
+in to every company. All existing switches in `config.json` (`create_items`, `post_receipts`,
+`post_purchase_requests`, `post_purchase_orders`, `post_purchase_quotations`,
+`post_quotation_purchase_orders`, `post_quotation_receipts`, `post_issues`, `create_hsn`, `create_groups`,
+`revalue_nil_stock`, `pull_from_sap`, `skip_companies`, `edit_fields`) and `dry_run` on the control
+Single keep working in both modes.
+
+### Files
+
+| File | What it is |
+|---|---|
+| `Watch-CmmsSapSync.ps1` | **The watcher.** Started by `SAP-CMMS-Watch` every minute, runs ~55 s. Checks `sync_requested` every 2 s, waits 3 s, runs `Sync-SapItemCategories.ps1 -Mode Job` in this same process. Also: writes `watcher_seen_at` + `watcher_version` as a heartbeat (at least every 60 s); 30-second safety net that runs a Job if any CMMS doctype has had a record Queued for over 60 s; takes over a `status = Running` older than 15 min; a named mutex `Global\MannaCmmsSapSync` stops a job and a routine overlapping. |
+| `Invoke-CmmsSapRoutine.ps1` | Thin shim that calls `Watch-CmmsSapSync.ps1 -Routine`. Takes the same mutex (waits up to 10 min for a job run to finish). |
+| `Register-CmmsSyncTasks.ps1` | **Run elevated.** Preview by default; `-Apply` registers `SAP-CMMS-Watch` (every minute) and `SAP-CMMS-Routine` (daily at `-RoutineTimes`), and removes `SAP-Watch-Categories` and any task running `Invoke-SapCategorySyncPoller.ps1`. Touches no other task. `-Disable` disables both new tasks (rollback step 1). |
+| `setup-sync-jobs.js` | Adds five Custom Fields to the Single (dry by default, `--apply`): `watcher_seen_at`, `watcher_version`, `routine_last_at`, `routine_last_result`, `vendor_refresh_requested`. Each script works before the fields are there - a missing field is treated as empty with a warning in the log. |
+
+The old `Invoke-FlagWatch.ps1` + `Invoke-SapCategorySyncPoller.ps1` chain is kept in the repo for reference
+but no scheduled task runs it any more after `Register-CmmsSyncTasks.ps1 -Apply`.
+
+### Settings
+
+- **No cooldown.** `cooldown_minutes` / `cooldown_until` are ignored; the watcher clears
+  `cooldown_until` every time it writes a result, so the app's status widget never shows a stale cooldown.
+- **A refused login** (400 or 401 at SAP `/Login`) is **never retried automatically** - SAP locks the
+  user after 3 wrong passwords. The sync writes `logs\login-blocked.json` and skips that company in
+  every later run until a person deletes the file.
+- **One SAP Service Layer user** (`eldhose` as `config.json` has it). Do not add users.
+
+### Deploy and rollback
+
+Deploy (after the dev PC's end-to-end test passed):
+
+```
+# on the SAP server, PowerShell
+Copy-Item C:\Users\eldhose\sap-engineering-sync C:\Users\eldhose\sap-engineering-sync-backup-<yyyyMMdd> -Recurse
+# copy the four new / changed files from the repo (sap-sync\) into C:\Users\eldhose\sap-engineering-sync\:
+#   Sync-SapItemCategories.ps1, Watch-CmmsSapSync.ps1, Invoke-CmmsSapRoutine.ps1, Register-CmmsSyncTasks.ps1
+#   plus setup-sync-jobs.js
+# config.json, poller.config.json and logs\ stay as they are.
+
+cd C:\Users\eldhose\sap-engineering-sync
+node setup-sync-jobs.js             # dry run
+node setup-sync-jobs.js --apply     # add the five fields
+
+# elevated:
+.\Register-CmmsSyncTasks.ps1        # preview
+.\Register-CmmsSyncTasks.ps1 -Apply # register the new tasks, remove SAP-Watch-Categories
+```
+
+Rollback:
+
+```
+# elevated:
+.\Register-CmmsSyncTasks.ps1 -Disable -Apply
+# restore the backup folder, if the sync script also needs rolling back:
+Remove-Item C:\Users\eldhose\sap-engineering-sync -Recurse -Force
+Rename-Item C:\Users\eldhose\sap-engineering-sync-backup-<yyyyMMdd> sap-engineering-sync
+# re-register the OLD watcher only if you want it (the user disabled the sales-dashboard watchers,
+# so DO NOT run sap-order-sync\Register-FlagWatchTasks.ps1 - it re-registers all five of those).
+# To re-register just the old category watcher, use the actions from the 24 Oct README commit.
+```
+
+The CMMS app itself does not need any change for the fast sync: `watcher_seen_at` and
+`vendor_refresh_requested` are read / written by the app later, when the "SAP sync offline since" line
+and the vendor-refresh button are added.
+
 ## The Manna Rubber clean-up (10 Oct 2026)
 
 A one-off, asked for by the user after inspecting the lists, and the one time this folder wrote item

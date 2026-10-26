@@ -146,7 +146,12 @@ param(
     [string] $ResultJsonPath,
     [int] $Limit = 0,
     # Company databases to leave out of this run (added to config.json "skip_companies").
-    [string[]] $SkipCompany = @()
+    [string[]] $SkipCompany = @(),
+    # Job (default, every flag): pushes only the queued work, only to the companies with any, and skips every bulk read.
+    # Routine (3 times a day): everything today's run does - PASS E, open PO lines, cancellations, HSN list, units,
+    # next codes, suppliers and tax codes for every company. A Job run with nothing queued and no vendor refresh asked
+    # for falls through to a Routine run, so today's app's Sync / "Fetch from SAP" buttons still do what they did.
+    [ValidateSet('Job','Routine')] [string] $Mode = 'Job'
 )
 
 Set-StrictMode -Version 1.0
@@ -357,13 +362,44 @@ try {
     $receipts = @($receipts) + @($quoteReceipts)
     if (-not $createGroups -and $groupReqs.Count) { Log INFO ("{0} item group request(s) left Queued - creating groups is off (create_groups)." -f $groupReqs.Count); $groupReqs = @() }
     if ($Limit -gt 0) { $creates = @($creates | Select-Object -First $Limit); $edits = @($edits | Select-Object -First $Limit); $receipts = @($receipts | Select-Object -First $Limit); $issues = @($issues | Select-Object -First $Limit) }
-    Log INFO ("{0} item(s) to create, {1} with pending edits, {2} receipt(s), {3} spares issue(s), {4} new item group(s), {5} new HSN code(s); edits send {6}{7}." -f $creates.Count, $edits.Count, $receipts.Count, $issues.Count, $groupReqs.Count, $hsnQueued.Count, ($editFields -join ', '), $(if ($DryRun) { ' - DRY RUN, nothing will be written' } else { '' }))
-    # No early exit: every run also re-reads each company's open PO lines for the goods receipt form.
+    # Companies the CMMS has asked for a supplier / tax code refresh (vendor_refresh_requested, 27 Oct 2026): a JSON array
+    # of abbreviations. Treated as empty when the field is missing. Processed in Job mode too; the abbr is removed once
+    # that company has been refreshed.
+    $vendRefresh = @(); $vendRefreshRaw = ''
+    if ($ctl.PSObject.Properties['vendor_refresh_requested']) {
+        $vendRefreshRaw = "$($ctl.vendor_refresh_requested)".Trim()
+        if ($vendRefreshRaw) { try { $vendRefresh = @(("$vendRefreshRaw" | ConvertFrom-Json) | ForEach-Object { "$_".Trim().ToUpper() } | Where-Object { $_ }) } catch { Log WARN "vendor_refresh_requested is not JSON ($vendRefreshRaw) - treated as empty"; $vendRefresh = @() } }
+    }
+    # Compatibility (27 Oct 2026): the app still has Sync / "Fetch from SAP" buttons that raise the flag with nothing queued.
+    # A Job run with no queued work and no vendor refresh asked for runs as Routine, so those buttons still do what they did.
+    # The app will drop them later, when every save queues work; the fallback stays in the code until then.
+    $anyWork = ($creates.Count + $edits.Count + $receipts.Count + $groupReqs.Count + $prs.Count + $orders.Count + $quotes.Count + $qorders.Count + $issues.Count + $hsnQueued.Count) -gt 0
+    if ($Mode -eq 'Job' -and -not $anyWork -and -not $vendRefresh.Count) { Log INFO 'Job mode: nothing queued and no vendor refresh - running Routine instead (today''s app still presses Sync with nothing queued).'; $Mode = 'Routine' }
+    $isRoutine = ($Mode -eq 'Routine')
+    $result.mode = $Mode
+    Log INFO ("mode {0}: {1} item(s) to create, {2} with pending edits, {3} receipt(s), {4} spares issue(s), {5} new item group(s), {6} new HSN code(s), {7} purchase request(s), {8} PO(s), {9} quotation(s), {10} PO(s) from quotations; vendor refresh for {11}; edits send {12}{13}." -f $Mode, $creates.Count, $edits.Count, $receipts.Count, $issues.Count, $groupReqs.Count, $hsnQueued.Count, $prs.Count, $orders.Count, $quotes.Count, $qorders.Count, $(if ($vendRefresh.Count) { ($vendRefresh -join ',') } else { 'none' }), ($editFields -join ', '), $(if ($DryRun) { ' - DRY RUN, nothing will be written' } else { '' }))
+    # No early exit: a Routine run also re-reads each company's open PO lines for the goods receipt form.
 
     # The engineering items ERPNext mirrors, per company: SAP code -> ERPNext item (for the open PO lines).
     # $mirrorAll includes disabled items, for PASS E (fetch from SAP) to re-enable or update them.
+    # Job mode (27 Oct 2026): only the items this run needs - by name of each line in the queued work. PASS E, the open
+    # PO lines read and the cancelled-in-SAP checks all skip in Job mode, so the whole engineering list is not needed.
+    # Routine mode reads them all, as before.
     $mirror = @{}; $mirrorAll = @{}
-    foreach ($it in (Erp-List 'Item' @('name', 'item_name', 'custom_sap_item_code', 'valuation_rate', 'disabled', 'stock_uom', 'custom_sap_item_group', 'custom_sap_sub_type_a', 'custom_sap_sub_type_b', 'custom_sap_foreign_name', 'custom_sap_hsn_code', 'custom_sap_tax_rate', 'safety_stock', 'custom_sap_category_pending') '[["custom_sap_item_group","is","set"]]')) {
+    $itemFilter = '[["custom_sap_item_group","is","set"]]'
+    if (-not $isRoutine) {
+        $need = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($rc in $receipts) { foreach ($l in @($rc.lines)) { if ("$($l.item)".Trim()) { [void]$need.Add("$($l.item)".Trim()) } } }
+        foreach ($gi in $issues) { foreach ($l in @($gi.lines)) { if ("$($l.item)".Trim()) { [void]$need.Add("$($l.item)".Trim()) } } }
+        foreach ($pq in $prs) { foreach ($l in @($pq.lines)) { if ("$($l.item)".Trim()) { [void]$need.Add("$($l.item)".Trim()) } } }
+        foreach ($po in $orders) { foreach ($l in @($po.lines)) { if ("$($l.item)".Trim()) { [void]$need.Add("$($l.item)".Trim()) } } }
+        foreach ($q in $quotes) { foreach ($l in @($q.lines)) { if ("$($l.item)".Trim()) { [void]$need.Add("$($l.item)".Trim()) } } }
+        foreach ($po in $qorders) { foreach ($l in @($po.lines)) { if ("$($l.item)".Trim()) { [void]$need.Add("$($l.item)".Trim()) } } }
+        foreach ($e in $edits) { if ("$($e.name)".Trim()) { [void]$need.Add("$($e.name)".Trim()) } }
+        if ($need.Count -eq 0) { $itemFilter = $null }
+        else { $itemFilter = '[["name","in",{0}]]' -f (ConvertTo-Json -InputObject @($need) -Compress) }
+    }
+    foreach ($it in $(if ($itemFilter) { Erp-List 'Item' @('name', 'item_name', 'custom_sap_item_code', 'valuation_rate', 'disabled', 'stock_uom', 'custom_sap_item_group', 'custom_sap_sub_type_a', 'custom_sap_sub_type_b', 'custom_sap_foreign_name', 'custom_sap_hsn_code', 'custom_sap_tax_rate', 'safety_stock', 'custom_sap_category_pending') $itemFilter } else { @() })) {
         $ab = ("$($it.name)" -split '-', 2)[0]
         $sc = "$($it.custom_sap_item_code)".Trim()
         if (-not $sc) { continue }
@@ -443,8 +479,11 @@ try {
         if (-not $work.ContainsKey($o.sap_db)) { $work[$o.sap_db] = @{ abbr = $Abbr; opt = $o; creates = New-Object System.Collections.ArrayList; edits = New-Object System.Collections.ArrayList; receipts = New-Object System.Collections.ArrayList; groups = New-Object System.Collections.ArrayList; prs = New-Object System.Collections.ArrayList; openPrs = New-Object System.Collections.ArrayList; issues = New-Object System.Collections.ArrayList; orders = New-Object System.Collections.ArrayList; quotes = New-Object System.Collections.ArrayList; qorders = New-Object System.Collections.ArrayList; hsnReqs = New-Object System.Collections.ArrayList } }
         $work[$o.sap_db]
     }
-    # Every company, for its open PO lines.
-    foreach ($ab in @($options.PSObject.Properties.Name)) { $null = Work-For $ab }
+    # Routine mode: every company, for its open PO lines, PASS E and the options refresh.
+    # Job mode: only the companies the CMMS asked for a vendor refresh. Companies with queued work are added below;
+    # the rest are not logged in to at all.
+    if ($isRoutine) { foreach ($ab in @($options.PSObject.Properties.Name)) { $null = Work-For $ab } }
+    else { foreach ($ab in $vendRefresh) { $null = Work-For $ab } }
     foreach ($g in $groupReqs) {
         $w = Work-For "$($g.company)"
         if (-not $w) { $result.failures++; Log ERROR ("{0}: unknown SAP company '{1}'" -f $g.name, $g.company); continue }
@@ -1060,6 +1099,14 @@ try {
                     if ($poEntry) {
                         $entry.sap_doc = $poNum
                         $null = Erp-Send PUT (Res 'CMMS Purchase Request' $po.name) @{ po_status = 'Posted'; po_doc_entry = $poEntry; po_doc_number = $poNum; po_error = '' }
+                        # Set the request to Ordered in the same run, as the open-PO read did (Job mode skips that read -
+                        # the request would stay In SAP until the next Routine run). The number is added to its po_numbers.
+                        if (-not $DryRun) {
+                            $knownPrNums = @("$($po.po_numbers)" -split '\s*,\s*' | Where-Object { $_ })
+                            if ($knownPrNums -notcontains $poNum) { $knownPrNums += $poNum }
+                            try { $null = Erp-Send PUT (Res 'CMMS Purchase Request' $po.name) @{ status = 'Ordered'; po_numbers = ($knownPrNums -join ', ') } }
+                            catch { Log WARN "{0}: Ordered status not written in-run: {1}" -f $po.name, $_.Exception.Message }
+                        }
                         $result['pos']++
                     }
                     Log INFO ("{0} [{1}]: {2} {3}{4}" -f $po.name, $db, $entry.action, $entry.sap_doc, $(if ($DryRun -and $entry.Contains('payload')) { ' ' + ($entry.payload | ConvertTo-Json -Compress -Depth 6) } else { '' }))
@@ -1142,6 +1189,16 @@ try {
                         # And one of its request's POs, for the status read at the end of this same run.
                         $k = "$($po.purchase_request)"
                         if ($k) { if (-not $quotePosByPr.ContainsKey($k)) { $quotePosByPr[$k] = @() }; if ($quotePosByPr[$k] -notcontains $poNum) { $quotePosByPr[$k] += $poNum } }
+                        # Set the request to Ordered in the same run (Job mode skips the open-PO read, which would set it).
+                        if (-not $DryRun -and $k) {
+                            try {
+                                $req = (Erp-Get (Res 'CMMS Purchase Request' $k)).data
+                                $knownPrNums = @("$($req.po_numbers)" -split '\s*,\s*' | Where-Object { $_ })
+                                if ($knownPrNums -notcontains $poNum) { $knownPrNums += $poNum }
+                                $wantStatus = if ("$($req.status)" -eq 'Closed') { 'Closed' } else { 'Ordered' }
+                                $null = Erp-Send PUT (Res 'CMMS Purchase Request' $k) @{ status = $wantStatus; po_numbers = ($knownPrNums -join ', ') }
+                            } catch { Log WARN "{0}: Ordered status not written in-run on {1}: {2}" -f $po.name, $k, $_.Exception.Message }
+                        }
                         $result['qpos']++
                     }
                     Log INFO ("{0} [{1}]: {2} {3}{4}" -f $po.name, $db, $entry.action, $entry.sap_doc, $(if ($DryRun -and $entry.Contains('payload')) { ' ' + ($entry.payload | ConvertTo-Json -Compress -Depth 6) } else { '' }))
@@ -1461,7 +1518,8 @@ try {
             # SAP's QuantityOnStock against the company's ERPNext store, and the differences posted as one Stock
             # Reconciliation (absolute quantities, current valuation kept) - the same measure the 24 Sep opening
             # stock used. Runs after PASS C, so a receipt posted this run is already on both sides.
-            if ($pullFromSap) {
+            # Routine mode only (27 Oct 2026): a Job run never fetches, to keep the flag -> SAP login time low.
+            if ($pullFromSap -and $isRoutine) {
                 try {
                     function To-Int($v) { try { [int]"$v" } catch { 0 } }
                     $gcodes = @($opt.groups | ForEach-Object { [int]$_.code })
@@ -1592,7 +1650,9 @@ try {
             # 24 Oct 2026). A PO SAP closed while goods were still pending - a heavier receipt brings in its quantity at the
             # PO's own ratio - turns Closed with what was pending, accepted as it is: the rest goes on a new request.
             # Reads SAP and writes the CMMS only (closing the request in SAP is rule 15's); a dry run says what it would do.
+            # Routine mode only (27 Oct 2026): Job runs never check cancellations.
             $noteCancel = { param([string] $Doctype, [string] $Name, [hashtable] $Body) if (-not $DryRun) { $null = Erp-Send PUT (Res $Doctype $Name) $Body } }
+            if ($isRoutine) {
             foreach ($q in @($watchQuotes | Where-Object { "$($_.company)" -eq $abbr -and -not "$($_.purchase_order)".Trim() })) {
                 try {
                     $qr = Invoke-Sl -Method GET -Url ("$slBase/PurchaseQuotations({0})?`$select=DocEntry,DocNum,DocumentStatus,Cancelled" -f [int]$q.sap_doc_entry) -Jar $jar
@@ -1692,12 +1752,15 @@ try {
                     Log INFO ("{0} [{1}]: SAP purchase request {2} closed - {3} line(s) dropped, the rest quoted" -f $dp.name, $db, $dp.sap_doc_number, $nDropped)
                 } catch { Log WARN ("{0}: dropped lines not closed in SAP: {1}" -f $dp.name, $_.Exception.Message) }
             }
+            } # end if ($isRoutine) - cancellations and dropped-lines close
 
             # ---------------- open PO lines for engineering items, for the CMMS goods receipt form
             # Read after PASS C, so a GRPO just posted is already off the open quantity. The same read finds the
             # POs raised from CMMS purchase requests: their lines carry BaseType 1470000113 (Purchase Request).
+            # Routine mode only (27 Oct 2026): Job mode marks a request Ordered in PASS G / PASS P instead of reading
+            # the open POs. A Routine run refreshes the lines a goods receipt form offers.
             $prToPo = @{}
-            try {
+            if ($isRoutine) { try {
                 $codes = if ($mirror.ContainsKey($abbr)) { $mirror[$abbr] } else { @{} }
                 $pos = New-Object System.Collections.ArrayList
                 foreach ($po in (Sl-All "PurchaseOrders?`$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocumentLines&`$filter=DocumentStatus eq 'bost_Open'" $jar)) {
@@ -1791,12 +1854,13 @@ try {
                         }
                     } catch { Log WARN ("{0}: purchase request status not refreshed: {1}" -f $pq.name, $_.Exception.Message) }
                 }
-            } catch { Log WARN ("{0}: open PO lines not refreshed: {1}" -f $db, $_.Exception.Message) }
+            } catch { Log WARN ("{0}: open PO lines not refreshed: {1}" -f $db, $_.Exception.Message) } }
 
             # ---------------- suppliers and purchase tax codes, for the CMMS PO form (post_purchase_orders)
-            # Hourly, or at once when there are POs to make: a supplier added in SAP this morning should be
-            # pickable this morning, but reading every business partner on every run is wasted work.
-            if ($postPos -or $postQuotes) {
+            # Routine mode: refreshes hourly, as before.
+            # Job mode (27 Oct 2026): only when the app asked for this company (vendor_refresh_requested).
+            $askedVendors = $vendRefresh -contains "$abbr".ToUpper()
+            if (($isRoutine -and ($postPos -or $postQuotes)) -or $askedVendors) {
                 try {
                     $stale = $true
                     if ($opt.PSObject.Properties['vendors_refreshed_at'] -and "$($opt.vendors_refreshed_at)") {
@@ -1837,7 +1901,8 @@ try {
             # ---------------- the company as SAP knows it, for the CMMS's printed forms (24 Oct 2026)
             # Name, address, phones and email from Administration > Company Details: the letterhead of the quotation
             # printout. One read per run, published only when it changed. Read only; a dry run reads it too.
-            try {
+            # Routine mode only (27 Oct 2026).
+            if ($isRoutine) { try {
                 $ai = Invoke-Sl -Method POST -Url "$slBase/CompanyService_GetAdminInfo" -Body '{}' -Jar $jar
                 if ($ai.Http -ne '200') { Sl-Fail $ai 'read the company details' }
                 $a = $ai.Body | ConvertFrom-Json
@@ -1860,12 +1925,13 @@ try {
                     $optionsChanged = $true
                     Log INFO ("{0}: company details published - {1}, {2} address line(s)" -f $db, $info.name, $info.address.Count)
                 }
-            } catch { Log WARN ("{0}: company details not refreshed: {1}" -f $db, $_.Exception.Message) }
+            } catch { Log WARN ("{0}: company details not refreshed: {1}" -f $db, $_.Exception.Message) } }
 
             # ---------------- SAP's whole unit list, for a quotation's vendor unit (25 Oct 2026)
             # Not "units", which is the short list an item is created with: a vendor sells by the BAG, DRM or CTN, which
             # no engineering item is stocked in. "Manual" is SAP's placeholder for a unit typed by hand, not a unit.
-            try {
+            # Routine mode only (27 Oct 2026).
+            if ($isRoutine) { try {
                 # A foreach statement: Sl-All hands its rows down a pipeline as one object.
                 $su = @(foreach ($u in (Sl-All 'UnitOfMeasurements?$select=Code' $jar)) { (Norm $u.Code).ToUpper() })
                 $su = @($su | Where-Object { $_ -and $_ -ne 'MANUAL' } | Sort-Object -Unique)
@@ -1875,19 +1941,37 @@ try {
                     $optionsChanged = $true
                     Log INFO ("{0}: {1} SAP unit(s) published for quotations" -f $db, $su.Count)
                 }
-            } catch { Log WARN ("{0}: SAP units not refreshed: {1}" -f $db, $_.Exception.Message) }
+            } catch { Log WARN ("{0}: SAP units not refreshed: {1}" -f $db, $_.Exception.Message) } }
 
             # ---------------- options for this company, fresh from SAP
-            foreach ($p in @($opt.groups | ForEach-Object { "$($_.prefix)" } | Where-Object { $_ } | Select-Object -Unique)) {
+            # Routine mode: every prefix in the options, with a SAP read for one that has not been looked up this run.
+            # Job mode (27 Oct 2026): only the prefixes PASS A already looked up for a creation, so no extra SAP reads
+            # are made. The CMMS creation form may still see the previous next number briefly; the next creation does
+            # its own authoritative lookup before posting.
+            $publishPrefixes = if ($isRoutine) { @($opt.groups | ForEach-Object { "$($_.prefix)" } | Where-Object { $_ } | Select-Object -Unique) } else { @($nextFor.Keys) }
+            foreach ($p in $publishPrefixes) {
                 if (-not $nextFor.ContainsKey($p)) {
                     $codes = (Sl-All ("Items?`$select=ItemCode&`$filter=startswith(ItemCode,'{0}')" -f $p.TrimEnd('-')) $jar) | ForEach-Object { $_.ItemCode }
                     $nextFor[$p] = (Prefix-Max $codes $p) + 1
                 }
                 if ([int]$opt.next_codes.$p -ne [int]$nextFor[$p]) { $opt.next_codes | Add-Member -NotePropertyName $p -NotePropertyValue ([int]$nextFor[$p]) -Force; $optionsChanged = $true }
             }
-            if ($needHsn) {
+            # Publish the HSN list only in Routine mode: a Job run reads at most a few new codes (PASS H) and the full
+            # list the UI shows is only refreshed by the routine.
+            if ($needHsn -and $isRoutine) {
                 $sorted = @($hsnList | Sort-Object)
                 if ((@($opt.hsn) -join ',') -ne ($sorted -join ',')) { $opt.hsn = $sorted; $optionsChanged = $true }
+            }
+            # vendor_refresh_requested (27 Oct 2026): this company's refresh has run, so remove its abbr. Re-read the
+            # field just before writing it back, so an abbr the CMMS added meanwhile is not lost.
+            if ($askedVendors -and -not $DryRun) {
+                try {
+                    $cur = (Erp-Get (Res $control $control)).data
+                    $live = @(); if ("$($cur.vendor_refresh_requested)".Trim()) { try { $live = @(("$($cur.vendor_refresh_requested)".Trim() | ConvertFrom-Json) | ForEach-Object { "$_".Trim().ToUpper() } | Where-Object { $_ }) } catch { } }
+                    $keep = @($live | Where-Object { $_ -ne $abbr.ToUpper() })
+                    $write = if ($keep.Count) { ConvertTo-Json -InputObject $keep -Compress } else { '' }
+                    if ("$write" -ne "$($cur.vendor_refresh_requested)".Trim()) { $null = Erp-Send PUT (Res $control $control) @{ vendor_refresh_requested = $write } }
+                } catch { Log WARN ("{0}: vendor_refresh_requested not cleared: {1}" -f $abbr, $_.Exception.Message) }
             }
         } finally {
             if (Test-Path -LiteralPath $jar) {
@@ -1925,9 +2009,16 @@ try {
     $wouldS = @($result.items | Where-Object { $_.kind -eq 'purchase quotation' -and $_.action -like 'would post*' }).Count
     $wouldN = @($result.items | Where-Object { $_.kind -eq 'quotation purchase order' -and $_.action -like 'would post*' }).Count
     $same   = @($result.items | Where-Object { $_.action -like 'already in SAP*' }).Count
-    $result.summary = if ($DryRun) { "DRY RUN: $wouldC item(s) would be created, $wouldP would change, $wouldR receipt(s) would post, $wouldG item group(s) would be created, $wouldQ purchase request(s) would post, $wouldO purchase order(s) would post, $wouldS quotation(s) would post, $wouldN PO(s) from quotations would post, $wouldI spares issue(s) would post, $($result['fetched']) change(s) would be fetched from SAP, $same already match, $($result.failures) failed." }
-                      else { "$($result.created) item(s) created in SAP, $($result.changed - $result.created - $result['receipts'] - $result['groups'] - $result['prs'] - $result['issues'] - $result['pos'] - $result['quotes'] - $result['qpos']) updated, $($result['receipts']) receipt(s) posted, $($result['groups']) item group(s) created, $($result['prs']) purchase request(s) posted, $($result['pos']) purchase order(s) posted, $($result['quotes']) quotation(s) posted, $($result['qpos']) PO(s) from quotations posted, $($result['issues']) spares issue(s) posted, $($result['fetched']) change(s) fetched from SAP, $same already matched, $($result.failures) failed." }
+    $tag = "mode $Mode"
+    $result.summary = if ($DryRun) { "DRY RUN ($tag): $wouldC item(s) would be created, $wouldP would change, $wouldR receipt(s) would post, $wouldG item group(s) would be created, $wouldQ purchase request(s) would post, $wouldO purchase order(s) would post, $wouldS quotation(s) would post, $wouldN PO(s) from quotations would post, $wouldI spares issue(s) would post, $($result['fetched']) change(s) would be fetched from SAP, $same already match, $($result.failures) failed." }
+                      else { "$tag`: $($result.created) item(s) created in SAP, $($result.changed - $result.created - $result['receipts'] - $result['groups'] - $result['prs'] - $result['issues'] - $result['pos'] - $result['quotes'] - $result['qpos']) updated, $($result['receipts']) receipt(s) posted, $($result['groups']) item group(s) created, $($result['prs']) purchase request(s) posted, $($result['pos']) purchase order(s) posted, $($result['quotes']) quotation(s) posted, $($result['qpos']) PO(s) from quotations posted, $($result['issues']) spares issue(s) posted, $($result['fetched']) change(s) fetched from SAP, $same already matched, $($result.failures) failed." }
     Log INFO $result.summary
+    # Routine stamps (27 Oct 2026): the app shows when the last routine run finished. A Routine run that fell through
+    # from an empty Job still counts, so the user's Sync press is reported this way too.
+    if ($isRoutine -and -not $DryRun) {
+        try { $null = Erp-Send PUT (Res $control $control) @{ routine_last_at = (Now-Ist); routine_last_result = $result.summary.Substring(0, [Math]::Min(500, $result.summary.Length)) } }
+        catch { Log WARN "routine_last_* not written (fields may be missing - run setup-sync-jobs.js --apply): $($_.Exception.Message)" }
+    }
     if ($result.failures -gt 0) { $result.exitCode = 1 }
 } catch {
     $result.exitCode = 2; $result.error = $_.Exception.Message
