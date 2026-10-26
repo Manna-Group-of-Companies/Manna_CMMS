@@ -10,7 +10,7 @@ import { erpNow, erpToday } from "../integrations/erpnext/time.js";
 import { storeForCompany } from "../integrations/erpnext/stores.js";
 import { catalogProducts } from "./catalog.js";
 import { itemMasterOptions, raiseSapFlag } from "./sapCategories.js";
-import { COMPLETED, receiptProgress, receiptsAgainst, toReceiptSummary } from "./purchaseCompletion.js";
+import { COMPLETED, ordersFor, receiptProgress, receiptsAgainst, stageOf, toReceiptSummary } from "./purchaseCompletion.js";
 
 /**
  * Purchase requests for engineering stock, raised in the CMMS (9 Oct 2026).
@@ -154,11 +154,28 @@ const receiptsOf = async (rows) => {
   return out;
 };
 
-const toRequest = (row, lines = [], got = null, quotations = []) => ({
+/** The CMMS POs made from each request's quotations, by request name. The stage stands without them. */
+const ordersOf = async (names) => {
+  const out = new Map();
+  const orders = await ordersFor(names).catch((error) => {
+    console.error("Purchase orders for purchase requests not read:", error.message);
+    return [];
+  });
+  for (const o of orders) {
+    if (!out.has(o.purchase_request)) out.set(o.purchase_request, []);
+    out.get(o.purchase_request).push(o);
+  }
+  return out;
+};
+
+const toRequest = (row, lines = [], got = null, quotations = [], orders = []) => ({
   id: row.name,
   company: row.company,
   companyName: storeForCompany(row.company)?.label || row.company,
   status: row.status || "Queued",
+  // Where it stands for the people waiting on it: Quotation Made, Ordered and Completed as soon as they are
+  // true, without waiting for the sync. `status` stays what SAP says, and what the actions go by.
+  stage: stageOf({ ...row, lines }, quotations, orders),
   requiredBy: row.required_by || null,
   reason: row.reason || "",
   raisedBy: row.raised_by || "",
@@ -212,7 +229,8 @@ export const listRequests = async ({ status = "", limit = 100, onlyCompanies = n
     return new Map();
   });
   const quotations = await quotationsForRequests(rows.map((r) => r.name));
-  return rows.map((r) => toRequest(r, r.lines, got.get(r.name), quotations.get(r.name) || []));
+  const orders = await ordersOf(rows.map((r) => r.name));
+  return rows.map((r) => toRequest(r, r.lines, got.get(r.name), quotations.get(r.name) || [], orders.get(r.name) || []));
 };
 
 export const getRequest = async (id) => {
@@ -223,7 +241,8 @@ export const getRequest = async (id) => {
   if (!doc) return null;
   const got = await receiptsOf([doc]).catch(() => new Map());
   const quotations = await quotationsForRequests([doc.name]);
-  return toRequest(doc, doc.lines || [], got.get(doc.name), quotations.get(doc.name) || []);
+  const orders = await ordersOf([doc.name]);
+  return toRequest(doc, doc.lines || [], got.get(doc.name), quotations.get(doc.name) || [], orders.get(doc.name) || []);
 };
 
 /**

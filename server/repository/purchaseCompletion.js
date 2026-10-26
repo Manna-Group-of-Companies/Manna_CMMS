@@ -201,8 +201,38 @@ export const receiptsAgainst = async (requests, api = erp) => {
   return rows.map((r) => ({ ...r, lines: lines.get(r.name) || [] }));
 };
 
+export const QUOTATION_MADE = "Quotation Made";
+
+/**
+ * Where a request stands for the people waiting on it (26 Oct 2026). Pure.
+ *
+ * The stored status follows SAP: the sync sets Ordered only once SAP has the PO, and only on its next run,
+ * and it reads and rewrites just In SAP and Ordered requests - so a stored "Quotation Made" would be written
+ * back to In SAP, or drop out of the sync. The stage is worked out from the request's quotations and POs
+ * instead, and moves the moment one is made:
+ *
+ *   In SAP -> Quotation Made (a quotation not cancelled in SAP)
+ *          -> Ordered        (a PO made from one of its quotations, in SAP yet or not; or one made in SAP)
+ *          -> Completed      (every line on a Purchased or closed PO - orderProgress, as the timer judges it)
+ *
+ * Queued, Failed, Closed and a stored Completed are shown as they are.
+ *
+ * @param row        { status, lines: [{ name, item, qty, coverage }] }
+ * @param quotations [{ status }]
+ * @param orders     the request's CMMS POs, as ordersFor gives them
+ */
+export const stageOf = (row, quotations = [], orders = []) => {
+  const status = row.status || "Queued";
+  if (["Queued", "Failed", "Closed", COMPLETED].includes(status)) return status;
+  const progress = orderProgress(row, orders);
+  if (progress.orders.length) return progress.complete ? COMPLETED : ORDERED;
+  if (status === ORDERED) return ORDERED;
+  if (quotations.some((q) => q.status !== "Cancelled")) return QUOTATION_MADE;
+  return status;
+};
+
 /** The CMMS POs made from these requests' quotations, with the request line each PO line answers. */
-const ordersFor = async (requestNames, api = erp) => {
+export const ordersFor = async (requestNames, api = erp) => {
   const rows = [];
   for (let i = 0; i < requestNames.length; i += 100) {
     rows.push(

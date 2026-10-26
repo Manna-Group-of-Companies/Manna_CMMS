@@ -74,13 +74,20 @@ const STATUS_STYLE = {
   Queued: "badge-amber",
   // No blue badge in index.css; the same recipe in blue.
   "In SAP": "border-blue-500/20 bg-blue-500/10 text-blue-600",
+  "Quotation Made": "border-violet-500/20 bg-violet-500/10 text-violet-600",
   Ordered: "badge-emerald",
   Completed: "badge-cyan",
   Closed: "badge-slate",
   Failed: "badge-rose",
 };
 
-const STATUSES = ["Queued", "In SAP", "Ordered", "Completed", "Closed", "Failed"];
+const STATUSES = ["Queued", "In SAP", "Quotation Made", "Ordered", "Completed", "Closed", "Failed"];
+
+/**
+ * Where a request stands, as shown and filtered (26 Oct 2026): the server's stage, which goes Quotation Made,
+ * Ordered and Completed as soon as they are true. `status` is what SAP says, and what the actions go by.
+ */
+const stageOf = (r) => r.stage || r.status;
 
 const when = (value) => {
   if (!value) return "—";
@@ -244,7 +251,7 @@ const PurchaseRequests = () => {
     () =>
       rows.filter(
         (r) =>
-          (!status || r.status === status) &&
+          (!status || stageOf(r) === status) &&
           (!company || r.company === company) &&
           (!raisedBy || r.raisedBy === raisedBy)
       ),
@@ -464,7 +471,7 @@ const RequestList = ({ rows, onView }) => (
         <div key={r.id} className="card flex items-center gap-4 p-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge status={r.status} />
+              <StatusBadge status={stageOf(r)} />
               <span className="text-[13px] font-semibold text-slate-900">{r.companyName || r.company}</span>
             </div>
             <p className="mt-2 truncate text-[13px] text-slate-700">{itemsSummary(r.lines)}</p>
@@ -490,7 +497,7 @@ const RequestList = ({ rows, onView }) => (
             {rows.map((r) => (
               <tr key={r.id} className="cursor-pointer" onClick={() => onView(r)}>
                 <td className="py-4">
-                  <StatusBadge status={r.status} />
+                  <StatusBadge status={stageOf(r)} />
                 </td>
                 <td className="whitespace-nowrap py-4 font-medium text-slate-800">{r.companyName || r.company}</td>
                 <td className="py-4">
@@ -529,7 +536,7 @@ const RequestDetails = ({ request: r, onClose, ...actions }) => {
           <h3 className="modal-title">
             <ShoppingCart className="h-[18px] w-[18px] text-brand-700 shrink-0" />
             Purchase request
-            <StatusBadge status={r.status} />
+            <StatusBadge status={stageOf(r)} />
           </h3>
           <p className="modal-sub">
             {r.companyName || r.company} · raised by {r.raisedByName || r.raisedBy || "—"} on {when(r.raisedAt)}
@@ -631,7 +638,7 @@ const RequestDetails = ({ request: r, onClose, ...actions }) => {
           </div>
         )}
 
-        {r.status === "Ordered" && (
+        {stageOf(r) === "Ordered" && (
           <p className="flex items-center gap-1.5 text-xs text-emerald-700">
             <Truck className="h-3.5 w-3.5 shrink-0" />
             Receive it with Goods receipt when the goods arrive.
@@ -654,7 +661,7 @@ const RequestDetails = ({ request: r, onClose, ...actions }) => {
           </div>
         )}
 
-        {r.status === "Completed" && (
+        {stageOf(r) === "Completed" && (
           <p className="flex items-center gap-1.5 text-xs text-cyan-700">
             <Truck className="h-3.5 w-3.5 shrink-0" />
             Every item has been received. Nothing more can be done on this request.

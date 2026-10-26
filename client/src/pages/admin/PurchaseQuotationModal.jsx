@@ -71,6 +71,8 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
   const editing = Boolean(quotation);
   const [request, setRequest] = useState(given);
   const [choices, setChoices] = useState(null);
+  // Opened from the quotation page: the company first, then that company's requests.
+  const [pickedCompany, setPickedCompany] = useState("");
   const [published, setPublished] = useState(null);
   const [vendorCode, setVendorCode] = useState(quotation?.vendorCode || "");
   const [term, setTerm] = useState("");
@@ -180,6 +182,27 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
       e.stopPropagation();
       setOpen(false);
     }
+  };
+
+  // The companies that have a request waiting, in the order of their names.
+  const companies = useMemo(() => {
+    const seen = new Map();
+    for (const c of choices || []) if (!seen.has(c.company)) seen.set(c.company, c.companyName || c.company);
+    return [...seen].map(([code, name]) => ({ code, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [choices]);
+  const companyChoices = useMemo(() => (choices || []).filter((c) => c.company === pickedCompany), [choices, pickedCompany]);
+
+  // One company only: nothing to choose.
+  useEffect(() => {
+    if (companies.length === 1) setPickedCompany(companies[0].code);
+  }, [companies]);
+
+  const chooseCompany = (code) => {
+    setPickedCompany(code);
+    setRequest(null);
+    setRows([]);
+    setVendorCode("");
+    setError("");
   };
 
   const chooseRequest = (id) => {
@@ -311,9 +334,6 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
         <div className="modal-body space-y-4">
           {!given && !editing && (
             <div>
-              <label className="field-label" htmlFor="pq-request">
-                Purchase request
-              </label>
               {!choices ? (
                 <div className="flex items-center gap-2 text-slate-500 text-sm">
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading the purchase requests…
@@ -324,21 +344,49 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
                   <span>No purchase request in SAP has a line waiting for a quotation.</span>
                 </div>
               ) : (
-                <select
-                  id="pq-request"
-                  value={request?.id || ""}
-                  onChange={(e) => chooseRequest(e.target.value)}
-                  className="field cursor-pointer"
-                >
-                  <option value="">Choose a purchase request…</option>
-                  {choices.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.id}
-                      {c.sapDocNumber ? ` · SAP PR ${c.sapDocNumber}` : ""} · {c.companyName || c.company}
-                      {c.reason ? ` · ${c.reason.slice(0, 60)}` : ""}
-                    </option>
-                  ))}
-                </select>
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                  <div>
+                    <label className="field-label" htmlFor="pq-company">
+                      Company
+                    </label>
+                    <select
+                      id="pq-company"
+                      value={pickedCompany}
+                      onChange={(e) => chooseCompany(e.target.value)}
+                      className="field cursor-pointer"
+                    >
+                      <option value="">Choose a company…</option>
+                      {companies.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="field-label" htmlFor="pq-request">
+                      Purchase request
+                    </label>
+                    <select
+                      id="pq-request"
+                      value={request?.id || ""}
+                      onChange={(e) => chooseRequest(e.target.value)}
+                      disabled={!pickedCompany}
+                      className="field cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      <option value="">
+                        {pickedCompany ? `Choose one of ${companyChoices.length} purchase requests…` : "Choose the company first"}
+                      </option>
+                      {companyChoices.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.id}
+                          {c.sapDocNumber ? ` · SAP PR ${c.sapDocNumber}` : ""}
+                          {c.reason ? ` · ${c.reason.slice(0, 60)}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               )}
             </div>
           )}

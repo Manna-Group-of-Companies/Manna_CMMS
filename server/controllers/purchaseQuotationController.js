@@ -1,5 +1,6 @@
 import * as quotations from "../repository/purchaseQuotations.js";
 import * as orders from "../repository/purchaseOrders.js";
+import { withNames } from "../repository/userNames.js";
 
 /** Quotations for purchase requests, and the PO made from each. See repository/purchaseQuotations.js. */
 
@@ -14,11 +15,14 @@ const fail = (res, error, fallback = "Something went wrong") => {
 export const list = async (req, res) => {
   try {
     res.json(
-      await quotations.listQuotations({
-        status: req.query.status || "",
-        request: req.query.request || "",
-        limit: Math.min(Number(req.query.limit) || 100, 300),
-      })
+      await withNames(
+        await quotations.listQuotations({
+          status: req.query.status || "",
+          request: req.query.request || "",
+          limit: Math.min(Number(req.query.limit) || 100, 300),
+        }),
+        ["raisedBy"]
+      )
     );
   } catch (error) {
     fail(res, error, "Could not load quotations");

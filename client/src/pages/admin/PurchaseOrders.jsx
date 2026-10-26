@@ -63,6 +63,8 @@ const PurchaseOrders = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [company, setCompany] = useState("");
+  const [vendorCode, setVendorCode] = useState("");
   const [busy, setBusy] = useState("");
 
   const load = useCallback(async (silent = false) => {
@@ -98,7 +100,29 @@ const PurchaseOrders = () => {
     }
   };
 
-  const shown = useMemo(() => rows.filter((r) => !status || r.status === status), [rows, status]);
+  // The companies and the vendors on the list, for the filters: by code, shown by name. Not who made
+  // them - that is always the purchase manager.
+  const companies = useMemo(() => {
+    const byCode = new Map();
+    for (const r of rows) if (r.company) byCode.set(r.company, r.companyName || r.company);
+    return [...byCode].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [rows]);
+  const vendors = useMemo(() => {
+    const byCode = new Map();
+    for (const r of rows) if (r.vendorCode) byCode.set(r.vendorCode, r.vendorName || r.vendorCode);
+    return [...byCode].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [rows]);
+
+  const shown = useMemo(
+    () =>
+      rows.filter(
+        (r) =>
+          (!status || r.status === status) &&
+          (!company || r.company === company) &&
+          (!vendorCode || r.vendorCode === vendorCode)
+      ),
+    [rows, status, company, vendorCode]
+  );
 
   return (
     <div className="space-y-5">
@@ -115,6 +139,32 @@ const PurchaseOrders = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            className="field field-sm w-auto cursor-pointer"
+            aria-label="Filter by company"
+          >
+            <option value="">All companies</option>
+            {companies.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={vendorCode}
+            onChange={(e) => setVendorCode(e.target.value)}
+            className="field field-sm w-auto max-w-[16rem] cursor-pointer"
+            aria-label="Filter by vendor"
+          >
+            <option value="">All vendors</option>
+            {vendors.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
@@ -153,7 +203,7 @@ const PurchaseOrders = () => {
             <p className="empty-title">Nothing here</p>
             <p className="empty-sub">
               {rows.length
-                ? "No purchase orders match this filter."
+                ? "No purchase orders match these filters."
                 : "No purchase orders yet. They are made from quotations SAP has."}
             </p>
           </div>
@@ -179,7 +229,7 @@ const PurchaseOrders = () => {
                     <KV label="Quotation · request" value={`${o.quotation} · ${o.request || "—"}`} />
                     <KV label="Company" value={o.companyName || o.company} />
                     <KV label="PO date · delivery" value={`${day(o.date) || "—"} · ${day(o.deliveryDate) || "—"}`} />
-                    <KV label="Made by" value={`${o.raisedBy || "—"} · ${when(o.raisedAt)}`} />
+                    <KV label="Made by" value={`${o.raisedByName || o.raisedBy || "—"} · ${when(o.raisedAt)}`} />
                   </div>
 
                   <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-100">

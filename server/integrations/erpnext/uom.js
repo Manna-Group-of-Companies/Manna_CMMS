@@ -35,6 +35,9 @@ const MAP = new Map([
   ...["set", "sets"].map((k) => [k, "Set"]),
   ...["pair", "pairs", "pr"].map((k) => [k, "Pair"]),
   ...["roll", "rolls"].map((k) => [k, "Roll"]),
+  // SAP's BRL (added 26 Oct 2026). ERPNext's only barrels are its standard
+  // "Barrel (Oil)" and "Barrel(Beer)"; the store's are oil and grease.
+  ...["barrel", "barrels", "brl"].map((k) => [k, "Barrel (Oil)"]),
   ...["unit", "units"].map((k) => [k, "Unit"]),
 ]);
 

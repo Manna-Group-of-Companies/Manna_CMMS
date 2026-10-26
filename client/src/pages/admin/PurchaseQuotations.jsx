@@ -75,6 +75,8 @@ const PurchaseQuotations = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [company, setCompany] = useState("");
+  const [vendorCode, setVendorCode] = useState("");
   const [busy, setBusy] = useState("");
   const [entering, setEntering] = useState(false);
   const [changing, setChanging] = useState(null);
@@ -147,7 +149,29 @@ const PurchaseQuotations = () => {
     setBusy("");
   };
 
-  const shown = useMemo(() => rows.filter((r) => !status || r.status === status), [rows, status]);
+  // The companies and the vendors on the list, for the filters: by code, shown by name. Not who entered
+  // them - that is always the purchase manager.
+  const companies = useMemo(() => {
+    const byCode = new Map();
+    for (const r of rows) if (r.company) byCode.set(r.company, r.companyName || r.company);
+    return [...byCode].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [rows]);
+  const vendors = useMemo(() => {
+    const byCode = new Map();
+    for (const r of rows) if (r.vendorCode) byCode.set(r.vendorCode, r.vendorName || r.vendorCode);
+    return [...byCode].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [rows]);
+
+  const shown = useMemo(
+    () =>
+      rows.filter(
+        (r) =>
+          (!status || r.status === status) &&
+          (!company || r.company === company) &&
+          (!vendorCode || r.vendorCode === vendorCode)
+      ),
+    [rows, status, company, vendorCode]
+  );
 
   return (
     <div className="space-y-5">
@@ -165,6 +189,32 @@ const PurchaseQuotations = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            className="field field-sm w-auto cursor-pointer"
+            aria-label="Filter by company"
+          >
+            <option value="">All companies</option>
+            {companies.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={vendorCode}
+            onChange={(e) => setVendorCode(e.target.value)}
+            className="field field-sm w-auto max-w-[16rem] cursor-pointer"
+            aria-label="Filter by vendor"
+          >
+            <option value="">All vendors</option>
+            {vendors.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
@@ -208,7 +258,7 @@ const PurchaseQuotations = () => {
             <FileText className="h-8 w-8 text-slate-300 mb-2" />
             <p className="empty-title">Nothing here</p>
             <p className="empty-sub">
-              {rows.length ? "No quotations match this filter." : "No quotations have been entered yet."}
+              {rows.length ? "No quotations match these filters." : "No quotations have been entered yet."}
             </p>
           </div>
         </div>
@@ -287,7 +337,7 @@ const QuotationCard = ({ quotation: q, canBuy, busy, onPrint, onChange, onDelete
           <KV label="Purchase request" value={q.request} />
           <KV label="Company" value={q.companyName || q.company} />
           <KV label="Dated · valid until" value={`${day(q.date) || "—"} · ${day(q.validUntil) || "—"}`} />
-          <KV label="Entered by" value={`${q.raisedBy || "—"} · ${when(q.raisedAt)}`} />
+          <KV label="Entered by" value={`${q.raisedByName || q.raisedBy || "—"} · ${when(q.raisedAt)}`} />
         </div>
 
         <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-100">

@@ -1,4 +1,5 @@
 import * as orders from "../repository/purchaseOrders.js";
+import { withNames } from "../repository/userNames.js";
 
 /** Purchase orders made from quotations. See repository/purchaseOrders.js. */
 
@@ -13,11 +14,14 @@ const fail = (res, error, fallback = "Something went wrong") => {
 export const list = async (req, res) => {
   try {
     res.json(
-      await orders.listOrders({
-        status: req.query.status || "",
-        syncStatus: req.query.syncStatus || "",
-        limit: Math.min(Number(req.query.limit) || 100, 300),
-      })
+      await withNames(
+        await orders.listOrders({
+          status: req.query.status || "",
+          syncStatus: req.query.syncStatus || "",
+          limit: Math.min(Number(req.query.limit) || 100, 300),
+        }),
+        ["raisedBy"]
+      )
     );
   } catch (error) {
     fail(res, error, "Could not load purchase orders");

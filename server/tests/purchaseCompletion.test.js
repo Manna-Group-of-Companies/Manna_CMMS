@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { historyNote, nextStatus, receiptProgress, receivesFor, reconcileCompletion } from "../repository/purchaseCompletion.js";
+import { historyNote, nextStatus, receiptProgress, receivesFor, reconcileCompletion, stageOf } from "../repository/purchaseCompletion.js";
 import { mayQuote } from "../repository/purchaseRequests.js";
 import { checkQuotation } from "../repository/purchaseQuotations.js";
 
@@ -215,5 +215,47 @@ describe("the completion check against ERPNext", () => {
       console.warn = warn;
     }
     assert.equal(erp.docs.Comment.length, 0);
+  });
+});
+
+describe("the stage a request is shown at (26 Oct 2026)", () => {
+  const pr = (status, coverage = ["", ""]) => ({
+    status,
+    lines: [
+      { name: "L1", item: "ENG-0001", qty: 10, coverage: coverage[0] },
+      { name: "L2", item: "ENG-0002", qty: 2, coverage: coverage[1] },
+    ],
+  });
+  const po = (name, status, prLines, extra = {}) => ({ name, status, lines: prLines.map((pr_line) => ({ pr_line })), ...extra });
+
+  it("In SAP with no quotation stays In SAP", () => {
+    assert.equal(stageOf(pr("In SAP")), "In SAP");
+  });
+
+  it("a quotation makes it Quotation Made, one cancelled in SAP does not", () => {
+    assert.equal(stageOf(pr("In SAP", ["Quoted", ""]), [{ status: "Queued" }]), "Quotation Made");
+    assert.equal(stageOf(pr("In SAP", ["Quoted", ""]), [{ status: "Posted" }]), "Quotation Made");
+    assert.equal(stageOf(pr("In SAP"), [{ status: "Cancelled" }]), "In SAP");
+  });
+
+  it("a PO from a quotation makes it Ordered at once, before the sync has run", () => {
+    assert.equal(stageOf(pr("In SAP", ["Quoted", "Quoted"]), [{ status: "Posted" }], [po("PO-1", "Open", ["L1"])]), "Ordered");
+  });
+
+  it("every line on a Purchased or closed PO makes it Completed; a dropped line does not wait", () => {
+    const quoted = pr("Ordered", ["Quoted", "Quoted"]);
+    assert.equal(stageOf(quoted, [], [po("PO-1", "Purchased", ["L1"]), po("PO-2", "Open", ["L2"])]), "Ordered");
+    assert.equal(stageOf(quoted, [], [po("PO-1", "Purchased", ["L1"]), po("PO-2", "Closed", ["L2"])]), "Completed");
+    assert.equal(stageOf(pr("Ordered", ["Quoted", "Dropped"]), [], [po("PO-1", "Purchased", ["L1"])]), "Completed");
+  });
+
+  it("a PO SAP cancelled orders nothing: back to Quotation Made", () => {
+    const cancelled = po("PO-1", "Closed", ["L1", "L2"], { error: "Cancelled in SAP 25 Oct 2026" });
+    assert.equal(stageOf(pr("In SAP", ["Quoted", "Quoted"]), [{ status: "Posted" }], [cancelled]), "Quotation Made");
+  });
+
+  it("an older request ordered in SAP itself stays Ordered; Queued, Failed, Closed and Completed are shown as stored", () => {
+    assert.equal(stageOf(pr("Ordered")), "Ordered");
+    for (const s of ["Queued", "Failed", "Closed", "Completed"]) assert.equal(stageOf(pr(s), [{ status: "Posted" }]), s);
   });
 });
