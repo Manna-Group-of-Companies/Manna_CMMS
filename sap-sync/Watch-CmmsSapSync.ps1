@@ -76,6 +76,8 @@ if (-not [System.IO.Path]::IsPathRooted($logDir)) { $logDir = Join-Path $scriptD
 if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $watchLog = Join-Path $logDir ('cmms-watch-{0}.log' -f (Get-Date -Format 'yyyy-MM-dd'))
 $resultJson = "$($cfg.result_json)".Trim(); if (-not $resultJson) { $resultJson = Join-Path $logDir 'category-last-result.json' }
+# When the last run finished - the safety net's lower time bound. Written by Invoke-SyncOnce.
+$lastEndFile = Join-Path $logDir 'cmms-last-run-end.txt'
 
 function Log {
     param([ValidateSet('INFO', 'WARN', 'ERROR')] [string] $Level = 'INFO', [string] $Message)
@@ -110,25 +112,38 @@ function Set-Control {
 function Parse-Dt { param($Value) if (-not "$Value".Trim()) { return $null } try { return [datetime]::Parse("$Value", [Globalization.CultureInfo]::InvariantCulture) } catch { return $null } }
 function Now-Str { (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }
 
-# A doctype -> filters pair the safety net uses, 60 s after a Queued record is modified. Only cheap list reads
-# (count: 1), no full-record reads. A doctype that is not present (setup not applied yet) is skipped.
+# A doctype + filters pair the safety net uses. The filter is bounded on BOTH sides (27 Oct 2026): a record only
+# triggers a run when it was modified AFTER the last run finished AND more than 60 s ago. Records the sync left
+# Queued on purpose (its switch is off, its company is in skip_companies / login-blocked, a receipt or quotation
+# is held waiting for an HSN code, an item edit failed) were modified BEFORE the run ended and so no longer fire.
+# Only cheap list reads (count: 1), no full-record reads. A doctype not present (setup not applied yet) is skipped.
 $queueProbes = @(
-    @{ dt = 'CMMS Item Naming Request'; filter = '[["sap_create_status","=","Queued"],["modified","<",{0}]]' },
-    @{ dt = 'Item'; filter = '[["custom_sap_category_pending","=",1],["modified","<",{0}]]' },
-    @{ dt = 'CMMS Goods Receipt'; filter = '[["status","=","Queued"],["modified","<",{0}]]' },
-    @{ dt = 'CMMS Goods Issue'; filter = '[["status","=","Queued"],["modified","<",{0}]]' },
-    @{ dt = 'CMMS Purchase Request'; filter = '[["status","=","Queued"],["modified","<",{0}]]' },
-    @{ dt = 'CMMS Purchase Request'; filter = '[["po_status","=","Queued"],["modified","<",{0}]]' },
-    @{ dt = 'CMMS Purchase Quotation'; filter = '[["status","=","Queued"],["modified","<",{0}]]' },
-    @{ dt = 'CMMS Purchase Order'; filter = '[["sync_status","=","Queued"],["modified","<",{0}]]' },
-    @{ dt = 'CMMS SAP HSN Request'; filter = '[["status","=","Queued"],["modified","<",{0}]]' },
-    @{ dt = 'CMMS SAP Item Group Request'; filter = '[["status","=","Queued"],["modified","<",{0}]]' }
+    @{ dt = 'CMMS Item Naming Request'; where = '["sap_create_status","=","Queued"]' },
+    @{ dt = 'Item'; where = '["custom_sap_category_pending","=",1]' },
+    @{ dt = 'CMMS Goods Receipt'; where = '["status","=","Queued"]' },
+    @{ dt = 'CMMS Goods Issue'; where = '["status","=","Queued"]' },
+    @{ dt = 'CMMS Purchase Request'; where = '["status","=","Queued"]' },
+    @{ dt = 'CMMS Purchase Request'; where = '["po_status","=","Queued"]' },
+    @{ dt = 'CMMS Purchase Quotation'; where = '["status","=","Queued"]' },
+    @{ dt = 'CMMS Purchase Order'; where = '["sync_status","=","Queued"]' },
+    @{ dt = 'CMMS SAP HSN Request'; where = '["status","=","Queued"]' },
+    @{ dt = 'CMMS SAP Item Group Request'; where = '["status","=","Queued"]' }
 )
+function Get-LastRunEnd {
+    # Falls back to the watcher's own start time: an unbounded probe would behave as before this fix.
+    try { if (Test-Path -LiteralPath $lastEndFile) { $t = Parse-Dt ([IO.File]::ReadAllText($lastEndFile).Trim()); if ($t) { return $t } } } catch { }
+    $script:watcherStartedAt
+}
 function Test-Stuck {
-    $cutoff = (Get-Date).AddSeconds(-60).ToString('yyyy-MM-dd HH:mm:ss')
+    $since = Get-LastRunEnd
+    $cutoff = (Get-Date).AddSeconds(-60)
+    if ($cutoff -le $since) { return $false }  # not enough time has passed since the run ended
+    $sinceStr = $since.ToString('yyyy-MM-dd HH:mm:ss')
+    $cutoffStr = $cutoff.ToString('yyyy-MM-dd HH:mm:ss')
     foreach ($p in $queueProbes) {
         try {
-            $u = '{0}/api/resource/{1}?filters={2}&limit_page_length=1&fields=["name"]' -f $site, [uri]::EscapeDataString($p.dt), [uri]::EscapeDataString(($p.filter -f (ConvertTo-Json -InputObject $cutoff -Compress)))
+            $filter = '[{0},["modified",">",{1}],["modified","<",{2}]]' -f $p.where, (ConvertTo-Json -InputObject $sinceStr -Compress), (ConvertTo-Json -InputObject $cutoffStr -Compress)
+            $u = '{0}/api/resource/{1}?filters={2}&limit_page_length=1&fields=["name"]' -f $site, [uri]::EscapeDataString($p.dt), [uri]::EscapeDataString($filter)
             $r = Invoke-RestMethod -Method Get -Uri $u -Headers $authHdr -TimeoutSec 10
             if ($r.data -and @($r.data).Count -gt 0) { return $true }
         } catch {
@@ -142,16 +157,18 @@ function Test-Stuck {
 }
 
 function Invoke-SyncOnce {
-    param([string] $Mode, [string] $Trigger)
+    param([string] $Mode, [string] $Trigger, [switch] $NoRoutineFallback)
     $started = Get-Date
     $msg = $null; $rows = 0; $exit = 0; $failures = 0; $success = $false
     if (Test-Path -LiteralPath $resultJson) { try { Remove-Item -LiteralPath $resultJson -Force -ErrorAction SilentlyContinue } catch { } }
     try {
-        Log INFO ("claiming the run ({0}, trigger: {1})" -f $Mode, $Trigger)
+        Log INFO ("claiming the run ({0}{1}, trigger: {2})" -f $Mode, $(if ($NoRoutineFallback) { ', no routine fallback' } else { '' }), $Trigger)
         Set-Control @{ status = 'Running'; last_run_started_at = (Now-Str); sync_requested = 0 }
         # In this same process: & returns, exit in the sync ends the sync only, $LASTEXITCODE is set.
         # Working directory stays wherever the task runs it from; the sync uses $PSScriptRoot for its own files.
-        & $cfg.sync_script -Mode $Mode -ConfigPath $cfg.sync_config -ResultJsonPath $resultJson
+        $syncArgs = @('-Mode', $Mode, '-ConfigPath', $cfg.sync_config, '-ResultJsonPath', $resultJson)
+        if ($NoRoutineFallback) { $syncArgs += '-NoRoutineFallback' }
+        & $cfg.sync_script @syncArgs
         $exit = [int]$LASTEXITCODE
         $elapsed = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
         $res = $null
@@ -183,6 +200,9 @@ function Invoke-SyncOnce {
         try { Set-Control @{ status = 'Failed'; last_result_message = $msg; cooldown_until = '' } }
         catch { Log ERROR "could not write Failed status back: $($_.Exception.Message)" }
     }
+    # Stamp "the last run ended now" (fix 1, 27 Oct 2026): the safety net reads this and ignores records modified
+    # before it, so a record the sync left Queued on purpose (switch off, held waiting for an HSN, ...) no longer fires.
+    try { [IO.File]::WriteAllText($lastEndFile, (Now-Str), [System.Text.Encoding]::ASCII) } catch { Log WARN "could not write last-run-end: $($_.Exception.Message)" }
     [pscustomobject]@{ exit = $exit; success = $success; elapsed = ((Get-Date) - $started).TotalSeconds; message = $msg }
 }
 
@@ -209,7 +229,8 @@ try {
         finally { try { $mutex.ReleaseMutex() } catch { } }
     }
 
-    $started = Get-Date; $deadline = $started.AddSeconds($WindowSeconds); $lastStuckAt = $started.AddSeconds(-30); $lastError = $null
+    $started = Get-Date; $script:watcherStartedAt = $started
+    $deadline = $started.AddSeconds($WindowSeconds); $lastStuckAt = $started.AddSeconds(-30); $lastError = $null
     Write-Heartbeat -Force
     if ($ForceJob) {
         if ($mutex.WaitOne(0)) { try { $null = Invoke-SyncOnce -Mode 'Job' -Trigger 'force' } finally { try { $mutex.ReleaseMutex() } catch { } } }
@@ -246,11 +267,14 @@ try {
         if ($decision -eq 'run') {
             if ($mutex.WaitOne(0)) {
                 try {
-                    # 3 s wait so several saves land in one run; the flag is already up, this does not slow a single save
-                    # beyond the 2 s check + the 3 s wait.
-                    if ($WaitSeconds -gt 0) { Start-Sleep -Seconds $WaitSeconds }
+                    # 3 s wait so several saves land in one run, but only on a real flag. A safety-net run has no new
+                    # flag to coalesce; waiting there just stretches a run that may fall through to Routine.
+                    $isSafetyNet = ($trigger -like 'safety net*')
+                    if (-not $isSafetyNet -and $WaitSeconds -gt 0) { Start-Sleep -Seconds $WaitSeconds }
                     Write-Heartbeat -Force
-                    $null = Invoke-SyncOnce -Mode 'Job' -Trigger $trigger
+                    # The safety-net trigger must NEVER fall through to Routine (fix 1, 27 Oct 2026): the fallback is
+                    # only for a real flag raised by today's Sync / Fetch buttons with nothing queued.
+                    $null = Invoke-SyncOnce -Mode 'Job' -Trigger $trigger -NoRoutineFallback:$isSafetyNet
                 } finally { try { $mutex.ReleaseMutex() } catch { } }
                 # Check the flag again at once, without the interval wait: work saved during the run should go straight away.
                 if ((Get-Date) -lt $deadline) { continue }
@@ -263,6 +287,24 @@ try {
         $sleep = $IntervalSeconds - ((Get-Date) - $tick).TotalSeconds
         if ($sleep -gt 0 -and (Get-Date).AddSeconds($sleep) -lt $deadline) { Start-Sleep -Milliseconds ([int]($sleep * 1000)) }
         else { break }
+    }
+
+    # Fix 5 (27 Oct 2026): one more flag check before exit, in case the flag was raised during the last run or in the
+    # couple of seconds since the final poll. The next minute's SAP-CMMS-Watch instance is skipped by IgnoreNew while
+    # a run is in progress, so without this a flag raised then would wait up to a full minute for the one after.
+    if (-not $Once) {
+        try {
+            $doc = Get-Control
+            $flag = 0; try { $flag = [int]("$($doc.sync_requested)" -as [int]) } catch { }
+            if ($flag -eq 1 -and $mutex.WaitOne(0)) {
+                try {
+                    Log INFO 'end-of-window check: flag is up - running one more job'
+                    if ($WaitSeconds -gt 0) { Start-Sleep -Seconds $WaitSeconds }
+                    Write-Heartbeat -Force
+                    $null = Invoke-SyncOnce -Mode 'Job' -Trigger "$($doc.sync_requested_by) (end-of-window)"
+                } finally { try { $mutex.ReleaseMutex() } catch { } }
+            }
+        } catch { Log WARN ("end-of-window check failed: {0}" -f $_.Exception.Message) }
     }
     exit 0
 } finally {

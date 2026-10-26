@@ -1,5 +1,6 @@
 // Adds five Custom Fields to the Single "SAP Item Category Sync Control" that the fast sync (job and
-// routine runs, 27 Oct 2026) relies on. Idempotent.
+// routine runs, 27 Oct 2026) relies on, and turns off history for the control (fix 4, same date).
+// Idempotent.
 //   node setup-sync-jobs.js            dry run
 //   node setup-sync-jobs.js --apply
 //
@@ -15,6 +16,12 @@
 //   vendor_refresh_requested  Small Text  JSON array of company abbreviations the CMMS wants
 //                                         refreshed in the next job run, e.g. ["HRI"]. The sync
 //                                         removes an abbreviation once that company is refreshed.
+//
+// track_changes on the control (fix 4): the DocType was created with track_changes = 1, so every PUT
+// that changes it saves a Version row. The watcher writes watcher_seen_at every 60 s, plus a claim and
+// a result per run, which adds up to 1,500+ Version rows a day on Frappe Cloud for ever. This script
+// sets track_changes to 0. Existing Version rows (683 at writing) are LEFT ALONE: the user decides
+// whether to delete them.
 const erp = require('./erp.js');
 const APPLY = process.argv.includes('--apply');
 const CONTROL = 'SAP Item Category Sync Control';
@@ -33,15 +40,28 @@ const FIELDS = [
 
 (async () => {
   // The control must already be present (setup-erpnext.js); if not, there is nothing to add fields to.
-  try { await erp.get('DocType', CONTROL); }
+  let dt;
+  try { dt = await erp.get('DocType', CONTROL); }
   catch (e) { console.error(`ERROR: ${CONTROL} is not present yet. Run setup-erpnext.js --apply first.`); process.exit(1); }
 
   const have = new Set((await erp.list('Custom Field', { fields: ['fieldname'], filters: [['dt', '=', CONTROL]] })).map(f => f.fieldname));
   const missing = FIELDS.filter(f => !have.has(f.fieldname));
-  console.log(`${APPLY ? 'APPLY' : 'DRY RUN'}: ${CONTROL} fields missing: ${missing.map(f => f.fieldname).join(', ') || 'none'}`);
+  const trackChangesNow = Number(dt.track_changes || 0);
+  const trackChangesChange = trackChangesNow === 1;
+  const versionCount = (await erp.list('Version', { fields: ['name'], filters: [['ref_doctype', '=', CONTROL]] })).length;
+
+  console.log(`${APPLY ? 'APPLY' : 'DRY RUN'}: ${CONTROL}`);
+  console.log(`  fields missing      : ${missing.map(f => f.fieldname).join(', ') || 'none'}`);
+  console.log(`  track_changes       : ${trackChangesNow}${trackChangesChange ? ' -> would set to 0' : ' (no change)'}`);
+  console.log(`  existing Version rows: ${versionCount} (LEFT ALONE - delete only on the user's say-so)`);
   if (!APPLY) return;
+
   for (const f of missing) {
     await erp.insert('Custom Field', { dt: CONTROL, ...f });
     console.log(`${CONTROL} field created: ${f.fieldname}`);
+  }
+  if (trackChangesChange) {
+    await erp.update('DocType', CONTROL, { track_changes: 0 });
+    console.log(`${CONTROL} track_changes set to 0`);
   }
 })().catch(e => { console.error('ERROR:', e.message); process.exit(1); });

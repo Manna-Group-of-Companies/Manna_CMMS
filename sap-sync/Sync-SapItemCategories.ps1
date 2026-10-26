@@ -151,7 +151,10 @@ param(
     # Routine (3 times a day): everything today's run does - PASS E, open PO lines, cancellations, HSN list, units,
     # next codes, suppliers and tax codes for every company. A Job run with nothing queued and no vendor refresh asked
     # for falls through to a Routine run, so today's app's Sync / "Fetch from SAP" buttons still do what they did.
-    [ValidateSet('Job','Routine')] [string] $Mode = 'Job'
+    [ValidateSet('Job','Routine')] [string] $Mode = 'Job',
+    # The watcher passes this on a safety-net run (fix 1, 27 Oct 2026): a Job with nothing queued must stop, not fall
+    # through to a Routine. The fallback is only for a real flag raised with nothing queued (today's Sync / Fetch buttons).
+    [switch] $NoRoutineFallback
 )
 
 Set-StrictMode -Version 1.0
@@ -171,6 +174,25 @@ function Log {
     Write-Host $line
     try { Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8 } catch { }
 }
+
+# Fix 3 (27 Oct 2026): login-blocked companies. SAP locks a user after 3 wrong passwords, and the sync shares one user,
+# so a 400/401 at /Login must never be retried automatically. The file is written when the first refusal is seen; a person
+# fixes the password and deletes the file to unblock.
+$loginBlockedFile = Join-Path $logDir 'login-blocked.json'
+$loginBlocked = @{}
+if (Test-Path -LiteralPath $loginBlockedFile) {
+    try {
+        $raw = [IO.File]::ReadAllText($loginBlockedFile)
+        if ($raw.Trim()) { $parsed = $raw | ConvertFrom-Json; foreach ($p in $parsed.PSObject.Properties) { $loginBlocked[$p.Name.ToUpper()] = $p.Value } }
+    } catch { Log WARN "login-blocked.json unreadable: $($_.Exception.Message); treated as empty" }
+}
+function Save-LoginBlocked {
+    try {
+        $out = [ordered]@{}; foreach ($k in @($loginBlocked.Keys | Sort-Object)) { $out[$k] = $loginBlocked[$k] }
+        [IO.File]::WriteAllText($loginBlockedFile, ($out | ConvertTo-Json -Depth 4), (New-Object System.Text.UTF8Encoding($false)))
+    } catch { Log WARN "could not write login-blocked.json: $($_.Exception.Message)" }
+}
+function Login-Reason([string] $Db) { "SAP login refused for $Db - not retried; a person must check the password and delete logs\login-blocked.json" }
 
 # The company's CMMS store = the ERPNext copy's default warehouse (see Manna_CMMS server stores.js).
 $storeByAbbr = @{ MRPPL = 'Manna Rubber Products Store - MRPPL'; MT = 'Stores - MT'; HRI = 'Stores - HRI'; MTR = 'Stores - MTR' }
@@ -301,8 +323,11 @@ try {
     try {
         $quotes = @(Erp-List 'CMMS Purchase Quotation' @('name') '[["status","=","Queued"]]' | ForEach-Object { (Erp-Get (Res 'CMMS Purchase Quotation' $_.name)).data })
         $qorders = @(Erp-List 'CMMS Purchase Order' @('name') '[["sync_status","=","Queued"]]' | ForEach-Object { (Erp-Get (Res 'CMMS Purchase Order' $_.name)).data })
-        # Purchased in the CMMS, but SAP refused to close the PO when it turned so (rule 19): tried again each run.
-        if ($postQuoteReceipts) { $closeLater = @(Erp-List 'CMMS Purchase Order' @('name', 'company', 'sap_doc_entry', 'sap_doc_number') '[["status","=","Purchased"],["error","like","SAP PO not closed%"]]') }
+        # Purchased in the CMMS, but SAP refused to close the PO when it turned so (rule 19): tried again each Routine run.
+        # Fix 2 (27 Oct 2026): a Job run skips this. The next Routine (3 times a day) or a run that already has work for
+        # that company will retry the close - no need to add a bulk read to every flag. $Mode is still as given here;
+        # $isRoutine is set below after the queued reads.
+        if ($postQuoteReceipts -and $Mode -eq 'Routine') { $closeLater = @(Erp-List 'CMMS Purchase Order' @('name', 'company', 'sap_doc_entry', 'sap_doc_number') '[["status","=","Purchased"],["error","like","SAP PO not closed%"]]') }
         # Every one SAP already has: kept off the open PO lines the old receipt screen offers (decided 24 Oct 2026), and
         # counted as its request's POs. SAP bases them on the quotation, not the request, so the open PO read cannot tie
         # them to it - and SAP closes the request once every line is on a PO, which read as Closed (PR-2026-00349 and
@@ -373,8 +398,14 @@ try {
     # Compatibility (27 Oct 2026): the app still has Sync / "Fetch from SAP" buttons that raise the flag with nothing queued.
     # A Job run with no queued work and no vendor refresh asked for runs as Routine, so those buttons still do what they did.
     # The app will drop them later, when every save queues work; the fallback stays in the code until then.
+    # The watcher passes -NoRoutineFallback on a safety-net run (fix 1, 27 Oct 2026): a safety-net Job with nothing queued
+    # must stop. Otherwise a record the sync left Queued on purpose (switch off, skip_companies, held waiting for HSN) would
+    # fire the safety net every 30 s, each Job falling through to a Routine - every company logged in to about twice a minute.
     $anyWork = ($creates.Count + $edits.Count + $receipts.Count + $groupReqs.Count + $prs.Count + $orders.Count + $quotes.Count + $qorders.Count + $issues.Count + $hsnQueued.Count) -gt 0
-    if ($Mode -eq 'Job' -and -not $anyWork -and -not $vendRefresh.Count) { Log INFO 'Job mode: nothing queued and no vendor refresh - running Routine instead (today''s app still presses Sync with nothing queued).'; $Mode = 'Routine' }
+    if ($Mode -eq 'Job' -and -not $anyWork -and -not $vendRefresh.Count) {
+        if ($NoRoutineFallback) { Log INFO 'Job mode: nothing queued and no vendor refresh - -NoRoutineFallback is set, so exiting without a Routine run.' }
+        else { Log INFO 'Job mode: nothing queued and no vendor refresh - running Routine instead (today''s app still presses Sync with nothing queued).'; $Mode = 'Routine' }
+    }
     $isRoutine = ($Mode -eq 'Routine')
     $result.mode = $Mode
     Log INFO ("mode {0}: {1} item(s) to create, {2} with pending edits, {3} receipt(s), {4} spares issue(s), {5} new item group(s), {6} new HSN code(s), {7} purchase request(s), {8} PO(s), {9} quotation(s), {10} PO(s) from quotations; vendor refresh for {11}; edits send {12}{13}." -f $Mode, $creates.Count, $edits.Count, $receipts.Count, $issues.Count, $groupReqs.Count, $hsnQueued.Count, $prs.Count, $orders.Count, $quotes.Count, $qorders.Count, $(if ($vendRefresh.Count) { ($vendRefresh -join ',') } else { 'none' }), ($editFields -join ', '), $(if ($DryRun) { ' - DRY RUN, nothing will be written' } else { '' }))
@@ -494,7 +525,9 @@ try {
         if (-not $w) { $result.failures++; Log ERROR ("{0}: unknown SAP company '{1}'" -f $pq.name, $pq.company); continue }
         [void]$w.prs.Add($pq)
     }
-    foreach ($pq in $openPrs) { $w = Work-For "$($pq.company)"; if ($w) { [void]$w.openPrs.Add($pq) } }
+    # Fix 2 (27 Oct 2026): openPrs is only used by the Routine's open-PO status read. Letting it build work entries in Job
+    # mode made every company with an open purchase request get logged in to, even with nothing queued for it.
+    if ($isRoutine) { foreach ($pq in $openPrs) { $w = Work-For "$($pq.company)"; if ($w) { [void]$w.openPrs.Add($pq) } } }
     foreach ($po in $orders) {
         $w = Work-For "$($po.company)"
         if (-not $w) { $result.failures++; Log ERROR ("{0}: unknown SAP company '{1}'" -f $po.name, $po.company); continue }
@@ -540,23 +573,92 @@ try {
     }
 
     $optionsChanged = $false
+    # Fix 3 (27 Oct 2026): once a company has refused the login (400/401), its queued records' error carries the reason.
+    # Walks the in-memory queued lists for this company and PUTs the error only when the current error differs - a run
+    # that finds the same reason there writes nothing. Dry runs log and skip the PUT.
+    $noteBlocked = {
+        param([string] $Db, $Work, [string] $Reason)
+        if ($DryRun) { Log INFO ("{0}: would mark {1} queued record(s) with the refused-login reason" -f $Db, ($Work.creates.Count + $Work.edits.Count + $Work.receipts.Count + $Work.groups.Count + $Work.prs.Count + $Work.orders.Count + $Work.quotes.Count + $Work.qorders.Count + $Work.issues.Count + $Work.hsnReqs.Count)); return }
+        $puts = @(
+            @{ list = $Work.creates;  dt = 'CMMS Item Naming Request';     field = 'sap_create_error' }
+            @{ list = $Work.edits;    dt = 'Item';                         field = 'custom_sap_category_error' }
+            @{ list = $Work.receipts; dt = 'CMMS Goods Receipt';           field = 'error' }
+            @{ list = $Work.groups;   dt = 'CMMS SAP Item Group Request';  field = 'error' }
+            @{ list = $Work.prs;      dt = 'CMMS Purchase Request';        field = 'error' }
+            @{ list = $Work.orders;   dt = 'CMMS Purchase Request';        field = 'po_error' }
+            @{ list = $Work.quotes;   dt = 'CMMS Purchase Quotation';      field = 'error' }
+            @{ list = $Work.qorders;  dt = 'CMMS Purchase Order';          field = 'error' }
+            @{ list = $Work.issues;   dt = 'CMMS Goods Issue';             field = 'error' }
+            @{ list = $Work.hsnReqs;  dt = 'CMMS SAP HSN Request';         field = 'error' }
+        )
+        foreach ($p in $puts) {
+            foreach ($row in $p.list) {
+                $curErr = "$($row.$($p.field))"; if ($curErr -eq $Reason) { continue }
+                try { $null = Erp-Send PUT (Res $p.dt $row.name) @{ "$($p.field)" = $Reason } }
+                catch { Log WARN ("{0}: could not note refused-login reason on {1}: {2}" -f $Db, $row.name, $_.Exception.Message) }
+            }
+        }
+    }
+
     foreach ($db in $work.Keys) {
         $w = $work[$db]; $abbr = $w.abbr; $opt = $w.opt
         if ($skipDbs -contains "$db".ToUpper()) { Log WARN ("{0}: skipped (skip_companies) - not logged in; its CMMS work stays Queued" -f $db); continue }
+        $dbUp = "$db".ToUpper()
+        if ($loginBlocked.ContainsKey($dbUp)) {
+            $reason = Login-Reason $db
+            $when = "$($loginBlocked[$dbUp].at)"
+            Log ERROR ("{0}: {1} (first refused at {2})" -f $db, $reason, $when)
+            if (-not $result.summary) { $result.summary = $reason } else { $result.summary = "$($result.summary); $reason" }
+            & $noteBlocked $db $w $reason
+            $result.failures++
+            continue
+        }
         $password = "$($cfg.sap.password)"
         if ($cfg.sap.PSObject.Properties['password_overrides'] -and $cfg.sap.password_overrides.PSObject.Properties[$db]) { $password = "$($cfg.sap.password_overrides.$db)" }
         $jar = Join-Path $env:TEMP ("imsync-{0}.jar" -f [guid]::NewGuid().ToString('N').Substring(0, 8))
         try {
             $login = @{ CompanyDB = $db; UserName = "$($cfg.sap.username)"; Password = $password } | ConvertTo-Json -Compress
-            $lg = Invoke-Sl -Method POST -Url "$slBase/Login" -Body $login -Jar $jar -SaveCookies
+            $lg = $null; $try = 0; $maxTries = 3
+            while ($try -lt $maxTries) {
+                $try++
+                $lg = Invoke-Sl -Method POST -Url "$slBase/Login" -Body $login -Jar $jar -SaveCookies
+                if ($lg.Http -eq '200') { break }
+                $httpCode = [int]"0$($lg.Http)"
+                # 400 / 401 is a refused login - never retried. Add to login-blocked, note the records, skip the company.
+                if ($httpCode -eq 400 -or $httpCode -eq 401) { break }
+                # 500+ or connection failures (curl writes http_code 000 when the socket never got a response): retry twice, 5 s apart.
+                if ($try -lt $maxTries) { Log WARN ("{0}: SAP login HTTP {1} - retrying in 5 s (attempt {2} of {3})" -f $db, $lg.Http, $try, $maxTries); Start-Sleep -Seconds 5 }
+            }
             $login = $null
-            if ($lg.Http -ne '200') { Sl-Fail $lg "login to $db" }
+            if ($lg.Http -ne '200') {
+                $httpCode = [int]"0$($lg.Http)"
+                if ($httpCode -eq 400 -or $httpCode -eq 401) {
+                    $sapBody = ("$($lg.Body)" -replace '\s+', ' ').Trim()
+                    if ($sapBody.Length -gt 200) { $sapBody = $sapBody.Substring(0, 200) }
+                    $loginBlocked[$dbUp] = [ordered]@{ at = (Now-Ist); http = $httpCode; reason = $sapBody }
+                    Save-LoginBlocked
+                    $reason = Login-Reason $db
+                    Log ERROR ("{0}: {1} (HTTP {2}: {3})" -f $db, $reason, $httpCode, $sapBody)
+                    if (-not $result.summary) { $result.summary = $reason } else { $result.summary = "$($result.summary); $reason" }
+                    & $noteBlocked $db $w $reason
+                    $result.failures++
+                    continue
+                }
+                # Not a refusal - a server error or timeout we did retry. Fall through to the original behavior.
+                Sl-Fail $lg "login to $db"
+            }
             Log INFO ("SAP login OK: {0} ({1} to create, {2} to edit, {3} receipt(s), {4} spares issue(s), {5} new group(s), {6} purchase request(s), {7} purchase order(s), {8} quotation(s), {9} PO(s) from quotations)" -f $db, $w.creates.Count, $w.edits.Count, $w.receipts.Count, $w.issues.Count, $w.groups.Count, $w.prs.Count, $w.orders.Count, $w.quotes.Count, $w.qorders.Count)
 
             # This company's HSN list: digits -> AbsEntry (ChapterID). Only read when HSN is written.
-            $hsn = @{}; $hsnList = New-Object System.Collections.ArrayList
             # Quotations too: each line carries its HSN's entry (HSNEntry).
-            $needHsn = $w.creates.Count -gt 0 -or $editFields -contains 'ChapterID' -or $pullFromSap -or $w.hsnReqs.Count -gt 0 -or $w.quotes.Count -gt 0
+            # Fix 6 (27 Oct 2026): in Job mode, read only when this company's queued work actually needs it. The Routine
+            # keeps the old "whenever HSN is editable OR pulling from SAP" rule, so the UI's HSN list stays fresh.
+            $hsn = @{}; $hsnList = New-Object System.Collections.ArrayList
+            $needHsn = if ($isRoutine) {
+                $w.creates.Count -gt 0 -or ($editFields -contains 'ChapterID') -or $pullFromSap -or $w.hsnReqs.Count -gt 0 -or $w.quotes.Count -gt 0
+            } else {
+                $w.creates.Count -gt 0 -or ($w.edits.Count -gt 0 -and ($editFields -contains 'ChapterID')) -or $w.hsnReqs.Count -gt 0 -or $w.quotes.Count -gt 0
+            }
             if ($needHsn) {
                 foreach ($h in (Sl-All 'IndiaHsn?$select=AbsEntry,Chapter,Heading,SubHeading' $jar)) {
                     $d = Digits ("{0}{1}{2}" -f $h.Chapter, $h.Heading, $h.SubHeading)
@@ -1105,7 +1207,7 @@ try {
                             $knownPrNums = @("$($po.po_numbers)" -split '\s*,\s*' | Where-Object { $_ })
                             if ($knownPrNums -notcontains $poNum) { $knownPrNums += $poNum }
                             try { $null = Erp-Send PUT (Res 'CMMS Purchase Request' $po.name) @{ status = 'Ordered'; po_numbers = ($knownPrNums -join ', ') } }
-                            catch { Log WARN "{0}: Ordered status not written in-run: {1}" -f $po.name, $_.Exception.Message }
+                            catch { Log WARN ("{0}: Ordered status not written in-run: {1}" -f $po.name, $_.Exception.Message) }
                         }
                         $result['pos']++
                     }
@@ -1197,7 +1299,7 @@ try {
                                 if ($knownPrNums -notcontains $poNum) { $knownPrNums += $poNum }
                                 $wantStatus = if ("$($req.status)" -eq 'Closed') { 'Closed' } else { 'Ordered' }
                                 $null = Erp-Send PUT (Res 'CMMS Purchase Request' $k) @{ status = $wantStatus; po_numbers = ($knownPrNums -join ', ') }
-                            } catch { Log WARN "{0}: Ordered status not written in-run on {1}: {2}" -f $po.name, $k, $_.Exception.Message }
+                            } catch { Log WARN ("{0}: Ordered status not written in-run on {1}: {2}" -f $po.name, $k, $_.Exception.Message) }
                         }
                         $result['qpos']++
                     }
