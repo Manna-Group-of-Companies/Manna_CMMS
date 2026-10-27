@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
+  Eye,
   FileCheck,
   FileText,
   Loader2,
@@ -11,16 +12,24 @@ import {
   RefreshCw,
   Send,
   Trash2,
+  X,
 } from "lucide-react";
 
 import API from "../../services/api";
 import { useAuth, MANAGER, PURCHASE_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
+import { useDialog } from "../../context/DialogContext";
+import CancelNote, { CancelButton } from "../../components/CancelNote";
+import { askCancelReason } from "../../utils/cancel";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import { useSapSyncDone } from "../../hooks/useSapSync";
 import PurchaseQuotationModal from "./PurchaseQuotationModal";
 import PurchaseOrderModal from "./PurchaseOrderModal";
 import { formatCurrency } from "../../utils/currency";
+import Pagination from "../../components/Pagination";
+import { pageSlice } from "../../utils/pageSlice";
+
+const PAGE_SIZE = 10;
 
 /**
  * The chosen vendor's quotation for each purchase request (24 Oct 2026).
@@ -30,6 +39,9 @@ import { formatCurrency } from "../../utils/currency";
  * has it, the PO is made from it here, one PO per quotation. A quotation SAP
  * does not have yet can be changed or deleted; one it has is cancelled in SAP
  * and entered again.
+ *
+ * Listed at a glance, as purchase requests are (27 Oct 2026): status, vendor, items and value, with everything
+ * else - the lines, dates, notes and actions - behind the eye.
  */
 
 const STATUS_STYLE = {
@@ -68,6 +80,7 @@ const statusLabel = (q) =>
 const PurchaseQuotations = () => {
   const { user } = useAuth();
   const { showToast } = useNotifications();
+  const { prompt } = useDialog();
   // Mirrors the server's guard: the purchase manager, and the Admin as the usual fallback.
   const canBuy = user?.role === PURCHASE_MANAGER || user?.role === MANAGER;
 
@@ -82,6 +95,9 @@ const PurchaseQuotations = () => {
   const [changing, setChanging] = useState(null);
   const [ordering, setOrdering] = useState(null);
   const [printing, setPrinting] = useState(null);
+  // The quotation whose details are open, by id, so a background reload shows the fresh copy.
+  const [viewing, setViewing] = useState("");
+  const [page, setPage] = useState(1);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -101,7 +117,7 @@ const PurchaseQuotations = () => {
   }, [load]);
 
   const dialogOpen = entering || changing || ordering;
-  const anyQueued = rows.some((r) => r.status === "Queued");
+  const anyQueued = rows.some((r) => r.status === "Queued" || r.cancel?.status === "Queued");
   useAutoRefresh(() => load(true), { enabled: anyQueued && !dialogOpen });
   useSapSyncDone(() => !dialogOpen && load(true));
 
@@ -131,6 +147,13 @@ const PurchaseQuotations = () => {
   };
 
   const retry = (q) => act(q.id, () => API.post(`/purchase-quotations/${q.id}/retry`), `${q.id} sent to SAP again`);
+
+  // One SAP has, with no PO made from it: cancelled in SAP by the sync, and its request lines open again (27 Oct 2026).
+  const cancel = async (q) => {
+    const reason = await askCancelReason(prompt, showToast, `quotation ${q.id}`);
+    if (reason === null) return;
+    act(q.id, () => API.post(`/purchase-quotations/${q.id}/cancel`, { reason }), `${q.id} is being cancelled in SAP`);
+  };
 
   const remove = (q) => {
     if (!window.confirm(`Delete quotation ${q.id}? Its request lines become open for a quotation again.`)) return;
@@ -173,6 +196,14 @@ const PurchaseQuotations = () => {
     [rows, status, company, vendorCode]
   );
 
+  // Ten to a page, as purchase requests; a filter change starts again from the first.
+  const { page: current, rows: pageRows } = pageSlice(shown, page, PAGE_SIZE);
+  const filterBy = (set) => (e) => {
+    set(e.target.value);
+    setPage(1);
+  };
+  const open = viewing ? rows.find((r) => r.id === viewing) : null;
+
   return (
     <div className="space-y-5">
       <div className="panel">
@@ -191,7 +222,7 @@ const PurchaseQuotations = () => {
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={company}
-            onChange={(e) => setCompany(e.target.value)}
+            onChange={filterBy(setCompany)}
             className="field field-sm w-auto cursor-pointer"
             aria-label="Filter by company"
           >
@@ -204,7 +235,7 @@ const PurchaseQuotations = () => {
           </select>
           <select
             value={vendorCode}
-            onChange={(e) => setVendorCode(e.target.value)}
+            onChange={filterBy(setVendorCode)}
             className="field field-sm w-auto max-w-[16rem] cursor-pointer"
             aria-label="Filter by vendor"
           >
@@ -217,7 +248,7 @@ const PurchaseQuotations = () => {
           </select>
           <select
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={filterBy(setStatus)}
             className="field field-sm w-auto cursor-pointer"
             aria-label="Filter by status"
           >
@@ -263,20 +294,33 @@ const PurchaseQuotations = () => {
           </div>
         </div>
       ) : (
-        <div className="space-y-3">
-          {shown.map((q) => (
-            <QuotationCard
-              key={q.id}
-              quotation={q}
-              canBuy={canBuy}
-              busy={busy === q.id}
-              onPrint={() => print(q)}
-              onChange={() => setChanging(q)}
-              onDelete={() => remove(q)}
-              onRetry={() => retry(q)}
-              onOrder={() => setOrdering(q)}
-            />
-          ))}
+        <>
+          <QuotationList rows={pageRows} onView={(q) => setViewing(q.id)} />
+          <Pagination page={current} total={shown.length} pageSize={PAGE_SIZE} onPage={setPage} noun="quotation" />
+        </>
+      )}
+
+      {open && (
+        <div className="modal-backdrop" onClick={() => setViewing("")}>
+          <QuotationDetails
+            quotation={open}
+            onClose={() => setViewing("")}
+            canBuy={canBuy}
+            busy={busy === open.id}
+            onPrint={() => print(open)}
+            // The form opens in place of the details, not over them.
+            onChange={() => {
+              setViewing("");
+              setChanging(open);
+            }}
+            onDelete={() => remove(open)}
+            onCancel={() => cancel(open)}
+            onRetry={() => retry(open)}
+            onOrder={() => {
+              setViewing("");
+              setOrdering(open);
+            }}
+          />
         </div>
       )}
 
@@ -318,33 +362,143 @@ const KV = ({ label, value }) => (
   </div>
 );
 
-const QuotationCard = ({ quotation: q, canBuy, busy, onPrint, onChange, onDelete, onRetry, onOrder }) => (
-  <div className="card p-5">
-    <div className="flex flex-wrap items-start gap-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="mono text-xs text-slate-500">{q.id}</span>
-          <span className={`badge ${STATUS_STYLE[q.status] || "badge-slate"}`}>{statusLabel(q)}</span>
-          {q.purchaseOrder && <span className="badge badge-emerald">{q.purchaseOrder} made</span>}
-          {q.expired && !q.purchaseOrder && q.status !== "Cancelled" && (
-            <span className="badge badge-amber">Expired {day(q.validUntil)}</span>
-          )}
-          <span className="ml-auto text-[13px] font-semibold tabular-nums text-slate-900">{formatCurrency(q.total)}</span>
-        </div>
+const StatusBadge = ({ quotation: q }) => (
+  <span className={`badge whitespace-nowrap ${STATUS_STYLE[q.status] || "badge-slate"}`}>{statusLabel(q)}</span>
+);
 
-        <div className="mt-2 grid sm:grid-cols-2 lg:grid-cols-5 gap-x-6 gap-y-2">
-          <KV label="Vendor" value={q.vendorName ? `${q.vendorName} · ${q.vendorCode}` : q.vendorCode} />
-          <KV label="Purchase request" value={q.request} />
-          <KV label="Company" value={q.companyName || q.company} />
-          <KV label="Dated · valid until" value={`${day(q.date) || "—"} · ${day(q.validUntil) || "—"}`} />
-          <KV label="Entered by" value={`${q.raisedByName || q.raisedBy || "—"} · ${when(q.raisedAt)}`} />
-        </div>
+/** The first item, and how many more: all a row has room for. */
+const itemsSummary = (lines = []) => {
+  if (!lines.length) return "—";
+  const first = `${lines[0].name} × ${lines[0].qty} ${lines[0].vendorUnit || ""}`.trim();
+  return lines.length > 1 ? `${first}, +${lines.length - 1} more` : first;
+};
 
-        <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-100">
+/** The eye: the way into everything about a quotation, as on purchase requests. */
+const ViewButton = ({ quotation: q, onView }) => (
+  <button
+    className="btn btn-sm btn-neutral btn-icon shrink-0 hover:border-brand-500 hover:text-brand-700"
+    onClick={() => onView(q)}
+    title="View full details"
+    aria-label={`View quotation ${q.id}`}
+  >
+    <Eye className="h-4 w-4" aria-hidden="true" />
+  </button>
+);
+
+/**
+ * One short line per quotation (27 Oct 2026, as purchase requests have it): where it stands, the vendor, what
+ * and how much. The lines, dates, notes and every action are behind the eye, so the list reads at a glance.
+ */
+const QuotationList = ({ rows, onView }) => (
+  <>
+    {/* Phone: a short card per quotation. */}
+    <div className="space-y-3 md:hidden">
+      {rows.map((q) => (
+        <div key={q.id} className="card flex items-center gap-4 p-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge quotation={q} />
+              <span className="text-[13px] font-semibold text-slate-900">{q.vendorName || q.vendorCode}</span>
+            </div>
+            <p className="mt-2 truncate text-[13px] text-slate-700">{itemsSummary(q.lines)}</p>
+            <p className="mt-0.5 text-[12px] text-slate-500">
+              {q.id} · {formatCurrency(q.total)}
+            </p>
+          </div>
+          <ViewButton quotation={q} onView={onView} />
+        </div>
+      ))}
+    </div>
+
+    {/* Tablet and up: a table and the eye. */}
+    <div className="table-card hidden md:block">
+      <div className="table-scroll">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th className="w-[200px]">Status</th>
+              <th className="w-[240px]">Vendor</th>
+              <th>Items</th>
+              <th className="w-[130px] text-right">Value</th>
+              <th className="w-[80px] text-right">View</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((q) => (
+              <tr key={q.id} className="cursor-pointer" onClick={() => onView(q)}>
+                <td className="py-4">
+                  <StatusBadge quotation={q} />
+                </td>
+                <td className="py-4">
+                  <div className="max-w-[240px] truncate font-medium text-slate-800">{q.vendorName || q.vendorCode}</div>
+                  <div className="text-[12px] text-slate-500">{q.companyName || q.company}</div>
+                </td>
+                <td className="py-4">
+                  <div className="max-w-[420px] truncate text-slate-700" title={itemsSummary(q.lines)}>
+                    {itemsSummary(q.lines)}
+                  </div>
+                </td>
+                <td className="whitespace-nowrap py-4 text-right tabular-nums text-slate-800">{formatCurrency(q.total)}</td>
+                {/* The row opens the details too; the eye is the visible way in. */}
+                <td className="py-4" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex justify-end">
+                    <ViewButton quotation={q} onView={onView} />
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </>
+);
+
+/** Everything about one quotation: the popup behind the eye. */
+const QuotationDetails = ({ quotation: q, onClose, canBuy, busy, onPrint, onChange, onDelete, onCancel, onRetry, onOrder }) => (
+  <div className="modal max-w-2xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+    <div className="modal-head">
+      <div className="min-w-0">
+        <h3 className="modal-title">
+          <FileText className="h-[18px] w-[18px] text-brand-700 shrink-0" />
+          Quotation {q.id}
+          <StatusBadge quotation={q} />
+        </h3>
+        <p className="modal-sub">
+          {q.vendorName || q.vendorCode} · {q.companyName || q.company}
+        </p>
+      </div>
+      <button onClick={onClose} className="modal-close" aria-label="Close">
+        <X className="h-5 w-5" />
+      </button>
+    </div>
+
+    <div className="modal-body space-y-6">
+      <CancelNote cancel={q.cancel} error={q.error} />
+      <div className="flex flex-wrap items-center gap-2">
+        {q.purchaseOrder && <span className="badge badge-emerald">{q.purchaseOrder} made</span>}
+        {q.expired && !q.purchaseOrder && q.status !== "Cancelled" && (
+          <span className="badge badge-amber">Expired {day(q.validUntil)}</span>
+        )}
+        <span className="ml-auto text-[15px] font-bold tabular-nums text-slate-900">{formatCurrency(q.total)}</span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+        <KV label="Vendor" value={q.vendorName ? `${q.vendorName} · ${q.vendorCode}` : q.vendorCode} />
+        <KV label="Purchase request" value={q.request} />
+        <KV label="Company" value={q.companyName || q.company} />
+        <KV label="Dated · valid until" value={`${day(q.date) || "—"} · ${day(q.validUntil) || "—"}`} />
+        <KV label="Entered by" value={`${q.raisedByName || q.raisedBy || "—"} · ${when(q.raisedAt)}`} />
+        <KV label="SAP quotation" value={q.sapDocNumber} />
+      </div>
+
+      <div>
+        <p className="mb-2 text-[12px] font-semibold text-slate-500">Items ({q.lines.length})</p>
+        <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
           {q.lines.map((l) => (
             <li
               key={l.lineId}
-              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-3 py-2 text-[13px]"
+              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-4 py-3 text-[13px]"
             >
               <span className="min-w-0 text-slate-800">
                 {l.name} <span className="mono text-[11px] text-slate-500">{l.sapItemCode || l.itemCode}</span>
@@ -354,21 +508,24 @@ const QuotationCard = ({ quotation: q, canBuy, busy, onPrint, onChange, onDelete
               </span>
               <span className="whitespace-nowrap text-slate-700">
                 {l.qty} {l.vendorUnit} @ {formatCurrency(l.price)} / {l.vendorUnit}
-                <span className="ml-2 text-[12px] text-slate-500">· {l.taxCode}</span>
+                {/* Only a quotation entered before 27 Oct 2026 has one: the tax code comes off the bill now. */}
+                {l.taxCode && <span className="ml-2 text-[12px] text-slate-500">· {l.taxCode}</span>}
               </span>
             </li>
           ))}
         </ul>
-
-        {q.remarks && <p className="mt-2 text-xs text-slate-600 italic">“{q.remarks}”</p>}
-        {q.status === "Failed" && q.error && <p className="mt-2 text-xs text-rose-700">SAP said: {q.error}</p>}
-        {/* The sync holds a quotation it will not send yet (an HSN SAP does not have, an item on a UoM group)
-            and says why here; it stays Queued and goes on the run after the reason is put right. */}
-        {q.status === "Queued" && q.error && <p className="mt-2 text-xs text-amber-700">Held, not sent to SAP: {q.error}</p>}
-        {q.status === "Cancelled" && q.error && <p className="mt-2 text-xs text-slate-600">{q.error}</p>}
       </div>
 
-      <div className="flex shrink-0 flex-wrap gap-2">
+      {q.remarks && <p className="text-[13px] text-slate-600 italic">“{q.remarks}”</p>}
+      {q.status === "Failed" && q.error && <p className="text-[13px] text-rose-700">SAP said: {q.error}</p>}
+      {/* The sync holds a quotation it will not send yet (an item on a UoM group) and says why here; it stays
+          Queued and goes on the run after the reason is put right. */}
+      {q.status === "Queued" && q.error && <p className="text-[13px] text-amber-700">Held, not sent to SAP: {q.error}</p>}
+      {q.status === "Cancelled" && q.error && <p className="text-[13px] text-slate-600">{q.error}</p>}
+    </div>
+
+    <div className="modal-foot">
+      <div className="flex flex-wrap justify-end gap-2">
         <button className="btn btn-sm btn-neutral" disabled={busy} onClick={onPrint}>
           <Printer className="h-4 w-4" />
           Print
@@ -397,6 +554,8 @@ const QuotationCard = ({ quotation: q, canBuy, busy, onPrint, onChange, onDelete
             </button>
           </>
         )}
+        {/* One SAP has: cancelled there instead of deleted. */}
+        <CancelButton cancel={q.cancel} allowed={canBuy} busy={busy} onCancel={onCancel} />
       </div>
     </div>
   </div>

@@ -1,10 +1,9 @@
 import { createDoc, deleteDoc, getDoc, listChildRows, listDocs, updateDoc } from "../integrations/erpnext/client.js";
 import { erpNow, erpToday } from "../integrations/erpnext/time.js";
 import { storeForCompany } from "../integrations/erpnext/stores.js";
-import { hsnDigits, hsnProblem, itemMasterOptions, pickFrom, raiseSapFlag } from "./sapCategories.js";
-import { QUOTING, listRequests, mayQuote, setLineFields, vendorsFor } from "./purchaseRequests.js";
-import { catalogProducts, forgetCatalog } from "./catalog.js";
-import { dropQueuedForQuotation, raiseHsnRequests } from "./hsnRequests.js";
+import { itemMasterOptions, pickFrom, raiseSapFlag } from "./sapCategories.js";
+import { QUOTING, cancelReason, listRequests, mayQuote, setLineFields, vendorsFor } from "./purchaseRequests.js";
+import { dropQueuedForQuotation } from "./hsnRequests.js";
 
 /**
  * The chosen vendor's quotation for a purchase request (24 Oct 2026).
@@ -25,12 +24,12 @@ import { dropQueuedForQuotation, raiseHsnRequests } from "./hsnRequests.js";
  * Each request line it quotes is marked Quoted on the request, so a line has
  * one vendor: a line already on a live quotation is not offered to another.
  *
- * SAP needs an HSN code on a line with a GST tax code, and takes it from the
- * item (PQ-2026-00352, 24 Oct 2026). A line whose item has none asks for one,
- * as a goods receipt line does: it is saved on the line, written onto the item
- * (the sync sets it in SAP before it posts the quotation), and a code SAP does
- * not have yet is asked for as an HSN request - the quotation then waits, as a
- * receipt does, until the sync has created it.
+ * No tax code and no HSN (27 Oct 2026): both are on the supplier's bill, so
+ * the goods receipt is the one document that asks for them (goodsReceipts.js).
+ * SAP takes a quotation and PO without either - tested in HITECH_RUBBER the
+ * same day - and asks for the HSN only on a GRPO line with a GST tax code.
+ * Quotations entered before then keep the tax code and HSN they were saved
+ * with; nothing sends them to SAP any more.
  *
  * Like the rest of purchasing, this server never talks to SAP: it writes the
  * record in ERPNext and raises the flag.
@@ -40,7 +39,8 @@ const DOCTYPE = "CMMS Purchase Quotation";
 const LINE = "CMMS Purchase Quotation Line";
 
 const FIELDS = ["name", "purchase_request", "company", "status", "vendor_code", "vendor_name", "quotation_date", "valid_until", "remarks",
-  "raised_by", "raised_at", "purchase_order", "sap_doc_entry", "sap_doc_number", "posted_at", "error", "modified"];
+  "raised_by", "raised_at", "purchase_order", "sap_doc_entry", "sap_doc_number", "posted_at", "error", "modified",
+  "cancel_status", "cancel_reason", "cancel_requested_by", "cancel_requested_at"];
 const LINE_FIELDS = ["parent", "idx", "name", "pr_line", "item", "item_name", "sap_item_code", "request_qty", "inventory_uom", "vendor_uom", "vendor_qty", "price", "tax_code", "hsn_code"];
 
 const tidy = (value) => String(value ?? "").trim().replace(/\s+/g, " ");
@@ -68,10 +68,45 @@ export const gstKindFor = (supplierState, companyState) => {
 /** The tax codes a supplier's lines may take: all of them when the kind is not known. */
 export const taxCodesFor = (taxCodes = [], kind = null) => (kind ? taxCodes.filter((t) => t.kind === kind) : taxCodes);
 
+/**
+ * A bill's tax code for one line, checked against SAP's codes and the kind the
+ * supplier's state calls for. Asked on the goods receipt only (27 Oct 2026).
+ *
+ * @param published { vendors: [{ code, name, state }], taxCodes: [{ code, kind }], companyState }
+ */
+export const checkTaxCode = (published = {}, vendorCode, value, label) => {
+  const taxCode = tidy(value);
+  if (!taxCode) throw badRequest(`Give the tax code for ${label} - it is on the bill.`);
+  const all = published.taxCodes || [];
+  if (all.length && !all.some((t) => t.code === taxCode)) throw badRequest(`The tax code for ${label} is not one SAP has.`);
+  const vendor = (published.vendors || []).find((v) => tidy(v.code) === tidy(vendorCode));
+  const kind = gstKindFor(vendor?.state, published.companyState);
+  if (kind && !taxCodesFor(all, kind).some((t) => t.code === taxCode)) {
+    throw badRequest(
+      kind === "cgst_sgst"
+        ? `${tidy(vendor.name)} is in ${vendor.state}, the company's own state, so ${label} takes a CGST+SGST tax code, not ${taxCode}.`
+        : `${tidy(vendor.name)} is in ${vendor.state}, not the company's state (${published.companyState}), so ${label} takes an IGST tax code, not ${taxCode}.`
+    );
+  }
+  return taxCode;
+};
+
 /** SAP has it, or is being asked to: no longer the CMMS's to change. */
 export const mayEdit = (row) => ["Queued", "Failed"].includes(row.status) && !row.purchase_order;
 /** The PO is made from a quotation SAP has, once. */
 export const mayMakeOrder = (row) => row.status === "Posted" && !row.purchase_order;
+/**
+ * Why a quotation cannot be cancelled now, or "" when it can (27 Oct 2026). Pure. Only one SAP has and no PO is
+ * made from yet: one SAP has not got is deleted instead, and one with a PO is undone by cancelling the PO.
+ */
+export const cancelRefusal = (row) => {
+  if (row.cancel_status === "Queued") return "Its cancellation is already with the SAP sync.";
+  if (row.status === "Cancelled") return "It is already cancelled.";
+  if (row.status !== "Posted") return "SAP does not have it, so it is deleted rather than cancelled.";
+  if (row.purchase_order) return `PO ${row.purchase_order} is made from it; cancel the PO instead.`;
+  return "";
+};
+
 /** Past its validity date on `day`. A PO can still be made from it, with a warning. */
 export const isExpired = (row, day = erpToday()) => Boolean(row.valid_until) && String(row.valid_until).slice(0, 10) < day;
 
@@ -112,7 +147,14 @@ const toQuotation = (row, lines = []) => ({
   lines: lines.map(toLine),
   total: Math.round(lines.reduce((sum, l) => sum + Number(l.vendor_qty || 0) * Number(l.price || 0), 0) * 100) / 100,
   mayEdit: mayEdit(row),
-  mayMakeOrder: mayMakeOrder(row),
+  mayMakeOrder: mayMakeOrder(row) && row.cancel_status !== "Queued",
+  cancel: {
+    status: row.cancel_status || "",
+    reason: row.cancel_reason || "",
+    by: row.cancel_requested_by || "",
+    at: row.cancel_requested_at || null,
+    refusal: cancelRefusal(row),
+  },
   updatedAt: row.modified,
 });
 
@@ -121,9 +163,8 @@ const toQuotation = (row, lines = []) => ({
  * gives back what to write. Pure, so the rules can be tested without ERPNext.
  *
  * @param request   the CMMS Purchase Request, with its lines
- * @param body      { vendorCode, quotationDate, validUntil, remarks, lines: [{ lineId, vendorUnit, qty, price, taxCode, hsnCode }] }
- * @param published { vendors: [{ code, name, state }], taxCodes: [{ code, kind }], units: ["KGS", "BAG", ...],
- *                    companyState, itemHsn: { item code: its HSN, "" when it has none } }
+ * @param body      { vendorCode, quotationDate, validUntil, remarks, lines: [{ lineId, vendorUnit, qty, price }] }
+ * @param published { vendors: [{ code, name, state }], units: ["KGS", "BAG", ...] }
  * @param today     YYYY-MM-DD
  * @param current   the quotation being changed, if it is a change: its own lines stay its to quote
  */
@@ -154,10 +195,6 @@ export const checkQuotation = (request, body = {}, published = {}, today = erpTo
   const remarks = tidy(body.remarks);
   if (remarks.length > REMARKS_MAX) throw badRequest(`The remarks can be at most ${REMARKS_MAX} characters.`);
 
-  const taxCodes = (published.taxCodes || []).map((t) => t.code);
-  // Only the codes of the kind this supplier needs, once both states are known.
-  const kind = gstKindFor(vendor.state, published.companyState);
-  const allowed = kind ? taxCodesFor(published.taxCodes || [], kind).map((t) => t.code) : null;
   const units = published.units || [];
   if (!units.length) throw badRequest(`The SAP sync has not published the unit list for ${request.company} yet.`);
   const byId = new Map((request.lines || []).map((l) => [l.name, l]));
@@ -180,30 +217,6 @@ export const checkQuotation = (request, body = {}, published = {}, today = erpTo
     if (!Number.isFinite(qty) || qty <= 0) throw badRequest(`The quantity for ${label} must be more than zero.`);
     const price = Number(w.price);
     if (!Number.isFinite(price) || price <= 0) throw badRequest(`Give the unit price for ${label}.`);
-    const taxCode = tidy(w.taxCode);
-    if (!taxCode) throw badRequest(`Give the tax code for ${label}.`);
-    if (taxCodes.length && !taxCodes.includes(taxCode)) throw badRequest(`The tax code for ${label} is not one SAP has.`);
-    if (allowed && !allowed.includes(taxCode)) {
-      throw badRequest(
-        kind === "cgst_sgst"
-          ? `${tidy(vendor.name)} is in ${vendor.state}, the company's own state, so ${label} takes a CGST+SGST tax code, not ${taxCode}.`
-          : `${tidy(vendor.name)} is in ${vendor.state}, not the company's state (${published.companyState}), so ${label} takes an IGST tax code, not ${taxCode}.`
-      );
-    }
-    // An item with no HSN takes one here; one whose HSN SAP has keeps it, and the line brings none. An item's HSN
-    // that SAP does not have yet is not its own either: saving a quotation puts its HSN on the item at once, so the
-    // line still carries it (and its HSN request) until SAP has the code - and an HSN this quotation brought stays
-    // its to change (PQ-2026-00353, 24 Oct 2026: an edit dropped 8491 and its request when it read as the item's).
-    let hsn = "";
-    const brought = (current?.lines || []).some((l) => l.item === line.item && hsnDigits(l.hsn_code));
-    const itemOwn = hsnDigits(published.itemHsn?.[line.item]);
-    const sapHas = !(published.hsn || []).length || (published.hsn || []).includes(itemOwn);
-    if (brought || !itemOwn || !sapHas) {
-      hsn = hsnDigits(w.hsnCode);
-      if (!hsn) throw badRequest(`${label} has no HSN code, and SAP needs one on a line with a GST tax code. Give it - it is on the quotation or the item's bill.`);
-      const problem = hsnProblem(hsn);
-      if (problem) throw badRequest(`${label}: HSN ${hsn} - ${problem}.`);
-    }
     return {
       doctype: LINE,
       pr_line: line.name,
@@ -215,8 +228,9 @@ export const checkQuotation = (request, body = {}, published = {}, today = erpTo
       vendor_uom: vendorUom,
       vendor_qty: qty,
       price,
-      tax_code: taxCode,
-      hsn_code: hsn,
+      // Written empty, so a quotation saved again drops what it carried before 27 Oct 2026.
+      tax_code: "",
+      hsn_code: "",
     };
   });
 
@@ -228,20 +242,6 @@ export const checkQuotation = (request, body = {}, published = {}, today = erpTo
     remarks,
     lines,
   };
-};
-
-/**
- * The HSN codes a quotation's lines bring that SAP does not have yet - asked for
- * as HSN requests, one per code: digits -> the item of the first line carrying
- * it. Pure.
- */
-export const newHsnCodes = (lines = [], sapList = []) => {
-  const out = new Map();
-  for (const l of lines) {
-    const hsn = hsnDigits(l.hsn_code);
-    if (hsn && !(sapList || []).includes(hsn) && !out.has(hsn)) out.set(hsn, l.item);
-  }
-  return out;
 };
 
 /** Quotations, newest first, each with its lines. */
@@ -291,18 +291,11 @@ export const optionsFor = async (company) => {
   const published = await vendorsFor(company);
   const options = (await itemMasterOptions())[published.company] || {};
   const info = options.company_info || null;
-  // Each of the company's items and its HSN: a line whose item has none asks for one.
-  const itemHsn = {};
-  for (const p of await catalogProducts()) {
-    if (p.sapCategory?.company === published.company) itemHsn[p.code] = hsnDigits(p.hsnCode);
-  }
   return {
     ...published,
     // SAP's whole unit list once the sync has published it; until then the units items are created with.
     units: Array.isArray(options.sap_units) && options.sap_units.length ? options.sap_units : Array.isArray(options.units) ? options.units : [],
-    hsn: Array.isArray(options.hsn) ? options.hsn : [],
-    itemHsn,
-    // Set against each supplier's state to choose CGST+SGST or IGST (gstKindFor).
+    // Set against each supplier's state to choose CGST+SGST or IGST (gstKindFor) - on the goods receipt now.
     companyState: info?.state || "",
     companyInfo: info
       ? {
@@ -326,21 +319,6 @@ const readRequest = async (id) => {
   return doc;
 };
 
-/**
- * Writes the HSN a line brought onto its item, and marks the item for the sync,
- * which sets it in SAP (PASS B) before it posts the quotation (PASS Q) - as a
- * goods receipt's bill does.
- */
-const followHsn = async (lines) => {
-  let written = 0;
-  for (const l of lines) {
-    if (!l.hsn_code) continue;
-    await updateDoc("Item", l.item, { custom_sap_hsn_code: l.hsn_code, custom_sap_category_pending: 1, custom_sap_category_error: "" });
-    written += 1;
-  }
-  if (written) forgetCatalog();
-};
-
 /** Marks request lines as on this quotation, or open again. */
 const markLines = async (lineIds, quotation) => {
   for (const id of lineIds) await setLineFields(id, quotation ? { coverage: "Quoted", quotation } : { coverage: "", quotation: "" });
@@ -349,7 +327,7 @@ const markLines = async (lineIds, quotation) => {
 /**
  * The purchase manager enters the chosen vendor's quotation.
  *
- * @param body { request, vendorCode, quotationDate, validUntil, remarks, lines: [{ lineId, vendorUnit, qty, price, taxCode }] }
+ * @param body { request, vendorCode, quotationDate, validUntil, remarks, lines: [{ lineId, vendorUnit, qty, price }] }
  */
 export const createQuotation = async (body = {}, user) => {
   const request = await readRequest(body.request);
@@ -378,16 +356,6 @@ export const createQuotation = async (body = {}, user) => {
     console.error("Quotation lines not marked:", error.message);
     throw Object.assign(new Error("The request's lines could not be marked as quoted, so the quotation was not saved. Try again."), { status: 400 });
   }
-  // Its new HSN codes with it: a quotation that would wait for a code nobody asked for is taken back.
-  try {
-    await raiseHsnRequests({ company: request.company, quotation: created.name, codes: newHsnCodes(edits.lines, options.hsn), user });
-  } catch (error) {
-    await markLines(marked, null).catch(() => {});
-    await deleteDoc(DOCTYPE, created.name).catch(() => {});
-    console.error("HSN request not saved:", error.message);
-    throw Object.assign(new Error("The new HSN code could not be recorded, so the quotation was not saved. Try again."), { status: 400 });
-  }
-  await followHsn(edits.lines);
   await raiseSapFlag(user?.email);
   return getQuotation(created.name);
 };
@@ -405,10 +373,8 @@ export const updateQuotation = async (id, body = {}, user) => {
   const after = new Set(edits.lines.map((l) => l.pr_line));
   await markLines([...before].filter((l) => !after.has(l)), null);
   await markLines([...after].filter((l) => !before.has(l)), id);
-  // The codes it asks for now replace the ones it asked for before, while SAP has not made those yet.
+  // An HSN request it raised before 27 Oct 2026 goes, while SAP has not made it yet: the line no longer carries the code.
   await dropQueuedForQuotation(id);
-  await raiseHsnRequests({ company: request.company, quotation: id, codes: newHsnCodes(edits.lines, options.hsn), user });
-  await followHsn(edits.lines);
   await raiseSapFlag(user?.email);
   return getQuotation(id);
 };
@@ -424,6 +390,25 @@ export const deleteQuotation = async (id) => {
   await dropQueuedForQuotation(id);
   await deleteDoc(DOCTYPE, id);
   return { deleted: id };
+};
+
+/**
+ * Cancels a quotation SAP has (27 Oct 2026): the sync cancels it there (PurchaseQuotations(n)/Cancel), turns it
+ * Cancelled and opens its request lines for a new quotation.
+ */
+export const cancelQuotation = async (id, body = {}, user) => {
+  const doc = await readQuotation(id);
+  if (!doc) throw notFound("Quotation not found");
+  const refusal = cancelRefusal(doc);
+  if (refusal) throw badRequest(refusal);
+  await updateDoc(DOCTYPE, id, {
+    cancel_status: "Queued",
+    cancel_reason: cancelReason(body.reason),
+    cancel_requested_by: user?.email || "",
+    cancel_requested_at: erpNow(),
+  });
+  await raiseSapFlag(user?.email);
+  return getQuotation(id);
 };
 
 /** Sends a quotation SAP refused back to the SAP server as it is. */

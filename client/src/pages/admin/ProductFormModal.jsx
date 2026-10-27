@@ -9,7 +9,6 @@ import TaxonomySelect, {
 import ItemNameBuilder, { EMPTY_NAMING, isNamingBlank } from "../../components/ItemNameBuilder";
 import { useFormDraft, describeWhen } from "../../hooks/useFormDraft";
 import Select from "../../components/Select";
-import Combobox from "../../components/Combobox";
 
 /**
  * Add or edit an engineering item - as a SAP item master record.
@@ -23,8 +22,8 @@ import Combobox from "../../components/Combobox";
  *   ItemName             Description
  *   ForeignName          Foreign name
  *   Inventory/Purchasing/Sales UoM   Unit      (one unit, as SAP is used here)
- *   ChapterID            HSN code              (edit only; from that company's SAP HSN list)
- *   U_TaxRate            Tax rate              (edit only)
+ *   ChapterID            HSN code              (shown on edit; set by the goods receipt)
+ *   U_TaxRate            Tax rate              (shown on edit; set by the goods receipt)
  *   MinInventory         Minimum stock         (also the CMMS low-stock limit)
  *   -                    Brand                 (the CMMS's own)
  *   -                    Opening quantity      (add only: stock on the shelf with no bill)
@@ -33,11 +32,11 @@ import Combobox from "../../components/Combobox";
  * queues it for the SAP server, which creates it in SAP with the company's next
  * item code (and then in ERPNext) within about a minute.
  *
- * Adding does not ask for HSN or tax rate (13 Oct 2026): they belong to a bill,
- * and the item's first goods receipt is what fills them in. They stay on the
- * edit form, which is where a wrong one gets corrected. An edit saves at once;
- * the name, item group, sub-categories, HSN and tax rate reach SAP, while the
- * foreign name and minimum stock stay in the CMMS.
+ * Neither form asks for HSN or tax rate: they belong to a bill, and the item's
+ * first goods receipt is what fills them in (adding since 13 Oct 2026, editing
+ * since 27 Oct 2026 - once an item has them they are not changed). The edit
+ * form shows them. An edit saves at once; the name, item group, sub-categories,
+ * foreign name and minimum stock reach SAP.
  * The item code, company and unit are fixed once an item exists (SAP refuses a
  * new inventory unit after the first transaction).
  */
@@ -190,11 +189,8 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
       subCategory: form.subCategory,
       subCategoryB: form.subCategoryB,
       foreignName: form.foreignName,
-      // Blank on an add whatever the form holds: the fields are gone from that
-      // side, but a draft saved before they went still carries what was typed
-      // then, and it would reach SAP with nobody able to see or correct it.
-      hsnCode: isEdit ? form.hsnCode : "",
-      taxRate: isEdit ? form.taxRate : "",
+      // No HSN or tax rate, on either form: a draft saved before they went may still carry them, and only the goods
+      // receipt sets them now.
       minStock: Number(form.minStock) || 0,
       brand: form.brand,
     };
@@ -207,7 +203,7 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
           category: itemGroup,
           name: form.name.trim(),
         });
-        showToast("Saved. The name, categories, HSN and tax rate are sent to SAP by the item master sync.", "success");
+        showToast("Saved. The changes are sent to SAP by the item master sync.", "success");
       } else {
         await API.post("/naming-requests", {
           ...payload,
@@ -379,35 +375,23 @@ const ProductFormModal = ({ product, onClose, onSaved }) => {
                   )}
                 </div>
                 {/*
-                  HSN and tax rate come off a bill, so adding an item no longer
-                  asks for them - the first goods receipt is what sets them.
-                  They stay on the edit form, which is where a wrong one is put
-                  right without waiting for another receipt.
+                  HSN and tax rate come off a bill: the goods receipt is the one
+                  place they are entered, and only for an item without them
+                  (27 Oct 2026). Shown here, not editable.
                 */}
                 {isEdit && (
                   <>
                     <div>
-                      <label className={label} htmlFor="sap-hsn">HSN code</label>
-                      <Combobox
-                        id="sap-hsn"
-                        value={form.hsnCode}
-                        onChange={(v) => set("hsnCode", v.replace(/[^\d.]/g, ""))}
-                        suggestions={company?.hsn || []}
-                        disabled={!company}
-                        className="field mono"
-                        aria-label="HSN code"
-                      />
+                      <span className={label}>HSN code</span>
+                      <p className="field mono bg-slate-50 text-slate-600" aria-readonly="true">
+                        {form.hsnCode || "None yet - set by the first goods receipt"}
+                      </p>
                     </div>
                     <div>
-                      <label className={label} htmlFor="sap-tax">Tax rate</label>
-                      <Select
-                        id="sap-tax"
-                        value={form.taxRate}
-                        onChange={bind("taxRate")}
-                        disabled={!company}
-                        options={company?.taxRates || []}
-                        placeholder="None"
-                      />
+                      <span className={label}>Tax rate</span>
+                      <p className="field bg-slate-50 text-slate-600" aria-readonly="true">
+                        {form.taxRate || "None yet - set by the first goods receipt"}
+                      </p>
                     </div>
                   </>
                 )}

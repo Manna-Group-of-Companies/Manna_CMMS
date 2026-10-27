@@ -40,6 +40,15 @@ export const detail = async (req, res) => {
 };
 
 /** @route POST /api/purchase-orders/:id/retry */
+/** @route POST /api/purchase-orders/:id/cancel { reason } - cancelled in SAP by the sync (27 Oct 2026) */
+export const cancel = async (req, res) => {
+  try {
+    res.json(await orders.cancelOrder(req.params.id, req.body, req.user));
+  } catch (error) {
+    fail(res, error, "Could not cancel the purchase order");
+  }
+};
+
 export const retry = async (req, res) => {
   try {
     res.json(await orders.retryOrder(req.params.id, req.user));

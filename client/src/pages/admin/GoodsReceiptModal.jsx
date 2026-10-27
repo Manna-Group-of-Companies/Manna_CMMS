@@ -13,9 +13,9 @@ import { hsnDigits, hsnProblem } from "../../utils/hsn";
  * Two kinds of PO are offered:
  *
  *   SAP POs        the open POs a snapshot from the SAP server lists - made in
- *                  SAP, or on a request before quotations. Vendor, price and
- *                  SAP tax code come from the PO; the store enters the quantity
- *                  received on each line, in the item's own unit.
+ *                  SAP, or on a request before quotations. Vendor and price
+ *                  come from the PO; the store enters the quantity received on
+ *                  each line, in the item's own unit.
  *   CMMS POs       made from a quotation (24 Oct 2026, phase 4), in the
  *                  vendor's unit. Per line the store enters the billed qty and
  *                  the bill price per vendor unit (the quoted price unless the
@@ -24,8 +24,10 @@ import { hsnDigits, hsnProblem } from "../../utils/hsn";
  *                  cost per unit follows from the bill, and the bill is the
  *                  value booked.
  *
- * Either way the store enters the bill number and date and each line's HSN and
- * tax rate as the bill states them. The record is queued and the SAP server
+ * Either way the store enters the bill number and date, and from the bill each
+ * line's tax code - the one document that asks for it (27 Oct 2026). HSN and
+ * tax rate are asked only for an item that has none; an item's own are shown
+ * and cannot be changed. The record is queued and the SAP server
  * posts the GRPO and the ERPNext receipt within about a minute. An item at nil
  * value takes this receipt's cost as its value.
  *
@@ -43,6 +45,13 @@ const today = () => {
 const POLL_MS = 5000;
 // About two minutes of waiting for the SAP server before giving up on it.
 const POLL_TRIES = 24;
+
+/** CGST+SGST from a supplier in the company's own state, IGST from another; null when either is not known. Mirrors gstKindFor. */
+const gstKindFor = (supplierState, companyState) => {
+  const a = String(supplierState || "").trim().toUpperCase();
+  const b = String(companyState || "").trim().toUpperCase();
+  return a && b ? (a === b ? "cgst_sgst" : "igst") : null;
+};
 
 /** A box left empty, or a number. */
 const num = (value) => (String(value ?? "").trim() === "" ? null : Number(value));
@@ -88,8 +97,8 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
   const [poLoading, setPoLoading] = useState(false);
   // The CMMS PO name for a PO made from a quotation, else the SAP DocEntry.
   const [poKey, setPoKey] = useState("");
-  // Per PO line, keyed by its line: { qty, hsnCode, taxRate }, or for a CMMS PO
-  // { vendorQty, billPrice, receivedQty, ratio, mode, hsnCode, taxRate }.
+  // Per PO line, keyed by its line: { qty, taxCode, hsnCode, taxRate }, or for a CMMS PO
+  // { vendorQty, billPrice, receivedQty, ratio, mode, taxCode, hsnCode, taxRate }.
   const [entries, setEntries] = useState({});
   const [billNo, setBillNo] = useState("");
   const [billDate, setBillDate] = useState(today());
@@ -142,10 +151,10 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
     };
   }, [company]);
 
-  // Pre-fill each line from the PO: the HSN and tax rate SAP has for the item,
-  // corrected by hand where the bill says otherwise, and on a CMMS PO the
-  // quoted price. Entries already typed for a line that is still there are
-  // kept, so a refresh does not wipe them.
+  // Pre-fill each line: the item's own HSN and tax rate, which stand (an item
+  // without them takes the bill's), and on a CMMS PO the quoted price. The tax
+  // code starts empty: it is read off the bill. Entries already typed for a
+  // line that is still there are kept, so a refresh does not wipe them.
   useEffect(() => {
     if (!po) return;
     setEntries((prev) => {
@@ -160,10 +169,11 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                 receivedQty: "",
                 ratio: "",
                 mode: "qty",
+                taxCode: "",
                 hsnCode: l.hsnCode || "",
                 taxRate: l.taxRate || "",
               }
-            : { qty: "", hsnCode: l.hsnCode || "", taxRate: l.taxRate || "" });
+            : { qty: "", taxCode: "", hsnCode: l.hsnCode || "", taxRate: l.taxRate || "" });
       }
       return next;
     });
@@ -254,9 +264,8 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
         }
         if (!(c.price > 0)) return `${l.name}: the bill price must be more than zero.`;
         if (!c.receivedQty) return `${l.name}: enter what came in, in ${l.unit}, or the ${l.unit} per ${l.vendorUnit}.`;
-        const hsn = hsnCheck(l, e);
-        if (hsn.error) return `${l.name}: ${hsn.error}`;
-        if (!e.taxRate) return `${l.name}: pick the tax rate from the bill.`;
+        const tax = billTaxProblem(l, e);
+        if (tax) return `${l.name}: ${tax}`;
       }
       return "";
     }
@@ -272,9 +281,8 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
       if (Number(e.qty) > Number(l.receivableQty)) {
         return `${l.name}: only ${l.receivableQty} ${l.unit || ""} is still open on this PO.`;
       }
-      const hsn = hsnCheck(l, e);
-      if (hsn.error) return `${l.name}: ${hsn.error}`;
-      if (!e.taxRate) return `${l.name}: pick the tax rate from the bill.`;
+      const tax = billTaxProblem(l, e);
+      if (tax) return `${l.name}: ${tax}`;
     }
     return "";
   };
@@ -297,8 +305,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
               vendorQty: c.vendorQty,
               billPrice: c.price,
               ...(en.mode === "ratio" ? { ratio: num(en.ratio) } : { receivedQty: num(en.receivedQty) }),
-              hsnCode: hsnDigits(en.hsnCode),
-              taxRate: en.taxRate,
+              ...billTaxes(l, en),
             };
           }),
         }
@@ -308,8 +315,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
           lines: entered.map((l) => ({
             poLine: l.line,
             qty: Number(entries[l.line].qty),
-            hsnCode: hsnDigits(entries[l.line].hsnCode),
-            taxRate: entries[l.line].taxRate,
+            ...billTaxes(l, entries[l.line]),
           })),
         };
     try {
@@ -329,30 +335,54 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
   };
 
   /**
-   * One line's HSN, as the server will take it: required, the shape of a real
-   * code, and either in SAP's list or - for an item that has no HSN yet - new,
-   * which the save asks SAP to add.
+   * The HSN typed for an item that has none, as the server will take it:
+   * required, the shape of a real code, and either in SAP's list or new, which
+   * the save asks SAP to add. An item's own HSN is not checked here - it stands.
    */
-  const hsnCheck = (l, e) => {
+  const hsnCheck = (e) => {
     const digits = hsnDigits(e.hsnCode);
     if (!digits) return { error: "enter the HSN code from the bill." };
     const problem = hsnProblem(digits);
     if (problem) return { error: `${problem}.` };
     if ((companyOptions?.hsn || []).includes(digits)) return { digits };
-    if (l.hsnCode) return { error: `HSN ${digits} is not in SAP's list - pick one from the list.` };
     return { digits, isNew: true };
   };
 
+  /** What a line still needs from the bill, or "" - mirrors billTaxes on the server. */
+  const billTaxProblem = (l, e) => {
+    if (!e.taxCode) return "pick the tax code from the bill.";
+    if (!l.hsnCode) {
+      const hsn = hsnCheck(e);
+      if (hsn.error) return hsn.error;
+    }
+    if (!l.taxRate && !e.taxRate) return "pick the tax rate from the bill.";
+    return "";
+  };
+
+  /** What a line sends: the tax code always, the HSN and tax rate only for an item without its own. */
+  const billTaxes = (l, e) => ({
+    taxCode: e.taxCode,
+    hsnCode: l.hsnCode ? "" : hsnDigits(e.hsnCode),
+    taxRate: l.taxRate ? "" : e.taxRate,
+  });
+
   const pos = snapshot?.pos || [];
   const taxRates = companyOptions?.taxRates || [];
+  // The supplier's kind of GST narrows the codes, as the server does; every code when a state is not known.
+  const gstKind = gstKindFor(po?.vendorState, snapshot?.companyState);
+  const taxCodes = useMemo(() => {
+    const all = snapshot?.taxCodes || [];
+    return gstKind ? all.filter((t) => t.kind === gstKind) : all;
+  }, [snapshot, gstKind]);
   const billCells = (l, e, closed) => (
     <BillTaxCells
       line={l}
       entry={e}
       closed={closed}
       company={company}
+      taxCodes={taxCodes}
       taxRates={taxRates}
-      hsnShown={String(e.hsnCode || "").trim() ? hsnCheck(l, e) : {}}
+      hsnShown={!l.hsnCode && String(e.hsnCode || "").trim() ? hsnCheck(e) : {}}
       onChange={(key, value) => setEntry(l.line, key, value)}
     />
   );
@@ -480,6 +510,7 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                           <th>Bill price</th>
                           <th>Received</th>
                           <th className="text-right">Cost</th>
+                          <th>Tax code</th>
                           <th>HSN</th>
                           <th>Tax rate</th>
                         </tr>
@@ -494,7 +525,6 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                             <tr key={l.line}>
                               <td>
                                 <ItemCell line={l} />
-                                <div className="mono text-[11px] text-slate-500">{l.taxCode || ""}</div>
                               </td>
                               <td className="text-right whitespace-nowrap">
                                 {l.receivableQty} {l.vendorUnit}
@@ -607,15 +637,15 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                           <th>Item</th>
                           <th className="text-right">Open</th>
                           <th className="text-right">PO price</th>
-                          <th>Tax code</th>
                           <th>Qty received</th>
+                          <th>Tax code</th>
                           <th>HSN</th>
                           <th>Tax rate</th>
                         </tr>
                       </thead>
                       <tbody>
                         {po.lines.map((l) => {
-                          const e = entries[l.line] || { qty: "", hsnCode: "", taxRate: "" };
+                          const e = entries[l.line] || { qty: "", taxCode: "", hsnCode: "", taxRate: "" };
                           const closed = Number(l.receivableQty) <= 0;
                           return (
                             <tr key={l.line}>
@@ -629,7 +659,6 @@ const GoodsReceiptModal = ({ onClose, onSaved }) => {
                                 )}
                               </td>
                               <td className="text-right whitespace-nowrap">{formatCurrency(l.price)}</td>
-                              <td className="mono text-slate-600">{l.taxCode || "—"}</td>
                               <td>
                                 <input
                                   type="number"
@@ -743,45 +772,83 @@ const ItemCell = ({ line: l }) => (
   </div>
 );
 
-/** The HSN and tax rate a line takes from the bill. */
-const BillTaxCells = ({ line: l, entry: e, closed, company, taxRates, hsnShown, onChange }) => {
+/** An item's own value, shown and not offered for change. */
+const OwnValue = ({ value, what }) => (
+  <span className="mono text-[12px] text-slate-600" title={`The item's own ${what} - not changed on a receipt`}>
+    {value}
+  </span>
+);
+
+/**
+ * What a line takes from the bill: the tax code always; the HSN and tax rate
+ * only when the item has none - an item's own are shown, not editable.
+ */
+const BillTaxCells = ({ line: l, entry: e, closed, company, taxCodes, taxRates, hsnShown, onChange }) => {
   const rates = e.taxRate && !taxRates.includes(e.taxRate) ? [e.taxRate, ...taxRates] : taxRates;
   return (
     <>
       <td>
-        <input
-          type="text"
-          list={`gr-hsn-${company}`}
-          value={e.hsnCode ?? ""}
-          onChange={(ev) => onChange("hsnCode", ev.target.value)}
-          disabled={closed}
-          inputMode="numeric"
-          className={`field field-sm w-32 mono disabled:opacity-60 ${hsnShown.error ? "border-rose-400" : ""}`}
-          aria-label={`HSN code of ${l.name}`}
-          aria-invalid={Boolean(hsnShown.error)}
-        />
-        {hsnShown.error && (
-          <div className="mt-0.5 max-w-[10rem] text-[11px] leading-tight text-rose-700">{hsnShown.error}</div>
-        )}
-        {!hsnShown.error && hsnShown.isNew && (
-          <div className="mt-0.5 max-w-[10rem] text-[11px] leading-tight text-amber-700">New HSN - will be added to SAP</div>
-        )}
-      </td>
-      <td>
         <select
-          value={e.taxRate ?? ""}
-          onChange={(ev) => onChange("taxRate", ev.target.value)}
+          value={e.taxCode ?? ""}
+          onChange={(ev) => onChange("taxCode", ev.target.value)}
           disabled={closed}
-          className="field field-sm w-24 cursor-pointer disabled:opacity-60"
-          aria-label={`Tax rate of ${l.name}`}
+          className="field field-sm w-36 cursor-pointer disabled:opacity-60"
+          aria-label={`Tax code of ${l.name}`}
         >
-          <option value="">—</option>
-          {rates.map((r) => (
-            <option key={r} value={r}>
-              {r}
+          <option value="">Tax code…</option>
+          {taxCodes.map((t) => (
+            <option key={t.code} value={t.code}>
+              {t.code}
+              {t.rate !== undefined && t.rate !== null ? ` · ${t.rate}%` : ""}
             </option>
           ))}
         </select>
+      </td>
+      <td>
+        {l.hsnCode ? (
+          <OwnValue value={l.hsnCode} what="HSN" />
+        ) : (
+          <>
+            <input
+              type="text"
+              list={`gr-hsn-${company}`}
+              value={e.hsnCode ?? ""}
+              onChange={(ev) => onChange("hsnCode", ev.target.value)}
+              disabled={closed}
+              inputMode="numeric"
+              placeholder="Item has none"
+              className={`field field-sm w-32 mono disabled:opacity-60 ${hsnShown.error ? "border-rose-400" : ""}`}
+              aria-label={`HSN code of ${l.name}`}
+              aria-invalid={Boolean(hsnShown.error)}
+            />
+            {hsnShown.error && (
+              <div className="mt-0.5 max-w-[10rem] text-[11px] leading-tight text-rose-700">{hsnShown.error}</div>
+            )}
+            {!hsnShown.error && hsnShown.isNew && (
+              <div className="mt-0.5 max-w-[10rem] text-[11px] leading-tight text-amber-700">New HSN - will be added to SAP</div>
+            )}
+          </>
+        )}
+      </td>
+      <td>
+        {l.taxRate ? (
+          <OwnValue value={l.taxRate} what="tax rate" />
+        ) : (
+          <select
+            value={e.taxRate ?? ""}
+            onChange={(ev) => onChange("taxRate", ev.target.value)}
+            disabled={closed}
+            className="field field-sm w-24 cursor-pointer disabled:opacity-60"
+            aria-label={`Tax rate of ${l.name}`}
+          >
+            <option value="">—</option>
+            {rates.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        )}
       </td>
     </>
   );

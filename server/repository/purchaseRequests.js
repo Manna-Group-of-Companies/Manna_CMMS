@@ -10,7 +10,7 @@ import { erpNow, erpToday } from "../integrations/erpnext/time.js";
 import { storeForCompany } from "../integrations/erpnext/stores.js";
 import { catalogProducts } from "./catalog.js";
 import { itemMasterOptions, raiseSapFlag } from "./sapCategories.js";
-import { COMPLETED, ordersFor, receiptProgress, receiptsAgainst, stageOf, toReceiptSummary } from "./purchaseCompletion.js";
+import { COMPLETED, ordersFor, receiptProgress, receiptsAgainst, stageOf, toReceiptSummary, workOf } from "./purchaseCompletion.js";
 
 /**
  * Purchase requests for engineering stock, raised in the CMMS (9 Oct 2026).
@@ -59,7 +59,8 @@ const DOCTYPE = "CMMS Purchase Request";
 const LINE = "CMMS Purchase Request Line";
 
 const FIELDS = ["name", "company", "status", "required_by", "reason", "raised_by", "raised_at", "sap_doc_entry", "sap_doc_number", "po_numbers", "posted_at", "error", "modified",
-  "po_status", "po_vendor_code", "po_vendor_name", "po_date", "po_due_date", "po_remarks", "po_raised_by", "po_raised_at", "po_doc_entry", "po_doc_number", "po_error"];
+  "po_status", "po_vendor_code", "po_vendor_name", "po_date", "po_due_date", "po_remarks", "po_raised_by", "po_raised_at", "po_doc_entry", "po_doc_number", "po_error",
+  "cancel_status", "cancel_reason", "cancel_requested_by", "cancel_requested_at"];
 const LINE_FIELDS = ["parent", "idx", "name", "item", "item_name", "sap_item_code", "qty", "uom", "remarks", "po_qty", "po_price", "po_tax_code",
   "coverage", "quotation", "drop_reason"];
 
@@ -135,6 +136,32 @@ export const linesOpenFor = (row) =>
 
 export const mayQuote = (row) => linesOpenFor(row) && Boolean(row.sap_doc_entry) && (row.lines || []).some((l) => !l.coverage);
 
+/** What a cancel reason can be: it goes into SAP's Comments with the canceller's login. */
+export const CANCEL_REASON_MAX = 140;
+
+/**
+ * Why a request cannot be cancelled now, or "" when it can (27 Oct 2026). Pure.
+ *
+ * Its quotations and POs are cancelled first, one by one (the user's choice) - a cancel never cascades. One still
+ * Queued is on its way to SAP, so it waits for the sync rather than racing it.
+ *
+ * @param quotations [{ id, status }]   orders: the request's CMMS POs [{ name, status }]
+ */
+export const cancelRefusal = (row, quotations = [], orders = []) => {
+  const status = row.status || "Queued";
+  if (row.cancel_status === "Queued") return "Its cancellation is already with the SAP sync.";
+  if (status === "Queued") return "It is on its way to SAP. Wait a few seconds for the sync, then cancel it.";
+  if (status === "Closed" || status === COMPLETED) return `It is ${status}; there is nothing to cancel.`;
+  const liveQuotes = quotations.filter((q) => q.status !== "Cancelled");
+  // A quotation SAP has not got yet (Queued, Failed) is deleted rather than cancelled.
+  if (liveQuotes.length) return `Cancel or delete its quotation${liveQuotes.length > 1 ? "s" : ""} first: ${liveQuotes.map((q) => q.id).join(", ")}.`;
+  const liveOrders = orders.filter((o) => o.status !== "Closed");
+  if (liveOrders.length) return `Cancel its purchase order${liveOrders.length > 1 ? "s" : ""} first: ${liveOrders.map((o) => o.name).join(", ")}.`;
+  if (row.po_status && row.po_status !== "Failed") return "A PO was made on it before quotations; cancel that PO in SAP.";
+  if (status === "Ordered") return "SAP has a PO for it. Cancel that PO in SAP first.";
+  return "";
+};
+
 /** Statuses whose goods can be coming in, so their receipts are looked up. */
 const RECEIVING = ["Ordered", COMPLETED];
 
@@ -176,6 +203,8 @@ const toRequest = (row, lines = [], got = null, quotations = [], orders = []) =>
   // Where it stands for the people waiting on it: Quotation Made, Ordered and Completed as soon as they are
   // true, without waiting for the sync. `status` stays what SAP says, and what the actions go by.
   stage: stageOf({ ...row, lines }, quotations, orders),
+  // The purchase manager's side alone: Pending until a PO is made for every line, then Complete (27 Oct 2026).
+  work: workOf({ ...row, lines }, orders),
   requiredBy: row.required_by || null,
   reason: row.reason || "",
   raisedBy: row.raised_by || "",
@@ -190,6 +219,14 @@ const toRequest = (row, lines = [], got = null, quotations = [], orders = []) =>
   order: toOrder(row, lines),
   quotations,
   mayQuote: mayQuote({ ...row, lines }),
+  // Cancelling from the CMMS (27 Oct 2026). Who may press it is the controller's; whether it can be is this.
+  cancel: {
+    status: row.cancel_status || "",
+    reason: row.cancel_reason || "",
+    by: row.cancel_requested_by || "",
+    at: row.cancel_requested_at || null,
+    refusal: cancelRefusal(row, quotations, orders),
+  },
   updatedAt: row.modified,
 });
 
@@ -243,6 +280,40 @@ export const getRequest = async (id) => {
   const quotations = await quotationsForRequests([doc.name]);
   const orders = await ordersOf([doc.name]);
   return toRequest(doc, doc.lines || [], got.get(doc.name), quotations.get(doc.name) || [], orders.get(doc.name) || []);
+};
+
+/** A cancel reason, checked: required, and short enough for SAP's Comments. */
+export const cancelReason = (value) => {
+  const reason = tidy(value);
+  if (!reason) throw badRequest("Say why it is being cancelled.");
+  if (reason.length > CANCEL_REASON_MAX) throw badRequest(`Keep the reason to ${CANCEL_REASON_MAX} characters.`);
+  return reason;
+};
+
+/**
+ * Cancels a request (27 Oct 2026). One SAP has is cancelled there by the sync (PurchaseRequests(n)/Cancel), which
+ * then turns it Closed; one SAP refused, and so never had, is closed here at once.
+ */
+export const cancelRequest = async (id, body = {}, user) => {
+  const doc = await getDoc(DOCTYPE, tidy(id)).catch((error) => {
+    if (error?.status === 404) return null;
+    throw error;
+  });
+  if (!doc) throw notFound("Purchase request not found");
+  const quotations = (await quotationsForRequests([doc.name])).get(doc.name) || [];
+  const orders = (await ordersOf([doc.name])).get(doc.name) || [];
+  const refusal = cancelRefusal(doc, quotations, orders);
+  if (refusal) throw badRequest(refusal);
+  const reason = cancelReason(body.reason);
+  const at = erpNow();
+  const stamp = { cancel_reason: reason, cancel_requested_by: user?.email || "", cancel_requested_at: at };
+  if (!doc.sap_doc_entry) {
+    await updateDoc(DOCTYPE, doc.name, { ...stamp, cancel_status: "Done", status: "Closed", error: `Cancelled in the CMMS by ${user?.email || "?"} ${at} - SAP never had it: ${reason}` });
+  } else {
+    await updateDoc(DOCTYPE, doc.name, { ...stamp, cancel_status: "Queued", error: "" });
+    await raiseSapFlag(user?.email);
+  }
+  return getRequest(doc.name);
 };
 
 /**

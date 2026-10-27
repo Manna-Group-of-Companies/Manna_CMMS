@@ -86,7 +86,8 @@
   - the chosen vendor's quotation, entered by the purchase manager against a request in SAP: a SAP Purchase
   Quotation (PurchaseQuotations) for the vendor, DocDueDate = valid until, RequriedDate = the request's required
   by, each line based on the request's line (BaseType 1470000113) in the vendor's unit (MeasureUnit, an estimated
-  UnitsOfMeasurment - the measured one comes with the goods receipt), Reference2 = "PQ<yy>-<n>". Only items on
+  UnitsOfMeasurment - the measured one comes with the goods receipt), Reference2 = "PQ<yy>-<n>". No tax code and no
+  HSN on a quotation or any PO (27 Oct 2026): the goods receipt brings both off the bill. Only items on
   the Manual UoM group. Posted with the SAP number, or Failed with SAP's reason; the item's purchase unit then
   follows the vendor's unit, in SAP and on the ERPNext item (custom_purchase_uom), for the record only.
 
@@ -354,6 +355,17 @@ try {
     if (-not $postQuotes -and $quotes.Count) { Log INFO ("{0} quotation(s) left Queued - posting them is off (post_purchase_quotations)." -f $quotes.Count); $quotes = @() }
     if (-not $postQuotePos -and $qorders.Count) { Log INFO ("{0} PO(s) from quotations left Queued - posting them is off (post_quotation_purchase_orders)." -f $qorders.Count); $qorders = @() }
     if (-not $postPrs -and $prs.Count) { Log INFO ("{0} purchase request(s) left Queued - posting them is off (post_purchase_requests)." -f $prs.Count); $prs = @() }
+    # Cancellations asked for in the CMMS (27 Oct 2026, PASS X), each behind the switch that posts its kind of document.
+    # Read in a try: cancel_status exists only once setup-cancel.js has been applied.
+    $cancels = @()
+    try {
+        foreach ($cd in @(@{ dt = 'CMMS Purchase Request'; on = $postPrs }, @{ dt = 'CMMS Purchase Quotation'; on = $postQuotes }, @{ dt = 'CMMS Purchase Order'; on = $postQuotePos })) {
+            $rows = @(Erp-List $cd.dt @('name') '[["cancel_status","=","Queued"]]')
+            if (-not $rows.Count) { continue }
+            if (-not $cd.on) { Log INFO ("{0} {1} cancellation(s) left Queued - its switch is off." -f $rows.Count, $cd.dt); continue }
+            foreach ($r in $rows) { $cancels += [pscustomobject]@{ dt = $cd.dt; doc = (Erp-Get (Res $cd.dt $r.name)).data } }
+        }
+    } catch { Log WARN ("cancellations not read (run setup-cancel.js --apply?): {0}" -f $_.Exception.Message) }
     # Spares issued to breakdowns, with their lines. Read in a try: the doctype exists only once
     # setup-goods-issue.js has been applied, and its absence must not stop the rest of the run.
     $issues = @()
@@ -401,7 +413,7 @@ try {
     # The watcher passes -NoRoutineFallback on a safety-net run (fix 1, 27 Oct 2026): a safety-net Job with nothing queued
     # must stop. Otherwise a record the sync left Queued on purpose (switch off, skip_companies, held waiting for HSN) would
     # fire the safety net every 30 s, each Job falling through to a Routine - every company logged in to about twice a minute.
-    $anyWork = ($creates.Count + $edits.Count + $receipts.Count + $groupReqs.Count + $prs.Count + $orders.Count + $quotes.Count + $qorders.Count + $issues.Count + $hsnQueued.Count) -gt 0
+    $anyWork = ($creates.Count + $edits.Count + $receipts.Count + $groupReqs.Count + $prs.Count + $orders.Count + $quotes.Count + $qorders.Count + $issues.Count + $hsnQueued.Count + $cancels.Count) -gt 0
     if ($Mode -eq 'Job' -and -not $anyWork -and -not $vendRefresh.Count) {
         if ($NoRoutineFallback) { Log INFO 'Job mode: nothing queued and no vendor refresh - -NoRoutineFallback is set, so exiting without a Routine run.' }
         else { Log INFO 'Job mode: nothing queued and no vendor refresh - running Routine instead (today''s app still presses Sync with nothing queued).'; $Mode = 'Routine' }
@@ -507,7 +519,7 @@ try {
     function Work-For([string] $Abbr) {
         $o = $options.$Abbr
         if (-not $o) { return $null }
-        if (-not $work.ContainsKey($o.sap_db)) { $work[$o.sap_db] = @{ abbr = $Abbr; opt = $o; creates = New-Object System.Collections.ArrayList; edits = New-Object System.Collections.ArrayList; receipts = New-Object System.Collections.ArrayList; groups = New-Object System.Collections.ArrayList; prs = New-Object System.Collections.ArrayList; openPrs = New-Object System.Collections.ArrayList; issues = New-Object System.Collections.ArrayList; orders = New-Object System.Collections.ArrayList; quotes = New-Object System.Collections.ArrayList; qorders = New-Object System.Collections.ArrayList; hsnReqs = New-Object System.Collections.ArrayList } }
+        if (-not $work.ContainsKey($o.sap_db)) { $work[$o.sap_db] = @{ abbr = $Abbr; opt = $o; creates = New-Object System.Collections.ArrayList; edits = New-Object System.Collections.ArrayList; receipts = New-Object System.Collections.ArrayList; groups = New-Object System.Collections.ArrayList; prs = New-Object System.Collections.ArrayList; openPrs = New-Object System.Collections.ArrayList; issues = New-Object System.Collections.ArrayList; orders = New-Object System.Collections.ArrayList; quotes = New-Object System.Collections.ArrayList; qorders = New-Object System.Collections.ArrayList; hsnReqs = New-Object System.Collections.ArrayList; cancels = New-Object System.Collections.ArrayList } }
         $work[$o.sap_db]
     }
     # Routine mode: every company, for its open PO lines, PASS E and the options refresh.
@@ -542,6 +554,11 @@ try {
         $w = Work-For "$($po.company)"
         if (-not $w) { $result.failures++; Log ERROR ("{0}: unknown SAP company '{1}'" -f $po.name, $po.company); continue }
         [void]$w.qorders.Add($po)
+    }
+    foreach ($cx in $cancels) {
+        $w = Work-For "$($cx.doc.company)"
+        if (-not $w) { $result.failures++; Log ERROR ("{0}: unknown SAP company '{1}'" -f $cx.doc.name, $cx.doc.company); continue }
+        [void]$w.cancels.Add($cx)
     }
     # The HSN requests to create, by company (PASS H). Restored 24 Oct 2026: the merge 7aa1cc3 dropped this and the
     # hsnReqs list from Work-For, so PASS H had nothing to create and every receipt or quotation waiting on a new code
@@ -653,14 +670,14 @@ try {
             Log INFO ("SAP login OK: {0} ({1} to create, {2} to edit, {3} receipt(s), {4} spares issue(s), {5} new group(s), {6} purchase request(s), {7} purchase order(s), {8} quotation(s), {9} PO(s) from quotations)" -f $db, $w.creates.Count, $w.edits.Count, $w.receipts.Count, $w.issues.Count, $w.groups.Count, $w.prs.Count, $w.orders.Count, $w.quotes.Count, $w.qorders.Count)
 
             # This company's HSN list: digits -> AbsEntry (ChapterID). Only read when HSN is written.
-            # Quotations too: each line carries its HSN's entry (HSNEntry).
             # Fix 6 (27 Oct 2026): in Job mode, read only when this company's queued work actually needs it. The Routine
             # keeps the old "whenever HSN is editable OR pulling from SAP" rule, so the UI's HSN list stays fresh.
+            # Quotations no longer need it: they carry no HSN since the same day.
             $hsn = @{}; $hsnList = New-Object System.Collections.ArrayList
             $needHsn = if ($isRoutine) {
-                $w.creates.Count -gt 0 -or ($editFields -contains 'ChapterID') -or $pullFromSap -or $w.hsnReqs.Count -gt 0 -or $w.quotes.Count -gt 0
+                $w.creates.Count -gt 0 -or ($editFields -contains 'ChapterID') -or $pullFromSap -or $w.hsnReqs.Count -gt 0
             } else {
-                $w.creates.Count -gt 0 -or ($w.edits.Count -gt 0 -and ($editFields -contains 'ChapterID')) -or $w.hsnReqs.Count -gt 0 -or $w.quotes.Count -gt 0
+                $w.creates.Count -gt 0 -or ($w.edits.Count -gt 0 -and ($editFields -contains 'ChapterID')) -or $w.hsnReqs.Count -gt 0
             }
             if ($needHsn) {
                 foreach ($h in (Sl-All 'IndiaHsn?$select=AbsEntry,Chapter,Heading,SubHeading' $jar)) {
@@ -1020,6 +1037,94 @@ try {
                 $result.items += [pscustomobject]$entry
             }
 
+            # ---------------- PASS X: cancellations asked for in the CMMS (27 Oct 2026)
+            # Cancel was pressed with a reason, and the CMMS checked it may be (cancelRefusal in purchaseRequests.js,
+            # purchaseQuotations.js, purchaseOrders.js) and set cancel_status = Queued. SAP cancels the document - every
+            # one of the three has a Cancel action - and the CMMS follows:
+            #   request    Closed.
+            #   quotation  Cancelled, its request lines open again for a new quotation.
+            #   PO         Closed (SAP refuses one with a GRPO on it); its quotation Cancelled, as SAP keeps that closed;
+            #              its request lines open for a new quotation (the user's choice), and the request back to
+            #              In SAP when no other PO is live. Tested in HITECH_RUBBER the same day: the request's lines stay
+            #              open in SAP after its quotation's PO is cancelled, and a new quotation is based on them.
+            # The note on each starts "Cancelled in SAP", as rule 7's do, so the routine run reads them alike. One already
+            # cancelled in SAP is taken as done. SAP's refusal leaves cancel_status Failed with the reason; Cancel can be
+            # pressed again.
+            foreach ($cx in $w.cancels) {
+                $d = $cx.doc
+                $entity = switch ($cx.dt) { 'CMMS Purchase Request' { 'PurchaseRequests' } 'CMMS Purchase Quotation' { 'PurchaseQuotations' } default { 'PurchaseOrders' } }
+                $entry = [ordered]@{ kind = "cancel $entity"; request = "$($d.name)"; sap_db = $db; action = ''; sap_doc = "$($d.sap_doc_number)"; error = '' }
+                try {
+                    if ([int]("0$($d.sap_doc_entry)") -le 0) { throw "SAP has no document for it" }
+                    $rd = Invoke-Sl -Method GET -Url ("$slBase/{0}({1})?`$select=DocEntry,DocNum,DocumentStatus,Cancelled" -f $entity, [int]$d.sap_doc_entry) -Jar $jar
+                    if ($rd.Http -ne '200') { Sl-Fail $rd "read $entity $($d.sap_doc_number)" }
+                    $sd = $rd.Body | ConvertFrom-Json
+                    if ($DryRun) { $entry.action = "would cancel $entity $($sd.DocNum)"; Log INFO ("{0} [{1}]: would cancel {2} {3}" -f $d.name, $db, $entity, $sd.DocNum) }
+                    else {
+                        # Already closed in SAP: nothing is left to undo there, and SAP refuses to cancel it ("Document is
+                        # already closed"), so the CMMS side is finished as for a cancel. A request is closed by a PO for its
+                        # whole quantity, even once that PO is cancelled (PR 54, PR-2026-00416, 27 Oct 2026); the server
+                        # keeps a PO with goods received from getting here.
+                        $already = "$($sd.Cancelled)" -eq 'tYES' -or "$($sd.DocumentStatus)" -eq 'bost_Close'
+                        if (-not $already) {
+                            $cr = Invoke-Sl -Method POST -Url ("$slBase/{0}({1})/Cancel" -f $entity, [int]$d.sap_doc_entry) -Jar $jar
+                            if ($cr.Http -ne '204' -and $cr.Http -ne '200') { Sl-Fail $cr "cancel $entity $($sd.DocNum)" }
+                        }
+                        $why = "Cancelled in SAP from the CMMS by $($d.cancel_requested_by) $(Now-Ist)$(if ($already -and "$($sd.Cancelled)" -ne 'tYES') { ' (SAP had already closed it)' }): $($d.cancel_reason)"
+                        # Request lines a quotation covered, open again for a new quotation.
+                        $reopen = {
+                            param([string] $Request, [string] $Quotation)
+                            $n = 0
+                            if (-not $Request) { return 0 }
+                            foreach ($rl in @((Erp-Get (Res 'CMMS Purchase Request' $Request)).data.lines | Where-Object { "$($_.quotation)" -eq $Quotation -and "$($_.coverage)" -eq 'Quoted' })) {
+                                $null = Erp-Send POST '/api/method/frappe.client.set_value' @{ doctype = 'CMMS Purchase Request Line'; name = "$($rl.name)"; fieldname = @{ coverage = ''; quotation = '' } }
+                                $n++
+                            }
+                            $n
+                        }
+                        if ($cx.dt -eq 'CMMS Purchase Request') {
+                            $null = Erp-Send PUT (Res $cx.dt $d.name) @{ status = 'Closed'; cancel_status = 'Done'; error = $why }
+                            $note = 'request closed'
+                        } elseif ($cx.dt -eq 'CMMS Purchase Quotation') {
+                            $null = Erp-Send PUT (Res $cx.dt $d.name) @{ status = 'Cancelled'; cancel_status = 'Done'; error = $why }
+                            $quoteStatus["$($d.name)"] = 'Cancelled'
+                            $note = "$(& $reopen "$($d.purchase_request)" "$($d.name)") request line(s) open again"
+                        } else {
+                            $null = Erp-Send PUT (Res $cx.dt $d.name) @{ status = 'Closed'; cancel_status = 'Done'; error = $why }
+                            $qn = "$($d.purchase_quotation)"
+                            $null = Erp-Send PUT (Res 'CMMS Purchase Quotation' $qn) @{ status = 'Cancelled'; error = "Its PO $($d.name) (SAP $($sd.DocNum)) was cancelled from the CMMS $(Now-Ist), and SAP keeps this quotation closed. Its request lines are open for a new quotation." }
+                            $quoteStatus[$qn] = 'Cancelled'
+                            $k = "$($d.purchase_request)"
+                            $n = & $reopen $k $qn
+                            # This run's own view of the request's POs, as rule 7 keeps it.
+                            if ($quotePosByPr.ContainsKey($k)) { $quotePosByPr[$k] = @($quotePosByPr[$k] | Where-Object { $_ -ne "$($sd.DocNum)" }); if (-not $quotePosByPr[$k].Count) { $quotePosByPr.Remove($k) } }
+                            if (-not $quoteCancelledByPr.ContainsKey($k)) { $quoteCancelledByPr[$k] = @() }; $quoteCancelledByPr[$k] += "$($sd.DocNum)"
+                            # Back to In SAP, so it can be quoted again at once, when no other PO of it is live.
+                            if ($k) {
+                                $req = (Erp-Get (Res 'CMMS Purchase Request' $k)).data
+                                $others = @(Erp-List 'CMMS Purchase Order' @('name') ('[["purchase_request","=",{0}],["status","!=","Closed"],["name","!=",{1}]]' -f (ConvertTo-Json -InputObject $k -Compress), (ConvertTo-Json -InputObject "$($d.name)" -Compress)))
+                                $left = @("$($req.po_numbers)" -split '\s*,\s*' | Where-Object { $_ -and $_ -ne "$($sd.DocNum)" })
+                                $body = [ordered]@{ po_numbers = ($left -join ', ') }
+                                if (-not $others.Count -and "$($req.status)" -eq 'Ordered' -and -not "$($req.po_status)".Trim()) { $body.status = 'In SAP' }
+                                $null = Erp-Send PUT (Res 'CMMS Purchase Request' $k) $body
+                            }
+                            $note = "quotation $qn cancelled, $n request line(s) open for a new quotation"
+                        }
+                        $entry.action = "cancelled $entity $($sd.DocNum)"; $result.changed++
+                        Log INFO ("{0} [{1}]: {2} {3} {4} - {5}" -f $d.name, $db, $entity, $sd.DocNum, $(if ($already) { 'already closed in SAP, finished in the CMMS' } else { 'cancelled in SAP' }), $note)
+                    }
+                } catch {
+                    $msg = $_.Exception.Message
+                    $entry.error = $msg; $result.failures++
+                    Log ERROR ("{0} [{1}]: not cancelled: {2}" -f $d.name, $db, $msg)
+                    if (-not $DryRun) {
+                        try { $null = Erp-Send PUT (Res $cx.dt $d.name) @{ cancel_status = 'Failed'; error = "Not cancelled: $msg" } }
+                        catch { Log WARN ("{0}: could not write the refusal back: {1}" -f $d.name, $_.Exception.Message) }
+                    }
+                }
+                $result.items += [pscustomobject]$entry
+            }
+
             # ---------------- PASS Q: purchase quotations (post_purchase_quotations, 24 Oct 2026)
             # The chosen vendor's quotation, entered in the CMMS against a request already in SAP: a SAP Purchase Quotation
             # (PurchaseQuotations) whose lines are based on the request's lines (BaseType 1470000113), in the vendor's unit.
@@ -1066,51 +1171,37 @@ try {
                         $rr = Invoke-Sl -Method GET -Url ("$slBase/PurchaseRequests({0})?`$select=DocEntry,DocNum,DocumentStatus,DocumentLines" -f [int]$rq.sap_doc_entry) -Jar $jar
                         if ($rr.Http -ne '200') { Sl-Fail $rr 'read the purchase request' }
                         $rqDoc = $rr.Body | ConvertFrom-Json
-                        if ("$($rqDoc.DocumentStatus)" -eq 'bost_Close') { throw "SAP has closed purchase request $($rqDoc.DocNum)" }
+                        # A request SAP has closed is quoted all the same (27 Oct 2026): a PO for a line's whole quantity
+                        # uses the line up, and cancelling the PO does not give it back - so a request whose PO was
+                        # cancelled has its lines open in the CMMS and closed in SAP (PR 54, PR-2026-00416). Such a line
+                        # goes on the quotation with no base document, which SAP takes (tested the same day); the CMMS
+                        # keeps the tie to the request. A request the CMMS itself closed never reaches here.
                         $baseOf = @{}; foreach ($bl in @($rqDoc.DocumentLines)) { $baseOf["$($bl.ItemCode)".Trim()] = $bl }
                         $comments = ("CMMS {0} by {1}{2}" -f $q.name, $q.raised_by, $(if ((Norm $q.remarks)) { ': ' + (Norm $q.remarks) } else { '' }))
                         if ($comments.Length -gt 254) { $comments = $comments.Substring(0, 254) }
                         $docLines = @()
-                        # Request lines posted while their item had no HSN, and the HSN entry each should carry. SAP copies a
-                        # line's HSN from the line it is based on and ignores the one sent with it (PQ-2026-00352, refused
-                        # with HSNEntry 59 on the line: its request line had none), so the request line gets it first.
-                        $prHsn = @()
+                        # No tax code and no HSN on a quotation (27 Oct 2026): both come off the bill, on the goods receipt.
+                        # Tested in HITECH_RUBBER the same day - SAP takes a request, quotation and PO with neither, and asks
+                        # for the HSN only on a GRPO line with a GST tax code. SAP may still default a tax code onto a line
+                        # whose item has an HSN; the GRPO's own tax code is what accounts invoice from.
                         foreach ($l in $lines) {
                             $code = "$($l.sap_item_code)".Trim()
                             $bl = $baseOf[$code]
                             if (-not $bl) { throw ("{0} is not on SAP purchase request {1}" -f $code, $rqDoc.DocNum) }
-                            if ("$($bl.LineStatus)" -eq 'bost_Close') { throw ("{0}'s line on SAP purchase request {1} is already closed" -f $code, $rqDoc.DocNum) }
                             # The vendor's unit is a free-text unit on a Manual-group item only.
-                            $ir = Invoke-Sl -Method GET -Url ((Key-Url $code) + '?$select=ItemCode,UoMGroupEntry,InventoryUOM,ChapterID') -Jar $jar
+                            $ir = Invoke-Sl -Method GET -Url ((Key-Url $code) + '?$select=ItemCode,UoMGroupEntry,InventoryUOM') -Jar $jar
                             if ($ir.Http -ne '200') { Sl-Fail $ir "read item $code" }
                             $it = $ir.Body | ConvertFrom-Json
                             if ([int]$it.UoMGroupEntry -ne -1) { throw ("{0} is on SAP UoM group {1}; a vendor's unit works only for items on the Manual group" -f $code, $it.UoMGroupEntry) }
-                            $ln = [ordered]@{ BaseType = 1470000113; BaseEntry = [int]$rq.sap_doc_entry; BaseLine = [int]$bl.LineNum; Quantity = [double]$l.vendor_qty; UnitPrice = [double]$l.price; TaxCode = (Norm $l.tax_code) }
+                            $ln = if ("$($bl.LineStatus)" -eq 'bost_Close') {
+                                Log INFO ("{0} [{1}]: {2}'s line on SAP purchase request {3} is closed (its PO was cancelled) - quoted with no base document" -f $q.name, $db, $code, $rqDoc.DocNum)
+                                [ordered]@{ ItemCode = $code; WarehouseCode = $(if ("$($bl.WarehouseCode)".Trim()) { "$($bl.WarehouseCode)" } else { $whOf }); Quantity = [double]$l.vendor_qty; UnitPrice = [double]$l.price }
+                            } else {
+                                [ordered]@{ BaseType = 1470000113; BaseEntry = [int]$rq.sap_doc_entry; BaseLine = [int]$bl.LineNum; Quantity = [double]$l.vendor_qty; UnitPrice = [double]$l.price }
+                            }
                             $vu = Vendor-Unit $l.vendor_uom $l.inventory_uom ([double]$l.request_qty) ([double]$l.vendor_qty)
                             $ln.MeasureUnit = $vu.unit; $ln.UnitsOfMeasurment = $vu.perUnit
-                            # The HSN the line brought for an item that had none, by its entry in SAP's list (HSNEntry, as SAP
-                            # shows it on a line); SAP needs one on a line with a GST tax code. A line that brought none
-                            # takes the item's own, as SAP fills it in.
-                            $hd = Digits $l.hsn_code
-                            $hsnEntry = 0
-                            if ($hd) {
-                                if (-not $hsn.ContainsKey($hd)) { throw ("HSN {0} of {1} is not in SAP's HSN list yet" -f $hd, $code) }
-                                $hsnEntry = [int]$hsn[$hd]
-                                $ln.HSNEntry = $hsnEntry
-                            } elseif ([int]("0$($it.ChapterID)" -replace '^0-', '-') -gt 0) { $hsnEntry = [int]$it.ChapterID }
-                            if ($hsnEntry -gt 0 -and [int]("0$($bl.HSNEntry)" -replace '^0-', '-') -le 0) {
-                                $prHsn += [ordered]@{ LineNum = [int]$bl.LineNum; HSNEntry = $hsnEntry }
-                            }
                             $docLines += $ln
-                        }
-                        if ($prHsn.Count) {
-                            $what = ($prHsn | ForEach-Object { "line $($_.LineNum) -> $($_.HSNEntry)" }) -join ', '
-                            if ($DryRun) { Log INFO ("{0} [{1}]: would set HSN on SAP purchase request {2}: {3}" -f $q.name, $db, $rqDoc.DocNum, $what) }
-                            else {
-                                $pp = Invoke-Sl -Method PATCH -Url ("$slBase/PurchaseRequests({0})" -f [int]$rq.sap_doc_entry) -Body (@{ DocumentLines = @($prHsn) } | ConvertTo-Json -Compress -Depth 4) -Jar $jar
-                                if ($pp.Http -ne '204' -and $pp.Http -ne '200') { Sl-Fail $pp "set the HSN on purchase request $($rqDoc.DocNum)" }
-                                Log INFO ("{0} [{1}]: HSN set on SAP purchase request {2}: {3}" -f $q.name, $db, $rqDoc.DocNum, $what)
-                            }
                         }
                         $payload = [ordered]@{
                             CardCode = "$($q.vendor_code)".Trim(); DocDate = "$($q.quotation_date)"; TaxDate = "$($q.quotation_date)"
@@ -1187,9 +1278,8 @@ try {
                                 $bl = $baseOf["$($l.sap_item_code)".Trim()]
                                 if (-not $bl) { throw ("{0} is not on SAP purchase request {1}" -f $l.sap_item_code, $po.sap_doc_number) }
                                 if ("$($bl.LineStatus)" -eq 'bost_Close') { throw ("{0}'s line on SAP purchase request {1} is already closed" -f $l.sap_item_code, $po.sap_doc_number) }
-                                $ln = [ordered]@{ BaseType = 1470000113; BaseEntry = [int]$po.sap_doc_entry; BaseLine = [int]$bl.LineNum; Quantity = [double]$l.po_qty; UnitPrice = [double]$l.po_price }
-                                if ((Norm $l.po_tax_code)) { $ln.TaxCode = (Norm $l.po_tax_code) }
-                                $ln
+                                # No tax code on a PO (27 Oct 2026): the goods receipt brings it, off the bill.
+                                [ordered]@{ BaseType = 1470000113; BaseEntry = [int]$po.sap_doc_entry; BaseLine = [int]$bl.LineNum; Quantity = [double]$l.po_qty; UnitPrice = [double]$l.po_price }
                             })
                         }
                         if ($DryRun) { $entry.action = 'would post PurchaseOrders'; $entry.payload = $payload }
@@ -1263,7 +1353,8 @@ try {
                             $bl = $baseOf[$code]
                             if (-not $bl) { throw ("{0} is not on SAP quotation {1}" -f $code, $qDoc.DocNum) }
                             if ("$($bl.LineStatus)" -eq 'bost_Close') { throw ("{0}'s line on SAP quotation {1} is already closed" -f $code, $qDoc.DocNum) }
-                            $ln = [ordered]@{ BaseType = 540000006; BaseEntry = [int]$qt.sap_doc_entry; BaseLine = [int]$bl.LineNum; Quantity = [double]$l.qty; UnitPrice = [double]$l.price; TaxCode = (Norm $l.tax_code) }
+                            # No tax code on a PO (27 Oct 2026): the goods receipt brings it, off the bill.
+                            $ln = [ordered]@{ BaseType = 540000006; BaseEntry = [int]$qt.sap_doc_entry; BaseLine = [int]$bl.LineNum; Quantity = [double]$l.qty; UnitPrice = [double]$l.price }
                             $vu = Vendor-Unit $l.vendor_uom $l.inventory_uom ([double]$askedFor["$($l.quotation_line)"]) ([double]$l.qty)
                             $ln.MeasureUnit = $vu.unit; $ln.UnitsOfMeasurment = $vu.perUnit
                             $docLines += $ln
@@ -1436,7 +1527,9 @@ try {
                                     $docLines += [ordered]@{
                                         BaseType = 22; BaseEntry = $poEntry; BaseLine = [int]$pl.LineNum; WarehouseCode = (& $lineWh $l "$($pl.WarehouseCode)")
                                         Quantity = $vq; UnitPrice = [double]$l.bill_price; MeasureUnit = (Norm $l.vendor_uom); UnitsOfMeasurment = [Math]::Round([double]$l.qty / $vq, 6)
-                                        TaxCode = "$($pl.TaxCode)"
+                                        # The bill's tax code, typed on the receipt (27 Oct 2026); a receipt entered before then has none
+                                        # of its own and keeps the PO line's.
+                                        TaxCode = $(if ((Norm $l.tax_code)) { Norm $l.tax_code } else { "$($pl.TaxCode)" })
                                     }
                                     if ([int]$ol.sap_line -ne [int]$pl.LineNum -and -not $DryRun) { $null = Erp-Send POST '/api/method/frappe.client.set_value' @{ doctype = 'CMMS Purchase Order Line'; name = "$($ol.name)"; fieldname = 'sap_line'; value = [int]$pl.LineNum } }
                                 }
@@ -1449,7 +1542,33 @@ try {
                                 if ("$($pl.LineStatus)" -ne 'bost_Open' -or [double]$pl.RemainingOpenQuantity -lt [double]$l.qty) {
                                     throw ("PO {0} line {1} ({2}) has {3} open in SAP; the receipt is for {4}" -f $po.DocNum, $l.po_line, $pl.ItemCode, $pl.RemainingOpenQuantity, $l.qty)
                                 }
-                                $docLines += [ordered]@{ BaseType = 22; BaseEntry = $poEntry; BaseLine = [int]$l.po_line; Quantity = [double]$l.qty; WarehouseCode = (& $lineWh $l "$($pl.WarehouseCode)") }
+                                $gl = [ordered]@{ BaseType = 22; BaseEntry = $poEntry; BaseLine = [int]$l.po_line; Quantity = [double]$l.qty; WarehouseCode = (& $lineWh $l "$($pl.WarehouseCode)") }
+                                # The bill's tax code (27 Oct 2026); without one SAP copies the PO line's, as before.
+                                if ((Norm $l.tax_code)) { $gl.TaxCode = (Norm $l.tax_code) }
+                                $docLines += $gl
+                            }
+
+                            # SAP takes a GRPO line's HSN from the PO line it is based on, ignores one sent with it, and refuses a
+                            # GST tax code without one (GR-2026-00410, 27 Oct 2026). A PO carries no HSN since quotations stopped
+                            # asking for one, so each PO line without it gets the item's first - which PASS H / PASS B put on the
+                            # item earlier in this run when the bill brought it. Tested in HITECH_RUBBER the same day (PO 303).
+                            $poHsn = @()
+                            foreach ($gl in $docLines) {
+                                $bl = @($po.DocumentLines | Where-Object { [int]$_.LineNum -eq [int]$gl.BaseLine })[0]
+                                if ([int]("0$($bl.HSNEntry)" -replace '^0-', '-') -gt 0) { continue }
+                                $ir = Invoke-Sl -Method GET -Url ((Key-Url "$($bl.ItemCode)") + '?$select=ItemCode,ChapterID') -Jar $jar
+                                if ($ir.Http -ne '200') { Sl-Fail $ir "read item $($bl.ItemCode)" }
+                                $ch = [int]("0$(($ir.Body | ConvertFrom-Json).ChapterID)" -replace '^0-', '-')
+                                if ($ch -gt 0) { $poHsn += [ordered]@{ LineNum = [int]$bl.LineNum; HSNEntry = $ch } }
+                            }
+                            if ($poHsn.Count) {
+                                $what = ($poHsn | ForEach-Object { "line $($_.LineNum) -> $($_.HSNEntry)" }) -join ', '
+                                if ($DryRun) { Log INFO ("{0} [{1}]: would set HSN on SAP PO {2}: {3}" -f $rc.name, $db, $po.DocNum, $what) }
+                                else {
+                                    $pp = Invoke-Sl -Method PATCH -Url ("$slBase/PurchaseOrders({0})" -f $poEntry) -Body (@{ DocumentLines = @($poHsn) } | ConvertTo-Json -Compress -Depth 4) -Jar $jar
+                                    if ($pp.Http -ne '204' -and $pp.Http -ne '200') { Sl-Fail $pp "set the HSN on PO $($po.DocNum)" }
+                                    Log INFO ("{0} [{1}]: HSN set on SAP PO {2}: {3}" -f $rc.name, $db, $po.DocNum, $what)
+                                }
                             }
 
                             if ($revalueNil) {

@@ -202,6 +202,12 @@ export const receiptsAgainst = async (requests, api = erp) => {
 };
 
 export const QUOTATION_MADE = "Quotation Made";
+/** Some lines on a quotation, others still to quote (27 Oct 2026): Quotation Made waits for every line. */
+export const PARTLY_QUOTED = "Partially Quoted";
+
+/** The purchase manager's work on a request (27 Oct 2026): pending until a PO is made for it, then complete. */
+export const WORK_PENDING = "Pending";
+export const WORK_COMPLETE = "Complete";
 
 /**
  * Where a request stands for the people waiting on it (26 Oct 2026). Pure.
@@ -211,7 +217,8 @@ export const QUOTATION_MADE = "Quotation Made";
  * back to In SAP, or drop out of the sync. The stage is worked out from the request's quotations and POs
  * instead, and moves the moment one is made:
  *
- *   In SAP -> Quotation Made (a quotation not cancelled in SAP)
+ *   In SAP -> Partially Quoted (a quotation not cancelled in SAP, and a line still on none - 27 Oct 2026)
+ *          -> Quotation Made (every line on a quotation, or dropped)
  *          -> Ordered        (a PO made from one of its quotations, in SAP yet or not; or one made in SAP)
  *          -> Completed      (every line on a Purchased or closed PO - orderProgress, as the timer judges it)
  *
@@ -227,8 +234,39 @@ export const stageOf = (row, quotations = [], orders = []) => {
   const progress = orderProgress(row, orders);
   if (progress.orders.length) return progress.complete ? COMPLETED : ORDERED;
   if (status === ORDERED) return ORDERED;
-  if (quotations.some((q) => q.status !== "Cancelled")) return QUOTATION_MADE;
+  if (quotations.some((q) => q.status !== "Cancelled")) {
+    // A line is waiting while it is on no quotation and not dropped (coverage blank).
+    return (row.lines || []).some((l) => !l.coverage) ? PARTLY_QUOTED : QUOTATION_MADE;
+  }
   return status;
+};
+
+/**
+ * Whether the purchase manager still has work on a request (27 Oct 2026). Pure.
+ *
+ * Complete once a PO is made for every line that is not dropped - made, not received: what happens after is the
+ * supplier's and the store's. Until then it is Pending, wherever it stands (queued for SAP, in SAP, quoted in
+ * part or in full, or ordered for some lines only). Also Complete: a request ordered in SAP itself, or on the
+ * request the old way and taken by SAP, and one Completed or Closed.
+ *
+ * @param row    { status, po_status, lines: [{ name, coverage }] }
+ * @param orders the request's CMMS POs, as ordersFor gives them
+ */
+export const workOf = (row, orders = []) => {
+  const status = row.status || "Queued";
+  if (status === COMPLETED || status === "Closed") return WORK_COMPLETE;
+  const wanted = (row.lines || []).filter((l) => l.coverage !== "Dropped");
+  const live = orders.filter((o) => !cancelledInSap(o));
+  if (live.length) {
+    const ordered = (l) => live.some((o) => (o.lines || []).some((ol) => ol.pr_line === l.name));
+    return wanted.every(ordered) ? WORK_COMPLETE : WORK_PENDING;
+  }
+  // Every line dropped: nothing left to buy.
+  if ((row.lines || []).length && !wanted.length) return WORK_COMPLETE;
+  // Made in SAP itself (the sync turned it Ordered), or a PO made on the request before quotations that SAP took.
+  if (status === ORDERED && !(row.lines || []).some((l) => l.coverage === "Quoted")) return WORK_COMPLETE;
+  if (row.po_status && row.po_status !== "Failed") return WORK_COMPLETE;
+  return WORK_PENDING;
 };
 
 /** The CMMS POs made from these requests' quotations, with the request line each PO line answers. */

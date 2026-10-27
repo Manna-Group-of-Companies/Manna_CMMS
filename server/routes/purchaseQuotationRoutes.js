@@ -1,6 +1,6 @@
 import express from "express";
 
-import { list, requests, options, detail, create, update, remove, retry, order } from "../controllers/purchaseQuotationController.js";
+import { list, requests, options, detail, create, update, remove, retry, cancel, order } from "../controllers/purchaseQuotationController.js";
 import { protect, requireRole } from "../middleware/session.js";
 import { requireView } from "../config/access.js";
 
@@ -21,6 +21,7 @@ router.post("/", BUY, create);
 router.put("/:id", BUY, update);
 router.delete("/:id", BUY, remove);
 router.post("/:id/retry", BUY, retry);
+router.post("/:id/cancel", BUY, cancel);
 router.post("/:id/order", BUY, order);
 
 export default router;

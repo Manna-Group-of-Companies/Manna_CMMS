@@ -1,6 +1,6 @@
 import express from "express";
 
-import { list, detail, retry } from "../controllers/purchaseOrderController.js";
+import { list, detail, retry, cancel } from "../controllers/purchaseOrderController.js";
 import { protect, requireRole } from "../middleware/session.js";
 import { requireView } from "../config/access.js";
 
@@ -14,5 +14,6 @@ const BUY = requireRole("Purchase Manager", "Manager");
 router.get("/", requireView("purchaseOrders"), list);
 router.get("/:id", requireView("purchaseOrders"), detail);
 router.post("/:id/retry", BUY, retry);
+router.post("/:id/cancel", BUY, cancel);
 
 export default router;

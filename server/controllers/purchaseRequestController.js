@@ -111,6 +111,27 @@ export const retryOrder = async (req, res) => {
 };
 
 /** @route POST /api/purchase-requests/:id/retry */
+/**
+ * @route POST /api/purchase-requests/:id/cancel  { reason }
+ * The purchase manager and the Admin cancel any; a Maintenance Manager or plant head only one they raised
+ * themselves (27 Oct 2026).
+ */
+export const cancel = async (req, res) => {
+  try {
+    const found = await requests.getRequest(req.params.id);
+    if (!found || !withinCompany(await scopeFor(req.user), found.company)) {
+      return res.status(404).json({ message: "Purchase request not found" });
+    }
+    const buyer = ["Purchase Manager", "Manager"].includes(req.user?.role);
+    if (!buyer && found.raisedBy !== req.user?.email) {
+      return res.status(403).json({ message: "Only whoever raised it, the purchase manager or the Admin can cancel a purchase request." });
+    }
+    res.json(await withRequestNames(await requests.cancelRequest(req.params.id, req.body, req.user)));
+  } catch (error) {
+    fail(res, error, "Could not cancel the purchase request");
+  }
+};
+
 export const retry = async (req, res) => {
   try {
     const found = await requests.getRequest(req.params.id);

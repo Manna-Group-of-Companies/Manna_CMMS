@@ -3,6 +3,7 @@ import { erpNow, erpToday } from "../integrations/erpnext/time.js";
 import { storeForCompany } from "../integrations/erpnext/stores.js";
 import { raiseSapFlag } from "./sapCategories.js";
 import { QUOTATION_DOCTYPE, isExpired, mayMakeOrder, readQuotation } from "./purchaseQuotations.js";
+import { cancelReason } from "./purchaseRequests.js";
 
 /**
  * Purchase orders made from a quotation (24 Oct 2026).
@@ -13,7 +14,8 @@ import { QUOTATION_DOCTYPE, isExpired, mayMakeOrder, readQuotation } from "./pur
  * posts it straight away.
  *
  *   status       Open -> Purchased (every line received), or Closed (closed or
- *                cancelled in SAP - the CMMS closes and cancels nothing)
+ *                cancelled in SAP, or cancelled from the CMMS since 27 Oct 2026 -
+ *                cancelOrder, which the sync carries out in SAP)
  *   sync_status  Queued -> Posted (SAP PO no.), or Failed (SAP's reason)
  *
  * Kept apart, so a PO is Open while SAP has not got it yet; it is received only
@@ -30,7 +32,8 @@ const DOCTYPE = "CMMS Purchase Order";
 const LINE = "CMMS Purchase Order Line";
 
 const FIELDS = ["name", "purchase_quotation", "purchase_request", "company", "status", "sync_status", "vendor_code", "vendor_name",
-  "po_date", "delivery_date", "remarks", "quotation_expired", "raised_by", "raised_at", "sap_doc_entry", "sap_doc_number", "posted_at", "error", "modified"];
+  "po_date", "delivery_date", "remarks", "quotation_expired", "raised_by", "raised_at", "sap_doc_entry", "sap_doc_number", "posted_at", "error", "modified",
+  "cancel_status", "cancel_reason", "cancel_requested_by", "cancel_requested_at"];
 const LINE_FIELDS = ["parent", "idx", "name", "quotation_line", "pr_line", "item", "item_name", "sap_item_code", "vendor_uom", "inventory_uom",
   "qty", "price", "tax_code", "received_qty"];
 
@@ -60,6 +63,24 @@ const toLine = (row) => {
   };
 };
 
+/**
+ * Why a PO cannot be cancelled now, or "" when it can (27 Oct 2026). Pure.
+ *
+ * Only an Open one nothing has been received against: SAP refuses to cancel a PO with a GRPO on it, and goods in
+ * the store are not undone by a cancel. One still Queued is on its way to SAP, so it waits for the sync.
+ *
+ * @param lines    its line rows (received_qty)
+ * @param receipts goods receipts entered against it and not posted yet: [{ name }]
+ */
+export const cancelRefusal = (row, lines = [], receipts = []) => {
+  if (row.cancel_status === "Queued") return "Its cancellation is already with the SAP sync.";
+  if ((row.status || "Open") !== "Open") return `It is ${row.status}; there is nothing to cancel.`;
+  if (row.sync_status === "Queued") return "It is on its way to SAP. Wait a few seconds for the sync, then cancel it.";
+  if (lines.some((l) => Number(l.received_qty || 0) > 0)) return "Goods have been received against it, so SAP will not cancel it.";
+  if (receipts.length) return `A goods receipt is entered against it (${receipts.map((r) => r.name).join(", ")}); delete that first.`;
+  return "";
+};
+
 const toOrder = (row, lines = []) => ({
   id: row.name,
   quotation: row.purchase_quotation,
@@ -82,6 +103,14 @@ const toOrder = (row, lines = []) => ({
   error: row.error || "",
   lines: lines.map(toLine),
   value: Math.round(lines.reduce((sum, l) => sum + Number(l.qty || 0) * Number(l.price || 0), 0) * 100) / 100,
+  // The receipts waiting against it are checked when Cancel is pressed; the list goes by its lines alone.
+  cancel: {
+    status: row.cancel_status || "",
+    reason: row.cancel_reason || "",
+    by: row.cancel_requested_by || "",
+    at: row.cancel_requested_at || null,
+    refusal: cancelRefusal(row, lines),
+  },
   updatedAt: row.modified,
 });
 
@@ -112,6 +141,7 @@ export const nextOrderName = (year, orderNames = [], oldPoRequests = []) => {
  */
 export const checkOrder = (quotation, body = {}, today = erpToday()) => {
   if (quotation.purchase_order) throw badRequest(`PO ${quotation.purchase_order} has already been made from this quotation.`);
+  if (quotation.cancel_status === "Queued") throw badRequest("This quotation is being cancelled in SAP.");
   if (!mayMakeOrder(quotation)) {
     if (quotation.status === "Cancelled") throw badRequest("This quotation was cancelled in SAP.");
     throw badRequest("SAP does not have this quotation yet, so a PO cannot be made from it. Wait for the sync.");
@@ -150,7 +180,8 @@ export const checkOrder = (quotation, body = {}, today = erpToday()) => {
       inventory_uom: line.inventory_uom,
       qty,
       price: Number(line.price || 0),
-      tax_code: line.tax_code,
+      // No tax code on a PO (27 Oct 2026), even from a quotation saved with one: the goods receipt takes it off the bill.
+      tax_code: "",
       received_qty: 0,
     };
   });
@@ -251,6 +282,39 @@ export const makeOrder = async (quotationId, body = {}, user) => {
   }
   await raiseSapFlag(user?.email);
   return getOrder(created.name);
+};
+
+/**
+ * Cancels a PO (27 Oct 2026). One SAP has is cancelled there by the sync (PurchaseOrders(n)/Cancel), which turns it
+ * Closed, marks its quotation Cancelled - SAP keeps that closed - and opens its request lines for a new quotation
+ * (the user's choice; tested in HITECH_RUBBER the same day: the request's lines stay open in SAP and a new quotation
+ * can be based on them). One SAP refused, and so never had, is closed here at once, and its quotation - still open
+ * in SAP - is free to make a new PO from.
+ */
+export const cancelOrder = async (id, body = {}, user) => {
+  const doc = await getDoc(DOCTYPE, tidy(id)).catch((error) => {
+    if (error?.status === 404) return null;
+    throw error;
+  });
+  if (!doc) throw notFound("Purchase order not found");
+  const receipts = await listDocs("CMMS Goods Receipt", {
+    fields: ["name"],
+    filters: [["CMMS Goods Receipt", "purchase_order", "=", doc.name], ["CMMS Goods Receipt", "status", "in", ["Queued", "Failed"]]],
+    limit: 20,
+  });
+  const refusal = cancelRefusal(doc, doc.lines || [], receipts);
+  if (refusal) throw badRequest(refusal);
+  const reason = cancelReason(body.reason);
+  const at = erpNow();
+  const stamp = { cancel_reason: reason, cancel_requested_by: user?.email || "", cancel_requested_at: at };
+  if (doc.sync_status === "Failed") {
+    await updateDoc(DOCTYPE, doc.name, { ...stamp, cancel_status: "Done", status: "Closed", error: `Cancelled in the CMMS by ${user?.email || "?"} ${at} - SAP never had it: ${reason}` });
+    await updateDoc(QUOTATION_DOCTYPE, doc.purchase_quotation, { purchase_order: "" });
+  } else {
+    await updateDoc(DOCTYPE, doc.name, { ...stamp, cancel_status: "Queued" });
+    await raiseSapFlag(user?.email);
+  }
+  return getOrder(doc.name);
 };
 
 /** Sends a PO that SAP refused back to the SAP server as it is. */

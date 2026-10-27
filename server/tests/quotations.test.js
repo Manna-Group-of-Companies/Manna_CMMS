@@ -9,8 +9,9 @@ import { describe, it } from "node:test";
 
 import { maySee } from "../config/access.js";
 import { checkDrop, mayQuote } from "../repository/purchaseRequests.js";
-import { checkQuotation, gstKindFor, isExpired, mayEdit, mayMakeOrder, newHsnCodes, taxCodesFor } from "../repository/purchaseQuotations.js";
+import { checkQuotation, checkTaxCode, gstKindFor, isExpired, mayEdit, mayMakeOrder, taxCodesFor } from "../repository/purchaseQuotations.js";
 import { checkOrder, nextOrderName } from "../repository/purchaseOrders.js";
+import { billTaxes } from "../repository/goodsReceipts.js";
 
 const TODAY = "2026-10-24";
 const refusal = (fn, pattern) => assert.throws(fn, (e) => e.status >= 400 && pattern.test(e.message));
@@ -29,16 +30,13 @@ const request = (extra = {}, lines = null) => ({
 });
 const published = {
   vendors: [{ code: "V1", name: "Lube Co" }],
-  taxCodes: [{ code: "G18", name: "GST 18", rate: 18 }],
   units: ["KGS", "NOS", "DRUM", "BAG"],
-  // Both request items already carry an HSN, so their lines need none.
-  itemHsn: { "HRI-ENG-7": "27101980", "HRI-ENG-4": "73079990" },
 };
 const body = (extra = {}) => ({
   vendorCode: "V1",
   quotationDate: "2026-10-23",
   validUntil: "2026-11-23",
-  lines: [{ lineId: "l1", vendorUnit: "drum", qty: 5, price: 8500, taxCode: "G18" }],
+  lines: [{ lineId: "l1", vendorUnit: "drum", qty: 5, price: 8500 }],
   ...extra,
 });
 
@@ -72,19 +70,27 @@ describe("a quotation for a purchase request", () => {
   it("keeps the vendor's unit as SAP spells it, and the request's own unit beside it", () => {
     const q = checkQuotation(request(), body(), published, TODAY);
     assert.equal(q.vendor_name, "Lube Co");
-    assert.deepEqual(q.lines.map((l) => [l.pr_line, l.vendor_uom, l.vendor_qty, l.price, l.tax_code, l.request_qty, l.inventory_uom]), [
-      ["l1", "DRUM", 5, 8500, "G18", 100, "KGS"],
+    assert.deepEqual(q.lines.map((l) => [l.pr_line, l.vendor_uom, l.vendor_qty, l.price, l.request_qty, l.inventory_uom]), [
+      ["l1", "DRUM", 5, 8500, 100, "KGS"],
     ]);
+  });
+
+  it("asks for no tax code and no HSN - the goods receipt takes both off the bill", () => {
+    // 27 Oct 2026: SAP takes a quotation and a PO with neither (tested in HITECH_RUBBER).
+    const sent = body({ lines: [{ lineId: "l1", vendorUnit: "DRUM", qty: 5, price: 8500, taxCode: "G18", hsnCode: "27101980" }] });
+    const [line] = checkQuotation(request(), sent, published, TODAY).lines;
+    assert.equal(line.tax_code, "", "a tax code sent anyway is not kept");
+    assert.equal(line.hsn_code, "", "nor an HSN");
+    assert.equal(checkQuotation(request(), body(), published, TODAY).lines.length, 1, "a line with neither is a whole line");
   });
 
   it("refuses what SAP would, and a unit SAP does not have", () => {
     refusal(() => checkQuotation(request(), body({ vendorCode: "NOPE" }), published, TODAY), /not among the SAP suppliers/);
     refusal(() => checkQuotation(request(), body({ quotationDate: "2026-10-25" }), published, TODAY), /future/);
     refusal(() => checkQuotation(request(), body({ validUntil: "2026-10-01" }), published, TODAY), /expire before/);
-    refusal(() => checkQuotation(request(), body({ lines: [{ lineId: "l1", vendorUnit: "BARREL", qty: 5, price: 1, taxCode: "G18" }] }), published, TODAY), /not a unit set up in SAP/);
-    refusal(() => checkQuotation(request(), body({ lines: [{ lineId: "l1", vendorUnit: "DRUM", qty: 0, price: 1, taxCode: "G18" }] }), published, TODAY), /more than zero/);
-    refusal(() => checkQuotation(request(), body({ lines: [{ lineId: "l1", vendorUnit: "DRUM", qty: 5, price: 0, taxCode: "G18" }] }), published, TODAY), /unit price/);
-    refusal(() => checkQuotation(request(), body({ lines: [{ lineId: "l1", vendorUnit: "DRUM", qty: 5, price: 1, taxCode: "" }] }), published, TODAY), /tax code/);
+    refusal(() => checkQuotation(request(), body({ lines: [{ lineId: "l1", vendorUnit: "BARREL", qty: 5, price: 1 }] }), published, TODAY), /not a unit set up in SAP/);
+    refusal(() => checkQuotation(request(), body({ lines: [{ lineId: "l1", vendorUnit: "DRUM", qty: 0, price: 1 }] }), published, TODAY), /more than zero/);
+    refusal(() => checkQuotation(request(), body({ lines: [{ lineId: "l1", vendorUnit: "DRUM", qty: 5, price: 0 }] }), published, TODAY), /unit price/);
     refusal(() => checkQuotation(request(), body({ lines: [] }), published, TODAY), /at least one/);
     refusal(() => checkQuotation(request(), body(), { ...published, units: [] }), /unit list/);
   });
@@ -107,7 +113,7 @@ describe("a quotation for a purchase request", () => {
   });
 });
 
-describe("GST on a quotation line follows where the supplier is", () => {
+describe("GST on a bill's line follows where the supplier is", () => {
   // SAP's own tax codes, as the sync publishes them, kinds from their components.
   const taxCodes = [
     { code: "CG+SG@18", rate: 18, kind: "cgst_sgst" },
@@ -116,7 +122,6 @@ describe("GST on a quotation line follows where the supplier is", () => {
     { code: "EXEMPT", rate: 0, kind: "other" },
   ];
   const withStates = (extra = {}) => ({
-    ...published,
     taxCodes,
     companyState: "KL",
     vendors: [
@@ -126,7 +131,7 @@ describe("GST on a quotation line follows where the supplier is", () => {
     ],
     ...extra,
   });
-  const line = (taxCode) => ({ lines: [{ lineId: "l1", vendorUnit: "NOS", qty: 10, price: 120, taxCode }] });
+  const check = (vendor, code, taxes = withStates()) => checkTaxCode(taxes, vendor, code, "Grease");
 
   it("takes CGST+SGST from a supplier in the company's own state, and IGST from any other", () => {
     assert.equal(gstKindFor("KL", "KL"), "cgst_sgst");
@@ -138,69 +143,60 @@ describe("GST on a quotation line follows where the supplier is", () => {
     assert.equal(taxCodesFor(taxCodes, null).length, 4);
   });
 
+  it("is asked for, and must be one SAP has", () => {
+    refusal(() => check("S-1050", ""), /Give the tax code for Grease - it is on the bill/);
+    refusal(() => check("S-1050", "G99"), /not one SAP has/);
+  });
+
   it("refuses EXEMPT from a same-state supplier, as SAP refused PQ-2026-00352", () => {
-    refusal(() => checkQuotation(request(), body({ vendorCode: "S-1050", ...line("EXEMPT") }), withStates(), TODAY), /in KL, the company's own state.*CGST\+SGST/);
-    assert.equal(checkQuotation(request(), body({ vendorCode: "S-1050", ...line("CG+SG@18") }), withStates(), TODAY).lines[0].tax_code, "CG+SG@18");
+    refusal(() => check("S-1050", "EXEMPT"), /in KL, the company's own state.*CGST\+SGST/);
+    assert.equal(check("S-1050", "CG+SG@18"), "CG+SG@18");
   });
 
   it("refuses CGST+SGST from another state's supplier, as SAP refused PQ-2026-00350 at first", () => {
-    refusal(() => checkQuotation(request(), body({ vendorCode: "S-1001", ...line("CG+SG@18") }), withStates(), TODAY), /in KT, not the company's state \(KL\).*IGST/);
-    assert.equal(checkQuotation(request(), body({ vendorCode: "S-1001", ...line("IGST@18") }), withStates(), TODAY).lines[0].tax_code, "IGST@18");
+    refusal(() => check("S-1001", "CG+SG@18"), /in KT, not the company's state \(KL\).*IGST/);
+    assert.equal(check("S-1001", "IGST@18"), "IGST@18");
   });
 
   it("leaves the choice to SAP when a state is not known", () => {
-    assert.equal(checkQuotation(request(), body({ vendorCode: "S-9999", ...line("EXEMPT") }), withStates(), TODAY).lines[0].tax_code, "EXEMPT");
-    assert.equal(checkQuotation(request(), body({ vendorCode: "S-1050", ...line("EXEMPT") }), withStates({ companyState: "" }), TODAY).lines[0].tax_code, "EXEMPT");
+    assert.equal(check("S-9999", "EXEMPT"), "EXEMPT");
+    assert.equal(check("S-1050", "EXEMPT", withStates({ companyState: "" })), "EXEMPT");
   });
 });
 
-describe("an item with no HSN takes one on the quotation line", () => {
-  // As PQ-2026-00352: Air Filter Element had no HSN, and SAP refused the GST line for it.
-  const noHsn = { ...published, itemHsn: { "HRI-ENG-7": "", "HRI-ENG-4": "73079990" } };
-  const line = (hsnCode, lineId = "l1") => ({ lines: [{ lineId, vendorUnit: "NOS", qty: 10, price: 120, taxCode: "G18", hsnCode }] });
+describe("the goods receipt is the one document that asks for tax", () => {
+  // 27 Oct 2026: tax code on every line; HSN and tax rate only for an item that has none, and an item's own stand.
+  const options = { hsn: ["27101980", "8421"], tax_rates: ["GST 18%", "GST 12%"] };
+  const taxes = { taxCodes: [{ code: "CG+SG@18", kind: "cgst_sgst" }], vendors: [{ code: "V1", name: "Lube Co", state: "KL" }], companyState: "KL" };
+  const line = { name: "Grease", itemCode: "HRI-ENG-7" };
+  const run = (product, w) => {
+    const newCodes = new Map();
+    return { ...billTaxes(line, { taxCode: "CG+SG@18", ...w }, product, options, "Hi-Tech", newCodes, taxes, "V1"), newCodes };
+  };
 
-  it("asks for it, and refuses the line without it", () => {
-    refusal(() => checkQuotation(request(), body(line("")), noHsn, TODAY), /Grease has no HSN code, and SAP needs one/);
-    assert.equal(checkQuotation(request(), body(line("8421.39.20")), noHsn, TODAY).lines[0].hsn_code, "84213920", "kept as digits");
+  it("keeps an item's own HSN and tax rate, whatever the bill says", () => {
+    const r = run({ hsnCode: "27101980", taxRate: "GST 18%" }, { hsnCode: "99999999", taxRate: "GST 12%" });
+    assert.equal(r.hsn, "27101980");
+    assert.equal(r.tax, "GST 18%");
+    assert.equal(r.taxCode, "CG+SG@18");
+    assert.equal(r.newCodes.size, 0, "nothing new is asked of SAP");
   });
 
-  it("refuses an HSN that cannot be one", () => {
-    refusal(() => checkQuotation(request(), body(line("842")), noHsn, TODAY), /Grease: HSN 842/);
-    refusal(() => checkQuotation(request(), body(line("77010000")), noHsn, TODAY), /Grease: HSN 77010000/);
+  it("asks an item with none for the bill's HSN and tax rate", () => {
+    refusal(() => run({ hsnCode: "", taxRate: "" }, { hsnCode: "", taxRate: "GST 18%" }), /HSN code for Grease is required/);
+    refusal(() => run({ hsnCode: "", taxRate: "" }, { hsnCode: "8421", taxRate: "" }), /tax rate for Grease is required/);
+    refusal(() => run({ hsnCode: "", taxRate: "" }, { hsnCode: "842", taxRate: "GST 18%" }), /Grease: HSN 842/);
+    const r = run({ hsnCode: "", taxRate: "" }, { hsnCode: "8421.39.20", taxRate: "GST 18%" });
+    assert.equal(r.hsn, "84213920", "kept as digits");
+    assert.deepEqual([...r.newCodes], [["84213920", "HRI-ENG-7"]], "a code SAP lacks is asked for");
   });
 
-  it("leaves an item that has its HSN alone, whatever the line says", () => {
-    assert.equal(checkQuotation(request(), body(line("8421", "l2")), noHsn, TODAY).lines[0].hsn_code, "", "the item's own HSN stands");
+  it("asks SAP again for an item's own HSN it has not got yet, so the GRPO line can carry it", () => {
+    assert.deepEqual([...run({ hsnCode: "84819090", taxRate: "GST 18%" }, {}).newCodes], [["84819090", "HRI-ENG-7"]]);
   });
 
-  it("keeps an HSN the quotation brought its own to change, though saving put it on the item", () => {
-    // As PQ-2026-00353: 8491 was saved, so the item now reads as having it - but it is still the quotation's.
-    const saved = { ...published, itemHsn: { "HRI-ENG-7": "8491", "HRI-ENG-4": "73079990" } };
-    const lines = request().lines.map((l) => (l.name === "l1" ? { ...l, coverage: "Quoted", quotation: "PQ-2026-00353" } : l));
-    const mine = { name: "PQ-2026-00353", status: "Queued", purchase_order: "", lines: [{ item: "HRI-ENG-7", hsn_code: "8491" }] };
-    assert.equal(checkQuotation(request({}, lines), body(line("27101980")), saved, TODAY, mine).lines[0].hsn_code, "27101980", "changed");
-    refusal(() => checkQuotation(request({}, lines), body(line("")), saved, TODAY, mine), /Grease has no HSN code/);
-  });
-
-  it("still asks for an item's HSN that SAP has not got, so the line raises the request", () => {
-    // As PQ-2026-00353 after its edit: the item says 8491, SAP's list does not have it, and the line had lost it.
-    const pending = { ...published, hsn: ["8421", "73079990"], itemHsn: { "HRI-ENG-7": "8491", "HRI-ENG-4": "73079990" } };
-    refusal(() => checkQuotation(request(), body(line("")), pending, TODAY), /Grease has no HSN code/);
-    const q = checkQuotation(request(), body(line("8491")), pending, TODAY);
-    assert.equal(q.lines[0].hsn_code, "8491");
-    assert.deepEqual([...newHsnCodes(q.lines, pending.hsn)], [["8491", "HRI-ENG-7"]], "and asks SAP for it");
-    assert.equal(checkQuotation(request(), body(line("", "l2")), pending, TODAY).lines[0].hsn_code, "", "an HSN SAP has stands");
-  });
-
-  it("asks SAP for a code it does not have yet, once per code", () => {
-    const lines = [
-      { item: "A", hsn_code: "84213920" },
-      { item: "B", hsn_code: "84213920" },
-      { item: "C", hsn_code: "8421" },
-      { item: "D", hsn_code: "" },
-    ];
-    assert.deepEqual([...newHsnCodes(lines, ["8421"])], [["84213920", "A"]]);
-    assert.equal(newHsnCodes(lines, ["8421", "84213920"]).size, 0);
+  it("asks for the tax code on every line, an item's HSN or not", () => {
+    refusal(() => run({ hsnCode: "27101980", taxRate: "GST 18%" }, { taxCode: "" }), /Give the tax code for Grease/);
   });
 });
 
@@ -242,7 +238,8 @@ describe("a PO made from a quotation", () => {
     assert.equal(po.po_date, TODAY);
     assert.equal(po.vendor_code, "V1");
     assert.equal(po.quotation_expired, 0);
-    assert.deepEqual(po.lines.map((l) => [l.quotation_line, l.vendor_uom, l.qty, l.price, l.tax_code, l.received_qty]), [["q1", "DRUM", 5, 8500, "G18", 0]]);
+    assert.deepEqual(po.lines.map((l) => [l.quotation_line, l.vendor_uom, l.qty, l.price, l.tax_code, l.received_qty]), [["q1", "DRUM", 5, 8500, "", 0]],
+      "no tax code, even from a quotation saved with one: the goods receipt brings it (27 Oct 2026)");
     assert.equal(checkOrder(quotation(), order({ lines: [] }), TODAY).lines[0].qty, 1, "the quoted quantity when none is given");
     refusal(() => checkOrder(quotation(), order({ lines: [{ lineId: "q1", qty: 0 }] }), TODAY), /more than zero/);
     refusal(() => checkOrder(quotation(), order({ lines: [{ lineId: "nope", qty: 1 }] }), TODAY), /not on this quotation/);

@@ -9,7 +9,8 @@ import { AlertTriangle, FileCheck, Loader2, X } from "lucide-react";
  *
  * Management has signed the printed quotation, and that signature is the
  * approval: there is no draft, and the sync posts the PO straight away. Vendor,
- * units, prices and tax codes are the quotation's. The quantity starts at the
+ * units and prices are the quotation's; no tax code (27 Oct 2026), which the
+ * goods receipt takes off the bill. The quantity starts at the
  * quoted one and can change, because a vendor sometimes quotes for a single
  * unit. A quotation past its validity date still makes a PO once that is
  * confirmed; the PO records that it was.
@@ -163,7 +164,6 @@ const PurchaseOrderModal = ({ quotation: q, onClose, onSaved }) => {
                     <th className="text-right">Quoted</th>
                     <th>Order qty</th>
                     <th className="text-right">Unit price</th>
-                    <th>Tax code</th>
                     <th className="text-right">Value</th>
                   </tr>
                 </thead>
@@ -202,7 +202,6 @@ const PurchaseOrderModal = ({ quotation: q, onClose, onSaved }) => {
                         <td className="text-right whitespace-nowrap tabular-nums text-slate-700">
                           {formatCurrency(l.price)} / {l.vendorUnit}
                         </td>
-                        <td className="whitespace-nowrap text-slate-700">{l.taxCode}</td>
                         <td className="text-right whitespace-nowrap tabular-nums text-slate-800">
                           {value ? formatCurrency(value) : "—"}
                         </td>

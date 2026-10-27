@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, FileCheck, Loader2, RefreshCw, Send } from "lucide-react";
+import { AlertTriangle, Eye, FileCheck, Loader2, RefreshCw, Send, X } from "lucide-react";
 
 import API from "../../services/api";
 import { useAuth, MANAGER, PURCHASE_MANAGER } from "../../context/AuthContext";
 import { useNotifications } from "../../context/NotificationContext";
+import { useDialog } from "../../context/DialogContext";
+import CancelNote, { CancelButton } from "../../components/CancelNote";
+import { askCancelReason } from "../../utils/cancel";
 import useAutoRefresh from "../../hooks/useAutoRefresh";
 import { useSapSyncDone } from "../../hooks/useSapSync";
 import { formatCurrency } from "../../utils/currency";
+import Pagination from "../../components/Pagination";
+import { pageSlice } from "../../utils/pageSlice";
+
+const PAGE_SIZE = 10;
 
 /**
  * Purchase orders made from quotations (24 Oct 2026), and where each stands.
@@ -15,6 +22,9 @@ import { formatCurrency } from "../../utils/currency";
  * away; until SAP has it, it cannot be received. It turns Purchased when every
  * line is received, and Closed when it is closed or cancelled in SAP - the CMMS
  * closes and cancels nothing. Quantities are in the vendor's unit.
+ *
+ * Listed at a glance, as purchase requests are (27 Oct 2026): status, vendor,
+ * items and value, with the lines, dates, notes and sending again behind the eye.
  */
 
 const STATUS_STYLE = {
@@ -56,6 +66,7 @@ const syncLabel = (o) =>
 const PurchaseOrders = () => {
   const { user } = useAuth();
   const { showToast } = useNotifications();
+  const { prompt } = useDialog();
   // Mirrors the server's guard on sending one again.
   const canBuy = user?.role === PURCHASE_MANAGER || user?.role === MANAGER;
 
@@ -66,6 +77,9 @@ const PurchaseOrders = () => {
   const [company, setCompany] = useState("");
   const [vendorCode, setVendorCode] = useState("");
   const [busy, setBusy] = useState("");
+  // The PO whose details are open, by id, so a background reload shows the fresh copy.
+  const [viewing, setViewing] = useState("");
+  const [page, setPage] = useState(1);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -84,7 +98,7 @@ const PurchaseOrders = () => {
     load();
   }, [load]);
 
-  useAutoRefresh(() => load(true), { enabled: rows.some((r) => r.syncStatus === "Queued") });
+  useAutoRefresh(() => load(true), { enabled: rows.some((r) => r.syncStatus === "Queued" || r.cancel?.status === "Queued") });
   useSapSyncDone(() => load(true));
 
   const retry = async (o) => {
@@ -95,6 +109,22 @@ const PurchaseOrders = () => {
       load(true);
     } catch (err) {
       showToast(err.response?.data?.message || "That step was refused", "error");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  // Cancelled in SAP by the sync; its request lines open for a new quotation (27 Oct 2026).
+  const cancel = async (o) => {
+    const reason = await askCancelReason(prompt, showToast, `purchase order ${o.id}`);
+    if (reason === null) return;
+    setBusy(o.id);
+    try {
+      const { data } = await API.post(`/purchase-orders/${o.id}/cancel`, { reason });
+      showToast(data?.status === "Closed" ? `${o.id} cancelled` : `${o.id} is being cancelled in SAP`, "success");
+      load(true);
+    } catch (err) {
+      showToast(err.response?.data?.message || "It could not be cancelled", "error");
     } finally {
       setBusy("");
     }
@@ -124,6 +154,14 @@ const PurchaseOrders = () => {
     [rows, status, company, vendorCode]
   );
 
+  // Ten to a page, as purchase requests; a filter change starts again from the first.
+  const { page: current, rows: pageRows } = pageSlice(shown, page, PAGE_SIZE);
+  const filterBy = (set) => (e) => {
+    set(e.target.value);
+    setPage(1);
+  };
+  const open = viewing ? rows.find((r) => r.id === viewing) : null;
+
   return (
     <div className="space-y-5">
       <div className="panel">
@@ -141,7 +179,7 @@ const PurchaseOrders = () => {
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={company}
-            onChange={(e) => setCompany(e.target.value)}
+            onChange={filterBy(setCompany)}
             className="field field-sm w-auto cursor-pointer"
             aria-label="Filter by company"
           >
@@ -154,7 +192,7 @@ const PurchaseOrders = () => {
           </select>
           <select
             value={vendorCode}
-            onChange={(e) => setVendorCode(e.target.value)}
+            onChange={filterBy(setVendorCode)}
             className="field field-sm w-auto max-w-[16rem] cursor-pointer"
             aria-label="Filter by vendor"
           >
@@ -167,7 +205,7 @@ const PurchaseOrders = () => {
           </select>
           <select
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={filterBy(setStatus)}
             className="field field-sm w-auto cursor-pointer"
             aria-label="Filter by status"
           >
@@ -209,66 +247,22 @@ const PurchaseOrders = () => {
           </div>
         </div>
       ) : (
-        <div className="space-y-3">
-          {shown.map((o) => (
-            <div key={o.id} className="card p-5">
-              <div className="flex flex-wrap items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="mono text-xs text-slate-500">{o.id}</span>
-                    <span className={`badge ${STATUS_STYLE[o.status] || "badge-slate"}`}>{o.status}</span>
-                    <span className={`badge ${SYNC_STYLE[o.syncStatus] || "badge-slate"}`}>{syncLabel(o)}</span>
-                    {o.quotationExpired && <span className="badge badge-amber">Made after the quotation expired</span>}
-                    <span className="ml-auto text-[13px] font-semibold tabular-nums text-slate-900">
-                      {formatCurrency(o.value)}
-                    </span>
-                  </div>
+        <>
+          <OrderList rows={pageRows} onView={(o) => setViewing(o.id)} />
+          <Pagination page={current} total={shown.length} pageSize={PAGE_SIZE} onPage={setPage} noun="purchase order" />
+        </>
+      )}
 
-                  <div className="mt-2 grid sm:grid-cols-2 lg:grid-cols-5 gap-x-6 gap-y-2">
-                    <KV label="Vendor" value={o.vendorName ? `${o.vendorName} · ${o.vendorCode}` : o.vendorCode} />
-                    <KV label="Quotation · request" value={`${o.quotation} · ${o.request || "—"}`} />
-                    <KV label="Company" value={o.companyName || o.company} />
-                    <KV label="PO date · delivery" value={`${day(o.date) || "—"} · ${day(o.deliveryDate) || "—"}`} />
-                    <KV label="Made by" value={`${o.raisedByName || o.raisedBy || "—"} · ${when(o.raisedAt)}`} />
-                  </div>
-
-                  <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-100">
-                    {o.lines.map((l) => (
-                      <li
-                        key={l.lineId}
-                        className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-3 py-2 text-[13px]"
-                      >
-                        <span className="min-w-0 text-slate-800">
-                          {l.name}{" "}
-                          <span className="mono text-[11px] text-slate-500">{l.sapItemCode || l.itemCode}</span>
-                        </span>
-                        <span className="whitespace-nowrap text-slate-700">
-                          {l.qty} {l.vendorUnit} @ {formatCurrency(l.price)}
-                          <span className="ml-2 text-[12px] text-slate-500">
-                            · received {l.received}, pending {l.pending}
-                          </span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-
-                  {o.remarks && <p className="mt-2 text-xs text-slate-600 italic">“{o.remarks}”</p>}
-                  {o.syncStatus === "Failed" && o.error && (
-                    <p className="mt-2 text-xs text-rose-700">SAP said: {o.error}</p>
-                  )}
-                  {/* Waiting for its quotation, closed or cancelled in SAP, or a SAP close still to retry. */}
-                  {o.syncStatus !== "Failed" && o.error && <p className="mt-2 text-xs text-amber-700">{o.error}</p>}
-                </div>
-
-                {canBuy && o.syncStatus === "Failed" && (
-                  <button className="btn btn-sm btn-primary shrink-0" disabled={busy === o.id} onClick={() => retry(o)}>
-                    <Send className="h-4 w-4" />
-                    {busy === o.id ? "…" : "Send again"}
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
+      {open && (
+        <div className="modal-backdrop" onClick={() => setViewing("")}>
+          <OrderDetails
+            order={open}
+            onClose={() => setViewing("")}
+            canBuy={canBuy}
+            busy={busy === open.id}
+            onRetry={() => retry(open)}
+            onCancel={() => cancel(open)}
+          />
         </div>
       )}
     </div>
@@ -279,6 +273,182 @@ const KV = ({ label, value }) => (
   <div className="min-w-0">
     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
     <p className="text-[13px] text-slate-800 break-words">{value || "—"}</p>
+  </div>
+);
+
+/** Where the PO stands: Open / Purchased / Closed, and with SAP. Both, since an Open PO may not be in SAP yet. */
+const Badges = ({ order: o }) => (
+  <>
+    <span className={`badge whitespace-nowrap ${STATUS_STYLE[o.status] || "badge-slate"}`}>{o.status}</span>
+    <span className={`badge whitespace-nowrap ${SYNC_STYLE[o.syncStatus] || "badge-slate"}`}>{syncLabel(o)}</span>
+  </>
+);
+
+/** The first item, and how many more: all a row has room for. */
+const itemsSummary = (lines = []) => {
+  if (!lines.length) return "—";
+  const first = `${lines[0].name} × ${lines[0].qty} ${lines[0].vendorUnit || ""}`.trim();
+  return lines.length > 1 ? `${first}, +${lines.length - 1} more` : first;
+};
+
+/** The eye: the way into everything about a PO, as on purchase requests. */
+const ViewButton = ({ order: o, onView }) => (
+  <button
+    className="btn btn-sm btn-neutral btn-icon shrink-0 hover:border-brand-500 hover:text-brand-700"
+    onClick={() => onView(o)}
+    title="View full details"
+    aria-label={`View purchase order ${o.id}`}
+  >
+    <Eye className="h-4 w-4" aria-hidden="true" />
+  </button>
+);
+
+/** One short line per PO: where it stands, the vendor, what and how much. The rest is behind the eye. */
+const OrderList = ({ rows, onView }) => (
+  <>
+    {/* Phone: a short card per PO. */}
+    <div className="space-y-3 md:hidden">
+      {rows.map((o) => (
+        <div key={o.id} className="card flex items-center gap-4 p-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badges order={o} />
+            </div>
+            <p className="mt-2 truncate text-[13px] font-semibold text-slate-900">{o.vendorName || o.vendorCode}</p>
+            <p className="mt-0.5 truncate text-[13px] text-slate-700">{itemsSummary(o.lines)}</p>
+            <p className="mt-0.5 text-[12px] text-slate-500">
+              {o.id} · {formatCurrency(o.value)}
+            </p>
+          </div>
+          <ViewButton order={o} onView={onView} />
+        </div>
+      ))}
+    </div>
+
+    {/* Tablet and up: a table and the eye. */}
+    <div className="table-card hidden md:block">
+      <div className="table-scroll">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th className="w-[230px]">Status</th>
+              <th className="w-[240px]">Vendor</th>
+              <th>Items</th>
+              <th className="w-[130px] text-right">Value</th>
+              <th className="w-[80px] text-right">View</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((o) => (
+              <tr key={o.id} className="cursor-pointer" onClick={() => onView(o)}>
+                <td className="py-4">
+                  <div className="flex flex-wrap gap-1.5">
+                    <Badges order={o} />
+                  </div>
+                </td>
+                <td className="py-4">
+                  <div className="max-w-[240px] truncate font-medium text-slate-800">{o.vendorName || o.vendorCode}</div>
+                  <div className="text-[12px] text-slate-500">{o.companyName || o.company}</div>
+                </td>
+                <td className="py-4">
+                  <div className="max-w-[420px] truncate text-slate-700" title={itemsSummary(o.lines)}>
+                    {itemsSummary(o.lines)}
+                  </div>
+                </td>
+                <td className="whitespace-nowrap py-4 text-right tabular-nums text-slate-800">{formatCurrency(o.value)}</td>
+                {/* The row opens the details too; the eye is the visible way in. */}
+                <td className="py-4" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex justify-end">
+                    <ViewButton order={o} onView={onView} />
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </>
+);
+
+/** Everything about one PO: the popup behind the eye. */
+const OrderDetails = ({ order: o, onClose, canBuy, busy, onRetry, onCancel }) => (
+  <div className="modal max-w-2xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+    <div className="modal-head">
+      <div className="min-w-0">
+        <h3 className="modal-title">
+          <FileCheck className="h-[18px] w-[18px] text-brand-700 shrink-0" />
+          Purchase order {o.id}
+        </h3>
+        <p className="modal-sub">
+          {o.vendorName || o.vendorCode} · {o.companyName || o.company}
+        </p>
+      </div>
+      <button onClick={onClose} className="modal-close" aria-label="Close">
+        <X className="h-5 w-5" />
+      </button>
+    </div>
+
+    <div className="modal-body space-y-6">
+      <CancelNote cancel={o.cancel} error={o.error} />
+      <div className="flex flex-wrap items-center gap-2">
+        <Badges order={o} />
+        {o.quotationExpired && <span className="badge badge-amber">Made after the quotation expired</span>}
+        <span className="ml-auto text-[15px] font-bold tabular-nums text-slate-900">{formatCurrency(o.value)}</span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+        <KV label="Vendor" value={o.vendorName ? `${o.vendorName} · ${o.vendorCode}` : o.vendorCode} />
+        <KV label="Quotation · request" value={`${o.quotation} · ${o.request || "—"}`} />
+        <KV label="Company" value={o.companyName || o.company} />
+        <KV label="PO date · delivery" value={`${day(o.date) || "—"} · ${day(o.deliveryDate) || "—"}`} />
+        <KV label="Made by" value={`${o.raisedByName || o.raisedBy || "—"} · ${when(o.raisedAt)}`} />
+        <KV label="SAP purchase order" value={o.sapDocNumber} />
+      </div>
+
+      <div>
+        <p className="mb-2 text-[12px] font-semibold text-slate-500">Items ({o.lines.length})</p>
+        <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+          {o.lines.map((l) => (
+            <li
+              key={l.lineId}
+              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-4 py-3 text-[13px]"
+            >
+              <span className="min-w-0 text-slate-800">
+                {l.name} <span className="mono text-[11px] text-slate-500">{l.sapItemCode || l.itemCode}</span>
+              </span>
+              <span className="whitespace-nowrap text-slate-700">
+                {l.qty} {l.vendorUnit} @ {formatCurrency(l.price)}
+                <span className="ml-2 text-[12px] text-slate-500">
+                  · received {l.received}, pending {l.pending}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {o.remarks && <p className="text-[13px] text-slate-600 italic">“{o.remarks}”</p>}
+      {o.syncStatus === "Failed" && o.error && <p className="text-[13px] text-rose-700">SAP said: {o.error}</p>}
+      {/* Waiting for its quotation, closed or cancelled, or a SAP close still to retry. A refused cancel says so above. */}
+      {o.syncStatus !== "Failed" && o.error && o.cancel?.status !== "Failed" && (
+        <p className="text-[13px] text-amber-700">{o.error}</p>
+      )}
+    </div>
+
+    {canBuy && (o.syncStatus === "Failed" || !o.cancel?.refusal) && (
+      <div className="modal-foot">
+        <div className="flex flex-wrap justify-end gap-2">
+          <CancelButton cancel={o.cancel} allowed={canBuy} busy={busy} onCancel={onCancel} />
+          {o.syncStatus === "Failed" && (
+            <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetry}>
+              <Send className="h-4 w-4" />
+              {busy ? "…" : "Send again"}
+            </button>
+          )}
+        </div>
+      </div>
+    )}
   </div>
 );
 

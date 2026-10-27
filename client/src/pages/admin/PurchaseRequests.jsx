@@ -30,6 +30,8 @@ import PurchaseRequestModal from "./PurchaseRequestModal";
 import PurchaseQuotationModal from "./PurchaseQuotationModal";
 import { formatCurrency } from "../../utils/currency";
 import Pagination from "../../components/Pagination";
+import CancelNote, { CancelButton } from "../../components/CancelNote";
+import { askCancelReason } from "../../utils/cancel";
 import { pageSlice } from "../../utils/pageSlice";
 
 const PAGE_SIZE = 10;
@@ -74,6 +76,8 @@ const STATUS_STYLE = {
   Queued: "badge-amber",
   // No blue badge in index.css; the same recipe in blue.
   "In SAP": "border-blue-500/20 bg-blue-500/10 text-blue-600",
+  // Lighter than Quotation Made: the same step, not finished.
+  "Partially Quoted": "border-violet-500/20 bg-white text-violet-600",
   "Quotation Made": "border-violet-500/20 bg-violet-500/10 text-violet-600",
   Ordered: "badge-emerald",
   Completed: "badge-cyan",
@@ -81,13 +85,21 @@ const STATUS_STYLE = {
   Failed: "badge-rose",
 };
 
-const STATUSES = ["Queued", "In SAP", "Quotation Made", "Ordered", "Completed", "Closed", "Failed"];
+const STATUSES = ["Queued", "In SAP", "Partially Quoted", "Quotation Made", "Ordered", "Completed", "Closed", "Failed"];
 
 /**
- * Where a request stands, as shown and filtered (26 Oct 2026): the server's stage, which goes Quotation Made,
- * Ordered and Completed as soon as they are true. `status` is what SAP says, and what the actions go by.
+ * Where a request stands, as shown and filtered (26 Oct 2026): the server's stage, which goes Partially Quoted,
+ * Quotation Made, Ordered and Completed as soon as they are true. `status` is what SAP says, and what the actions
+ * go by.
  */
 const stageOf = (r) => r.stage || r.status;
+
+/**
+ * The purchase manager's work on a request (27 Oct 2026), from the server: Pending until a PO is made for every
+ * line not dropped, whatever stage it is at, then Complete. A filter of its own beside the status.
+ */
+const WORK = ["Pending", "Complete"];
+const WORK_STYLE = { Pending: "badge-amber", Complete: "badge-emerald" };
 
 const when = (value) => {
   if (!value) return "—";
@@ -119,6 +131,7 @@ const PurchaseRequests = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [work, setWork] = useState("");
   const [company, setCompany] = useState("");
   const [raisedBy, setRaisedBy] = useState("");
   const [sapCompanies, setSapCompanies] = useState([]);
@@ -166,13 +179,33 @@ const PurchaseRequests = () => {
   // Only worth polling while the SAP server still has something to create.
   // Paused while the dialog is open, so the list does not shift under it.
   const anyQueued = rows.some(
-    (r) => r.status === "Queued" || r.order?.status === "Queued" || r.quotations?.some((q) => q.status === "Queued")
+    (r) =>
+      r.status === "Queued" ||
+      r.cancel?.status === "Queued" ||
+      r.order?.status === "Queued" ||
+      r.quotations?.some((q) => q.status === "Queued")
   );
   useAutoRefresh(() => load(true), { enabled: anyQueued && !raising && !quoting });
 
   // A finished run is what moves a request off Queued, so the row it moved is
   // the one on screen. Not while the dialog is open - the list would shift.
   useSapSyncDone(() => !raising && !quoting && load(true));
+
+  // Cancelled in SAP by the sync once the server takes it (27 Oct 2026). Its quotations and POs go first.
+  const cancelRequest = async (r) => {
+    const reason = await askCancelReason(prompt, showToast, `purchase request ${r.id}`);
+    if (reason === null) return;
+    setBusy(r.id);
+    try {
+      const { data } = await API.post(`/purchase-requests/${r.id}/cancel`, { reason });
+      showToast(data?.status === "Closed" ? `${r.id} cancelled` : `${r.id} is being cancelled in SAP`, "success");
+      load(true);
+    } catch (err) {
+      showToast(err.response?.data?.message || "It could not be cancelled", "error");
+    } finally {
+      setBusy("");
+    }
+  };
 
   const retry = async (id) => {
     setBusy(id);
@@ -252,10 +285,11 @@ const PurchaseRequests = () => {
       rows.filter(
         (r) =>
           (!status || stageOf(r) === status) &&
+          (!work || r.work === work) &&
           (!company || r.company === company) &&
           (!raisedBy || r.raisedBy === raisedBy)
       ),
-    [rows, status, company, raisedBy]
+    [rows, status, work, company, raisedBy]
   );
 
   // Ten to a page. A filter change starts again from the first (see `filterBy`),
@@ -278,6 +312,9 @@ const PurchaseRequests = () => {
     },
     onRetryOrder: () => retryOrder(r.id),
     onLine: (l, step) => lineStep(r, l, step),
+    // The buyers cancel any; whoever raised one cancels their own - mirrors the server's guard.
+    canCancel: canBuy || (canRaise && r.raisedBy === user?.email),
+    onCancel: () => cancelRequest(r),
   });
 
   return (
@@ -331,6 +368,22 @@ const PurchaseRequests = () => {
               </option>
             ))}
           </select>
+          {canBuy && (
+            <select
+              value={work}
+              onChange={filterBy(setWork)}
+              className="field field-sm w-auto cursor-pointer"
+              aria-label="Filter by purchase work"
+              title="Pending until a PO is made for every line"
+            >
+              <option value="">All work</option>
+              {WORK.map((w) => (
+                <option key={w} value={w}>
+                  Work {w.toLowerCase()}
+                </option>
+              ))}
+            </select>
+          )}
           {canRaise && (
             <button className="btn btn-sm btn-primary" onClick={() => setRaising(true)}>
               <Plus className="h-4 w-4" />
@@ -365,7 +418,7 @@ const PurchaseRequests = () => {
         </div>
       ) : (
         <>
-          <RequestList rows={pageRows} actions={actions} onView={(r) => setViewing(r.id)} />
+          <RequestList rows={pageRows} actions={actions} showWork={canBuy} onView={(r) => setViewing(r.id)} />
           <Pagination
             page={current}
             total={shown.length}
@@ -410,6 +463,14 @@ const StatusBadge = ({ status }) => (
   </span>
 );
 
+/** The purchase manager's work on it: Pending until a PO is made for every line. */
+const WorkBadge = ({ work }) =>
+  work ? (
+    <span className={`badge badge-soft whitespace-nowrap ${WORK_STYLE[work] || "badge-slate"}`} title="Purchase work: pending until a PO is made for every line">
+      {work}
+    </span>
+  ) : null;
+
 /** The first item, and how many more: all a row has room for. */
 const itemsSummary = (lines = []) => {
   if (!lines.length) return "—";
@@ -418,10 +479,11 @@ const itemsSummary = (lines = []) => {
 };
 
 /** Send again, or make the quotation - offered on the row and in the popup alike. */
-const RowActions = ({ request: r, canRetry, canBuy, busy, onRetry, onQuote, onRetryOrder }) => {
+const RowActions = ({ request: r, canRetry, canBuy, busy, onRetry, onQuote, onRetryOrder, canCancel, onCancel }) => {
   const o = r.order;
   return (
     <>
+      <CancelButton cancel={r.cancel} allowed={canCancel} busy={busy} onCancel={onCancel} />
       {canRetry && r.status === "Failed" && (
         <button className="btn btn-sm btn-primary" disabled={busy} onClick={onRetry}>
           <Send className="h-4 w-4" />
@@ -463,7 +525,7 @@ const ViewButton = ({ request: r, onView }) => (
  * every line, the PO and the actions (retry, create PO) - is behind the eye,
  * so the list reads down at a glance.
  */
-const RequestList = ({ rows, onView }) => (
+const RequestList = ({ rows, onView, showWork = false }) => (
   <>
     {/* Phone: a short card per request. */}
     <div className="space-y-3 md:hidden">
@@ -472,6 +534,7 @@ const RequestList = ({ rows, onView }) => (
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={stageOf(r)} />
+              {showWork && <WorkBadge work={r.work} />}
               <span className="text-[13px] font-semibold text-slate-900">{r.companyName || r.company}</span>
             </div>
             <p className="mt-2 truncate text-[13px] text-slate-700">{itemsSummary(r.lines)}</p>
@@ -488,6 +551,7 @@ const RequestList = ({ rows, onView }) => (
           <thead>
             <tr>
               <th className="w-[160px]">Status</th>
+              {showWork && <th className="w-[110px]">Work</th>}
               <th className="w-[260px]">Company</th>
               <th>Items</th>
               <th className="w-[80px] text-right">View</th>
@@ -499,6 +563,11 @@ const RequestList = ({ rows, onView }) => (
                 <td className="py-4">
                   <StatusBadge status={stageOf(r)} />
                 </td>
+                {showWork && (
+                  <td className="py-4">
+                    <WorkBadge work={r.work} />
+                  </td>
+                )}
                 <td className="whitespace-nowrap py-4 font-medium text-slate-800">{r.companyName || r.company}</td>
                 <td className="py-4">
                   <div className="max-w-[480px] truncate text-slate-700" title={itemsSummary(r.lines)}>
@@ -548,6 +617,7 @@ const RequestDetails = ({ request: r, onClose, ...actions }) => {
       </div>
 
       <div className="modal-body space-y-6">
+        <CancelNote cancel={r.cancel} error={r.error} />
         <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
           <KV label="Company" value={r.companyName || r.company} />
           <KV label="Required by" value={day(r.requiredBy)} />

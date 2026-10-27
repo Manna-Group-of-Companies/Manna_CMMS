@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import API from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
 import { formatCurrency } from "../../utils/currency";
-import { hsnDigits, hsnProblem } from "../../utils/hsn";
 import { AlertCircle, ChevronDown, FileText, Loader2, Search, X } from "lucide-react";
 
 /**
@@ -12,12 +11,11 @@ import { AlertCircle, ChevronDown, FileText, Loader2, Search, X } from "lucide-r
  * and the PO made from it once SAP has it.
  *
  * A request line goes on one quotation: lines already quoted or dropped are
- * shown, not offered. The vendors, tax codes and units are the ones the sync
- * publishes for the company - the server refuses anything else, so this offers
- * nothing else.
+ * shown, not offered. The vendors and units are the ones the sync publishes for
+ * the company - the server refuses anything else, so this offers nothing else.
  *
- * An item with no HSN code asks for one on its line, as a goods receipt does:
- * SAP needs it on a line with a GST tax code. It is written onto the item too.
+ * No tax code and no HSN (27 Oct 2026): both come off the supplier's bill, on
+ * the goods receipt, the one document that asks for them.
  *
  * Opened from a request card (`request`), from the quotation page with no
  * request (it asks which), or on a quotation SAP does not have yet to change it
@@ -58,10 +56,6 @@ const rowsFor = (request, quotation) => {
       vendorUnit: mine?.vendorUnit || "",
       qty: mine ? String(mine.qty) : "",
       price: mine ? String(mine.price) : "",
-      taxCode: mine?.taxCode || "",
-      hsnCode: mine?.hsnCode || "",
-      // An HSN this quotation brought stays editable: saving it already put it on the item.
-      broughtHsn: Boolean(mine?.hsnCode),
     };
   });
 };
@@ -115,7 +109,7 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
     API.get("/purchase-quotations/options", { params: { company } })
       .then(({ data }) => setPublished(data))
       .catch((e) => {
-        setPublished({ vendors: [], taxCodes: [], units: [] });
+        setPublished({ vendors: [], units: [] });
         setError(e.response?.data?.message || "Could not load the SAP lists.");
       });
   }, [company]);
@@ -123,32 +117,6 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
   const vendors = useMemo(() => published?.vendors || [], [published]);
   const units = useMemo(() => published?.units || [], [published]);
   const vendor = vendors.find((v) => v.code === vendorCode) || null;
-  // The item's own HSN, from the catalog; "" when it has none and the line must bring one.
-  const itemHsn = (code) => hsnDigits(published?.itemHsn?.[code]);
-  // The HSN a row stands on without asking: the item's own, when SAP has that code and this quotation did not
-  // bring it. Otherwise the line carries it, so a code SAP has not got is still asked for. Mirrors checkQuotation.
-  const ownHsn = (r) => {
-    const h = itemHsn(r.itemCode);
-    const list = published?.hsn || [];
-    return !h || r.broughtHsn || (list.length && !list.includes(h)) ? "" : h;
-  };
-  // Only the GST codes of the kind this supplier needs: CGST+SGST in the company's
-  // own state, IGST from another (SAP refuses the rest). Mirrors gstKindFor on the
-  // server, which refuses a mismatch; with either state unknown, every code is offered.
-  const companyState = String(published?.companyState || "").trim().toUpperCase();
-  const vendorState = String(vendor?.state || "").trim().toUpperCase();
-  const gstKind = companyState && vendorState ? (companyState === vendorState ? "cgst_sgst" : "igst") : null;
-  const taxCodes = useMemo(() => {
-    const all = published?.taxCodes || [];
-    return gstKind ? all.filter((t) => t.kind === gstKind) : all;
-  }, [published, gstKind]);
-
-  // A code picked for another supplier, of the other kind, is cleared rather than kept.
-  useEffect(() => {
-    if (!gstKind) return;
-    const ok = new Set(taxCodes.map((t) => t.code));
-    setRows((prev) => (prev.some((r) => r.taxCode && !ok.has(r.taxCode)) ? prev.map((r) => (r.taxCode && !ok.has(r.taxCode) ? { ...r, taxCode: "" } : r)) : prev));
-  }, [gstKind, taxCodes]);
 
   const matches = useMemo(() => {
     const q = term.trim().toLowerCase();
@@ -225,23 +193,7 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
   }, [units]);
 
   const included = rows.filter((r) => r.include);
-  // The HSN column only when a line on the quotation is for an item that has none.
-  const needsHsn = included.some((r) => !ownHsn(r));
-
-  // An item that carries an HSN SAP has not got yet offers it, so the line asks SAP for it rather than typing it again.
-  useEffect(() => {
-    const list = published?.hsn || [];
-    if (!list.length) return;
-    setRows((prev) =>
-      prev.some((r) => !r.hsnCode && hsnDigits(published?.itemHsn?.[r.itemCode]) && !list.includes(hsnDigits(published?.itemHsn?.[r.itemCode])))
-        ? prev.map((r) => {
-            const h = hsnDigits(published?.itemHsn?.[r.itemCode]);
-            return !r.hsnCode && h && !list.includes(h) ? { ...r, hsnCode: h } : r;
-          })
-        : prev
-    );
-  }, [published, request]);
-  // Before tax: the tax codes carry their rates in SAP.
+  // Before tax: the tax is known only from the bill, on the goods receipt.
   const total = included.reduce((sum, r) => {
     const qty = Number(r.qty);
     const price = Number(r.price);
@@ -261,13 +213,6 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
       if (!r.vendorUnit) return `Give the vendor's unit for ${r.name}.`;
       if (!(Number(r.qty) > 0)) return `Give the quantity for ${r.name}.`;
       if (!(Number(r.price) > 0)) return `Give the unit price for ${r.name}.`;
-      if (!r.taxCode) return `Give the tax code for ${r.name}.`;
-      if (!ownHsn(r)) {
-        const hsn = hsnDigits(r.hsnCode);
-        if (!hsn) return `${r.name} has no HSN code. Give it - SAP needs one on a line with a GST tax code.`;
-        const problem = hsnProblem(hsn);
-        if (problem) return `${r.name}: HSN ${hsn} - ${problem}.`;
-      }
     }
     return "";
   };
@@ -288,8 +233,6 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
         vendorUnit: r.vendorUnit,
         qty: Number(r.qty),
         price: Number(r.price),
-        taxCode: r.taxCode,
-        hsnCode: ownHsn(r) ? "" : hsnDigits(r.hsnCode),
       })),
     };
     try {
@@ -393,7 +336,7 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
 
           {!request ? null : loadingLists ? (
             <div className="flex items-center gap-2 text-slate-500 text-sm">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading the SAP suppliers, tax codes and units…
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading the SAP suppliers and units…
             </div>
           ) : missing ? (
             <div className="note note-amber">
@@ -488,13 +431,6 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
                     )}
                   </ul>
                 )}
-                {vendor && gstKind && (
-                  <p className="mt-1.5 text-[12px] text-slate-500">
-                    {gstKind === "cgst_sgst"
-                      ? `${vendor.name} is in ${vendorState}, the company's own state: CGST+SGST tax codes only.`
-                      : `${vendor.name} is in ${vendorState}, another state than the company's (${companyState}): IGST tax codes only.`}
-                  </p>
-                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3 sm:max-w-md">
@@ -541,8 +477,6 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
                         <th>Vendor unit</th>
                         <th>Qty</th>
                         <th>Unit price (₹)</th>
-                        <th>Tax code</th>
-                        {needsHsn && <th>HSN</th>}
                         <th className="text-right">Value</th>
                       </tr>
                     </thead>
@@ -616,48 +550,12 @@ const PurchaseQuotationModal = ({ request: given = null, quotation = null, onClo
                                     aria-label={`Unit price of ${r.name} per vendor unit`}
                                   />
                                 </td>
-                                <td>
-                                  <select
-                                    value={r.taxCode}
-                                    onChange={(ev) => setRow(r.lineId, "taxCode", ev.target.value)}
-                                    className="field field-sm w-40 cursor-pointer"
-                                    aria-label={`Tax code for ${r.name}`}
-                                  >
-                                    <option value="">Tax code…</option>
-                                    {taxCodes.map((t) => (
-                                      <option key={t.code} value={t.code}>
-                                        {t.code}
-                                        {t.rate !== undefined && t.rate !== null ? ` · ${t.rate}%` : ""}
-                                        {t.name && t.name !== t.code ? ` · ${t.name}` : ""}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </td>
-                                {needsHsn && (
-                                  <td>
-                                    {ownHsn(r) ? (
-                                      <span className="mono text-[12px] text-slate-500" title="The item's own HSN">
-                                        {ownHsn(r)}
-                                      </span>
-                                    ) : (
-                                      <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        value={r.hsnCode}
-                                        onChange={(ev) => setRow(r.lineId, "hsnCode", ev.target.value)}
-                                        placeholder="Item has none"
-                                        className="field field-sm w-32"
-                                        aria-label={`HSN code for ${r.name}`}
-                                      />
-                                    )}
-                                  </td>
-                                )}
                                 <td className="text-right whitespace-nowrap tabular-nums text-slate-800">
                                   {value ? formatCurrency(value) : "—"}
                                 </td>
                               </>
                             ) : (
-                              <td colSpan={needsHsn ? 6 : 5} className="text-[12px] text-slate-400">
+                              <td colSpan={4} className="text-[12px] text-slate-400">
                                 {r.open ? "Not on this quotation" : ""}
                               </td>
                             )}

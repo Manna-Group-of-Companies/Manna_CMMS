@@ -89,12 +89,23 @@ export const categorySyncStatus = async () => {
  * One flag for the whole item master: the same run creates approved items in
  * SAP and pushes pending edits.
  */
-export const raiseSapFlag = async (email) =>
-  updateDoc(CONTROL, CONTROL, {
-    sync_requested: 1,
-    sync_requested_by: email || "",
-    sync_requested_at: erpNow(),
-  });
+export const raiseSapFlag = async (email) => {
+  // The watcher writes this Single every few seconds (heartbeat, claim, result), and MariaDB answers a write that
+  // meets one with "Record has changed since last read" (QueryDeadlockError, 27 Oct 2026, cancelling PR-2026-00416).
+  // The client marks that retryable but leaves the retry to its caller; a person's click is that caller here.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await updateDoc(CONTROL, CONTROL, {
+        sync_requested: 1,
+        sync_requested_by: email || "",
+        sync_requested_at: erpNow(),
+      });
+    } catch (error) {
+      if (!error?.retryable || attempt >= 4) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    }
+  }
+};
 const raiseFlag = raiseSapFlag;
 
 let optionsCache = null;
@@ -328,8 +339,8 @@ export const updateSapItem = async (code, body = {}, user, { resolveName, ensure
     if (foreign.length > SAP_NAME_MAX) throw badRequest(`The foreign name can be at most ${SAP_NAME_MAX} characters.`);
     set("custom_sap_foreign_name", foreign, product.foreignName);
   }
-  if (body.hsnCode !== undefined) set("custom_sap_hsn_code", pickHsn(options.hsn, body.hsnCode, company), product.hsnCode);
-  if (body.taxRate !== undefined) set("custom_sap_tax_rate", pickFrom(options.tax_rates, body.taxRate, "tax rate", company), product.taxRate);
+  // HSN and tax rate are not edited here (27 Oct 2026): the goods receipt fills them in from the bill for an item
+  // without them, and an item's own are not changed after that.
   if (body.minStock !== undefined) {
     const min = Number(body.minStock);
     if (!Number.isFinite(min) || min < 0) throw badRequest("Minimum stock must be zero or more.");

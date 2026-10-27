@@ -127,7 +127,11 @@ $queueProbes = @(
     @{ dt = 'CMMS Purchase Quotation'; where = '["status","=","Queued"]' },
     @{ dt = 'CMMS Purchase Order'; where = '["sync_status","=","Queued"]' },
     @{ dt = 'CMMS SAP HSN Request'; where = '["status","=","Queued"]' },
-    @{ dt = 'CMMS SAP Item Group Request'; where = '["status","=","Queued"]' }
+    @{ dt = 'CMMS SAP Item Group Request'; where = '["status","=","Queued"]' },
+    # Cancel pressed in the CMMS (27 Oct 2026). A site without the field yet answers an error, which skips the probe.
+    @{ dt = 'CMMS Purchase Request'; where = '["cancel_status","=","Queued"]' },
+    @{ dt = 'CMMS Purchase Quotation'; where = '["cancel_status","=","Queued"]' },
+    @{ dt = 'CMMS Purchase Order'; where = '["cancel_status","=","Queued"]' }
 )
 function Get-LastRunEnd {
     # Falls back to the watcher's own start time: an unbounded probe would behave as before this fix.

@@ -9,8 +9,10 @@ import {
 import { erpNow, erpToday } from "../integrations/erpnext/time.js";
 import { storeForCompany } from "../integrations/erpnext/stores.js";
 import { catalogProducts, forgetCatalog } from "./catalog.js";
-import { CONTROL, hsnDigits, hsnProblem, itemMasterOptions, pickFrom, pickHsn, raiseSapFlag } from "./sapCategories.js";
+import { CONTROL, hsnDigits, hsnProblem, itemMasterOptions, pickFrom, raiseSapFlag } from "./sapCategories.js";
 import { dropQueuedRequests, raiseHsnRequests, requestsForReceipts } from "./hsnRequests.js";
+import { vendorsFor } from "./purchaseRequests.js";
+import { checkTaxCode } from "./purchaseQuotations.js";
 
 /**
  * Stock coming into the engineering store, decided 9 Oct 2026. Two kinds,
@@ -18,15 +20,21 @@ import { dropQueuedRequests, raiseHsnRequests, requestsForReceipts } from "./hsn
  *
  *   Goods Receipt   - from a supplier's bill, against the open SAP Purchase
  *                     Order purchase raised. The store picks the PO, enters the
- *                     bill number and date, what arrived, and each line's HSN
- *                     and tax rate from the bill. Vendor, price and SAP tax
- *                     code come from the PO. The sync posts a GRPO in SAP (so
- *                     accounts make the A/P invoice from it, as before) and the
- *                     same quantity into the company's ERPNext store at the PO
- *                     price. A bill's HSN code SAP does not have yet, on an
- *                     item with none, is asked for with the receipt (20 Oct
- *                     2026, see hsnRequests.js); the sync holds the receipt
- *                     until SAP has it.
+ *                     bill number and date, what arrived, and each line's SAP
+ *                     tax code from the bill. Vendor and price come from the
+ *                     PO. The sync posts a GRPO in SAP (so accounts make the
+ *                     A/P invoice from it, as before) and the same quantity
+ *                     into the company's ERPNext store at the PO price.
+ *
+ *                     The only document that asks for tax (27 Oct 2026): the
+ *                     tax code on every line, and the HSN and tax rate only
+ *                     for an item that has none - an item's own stand, and
+ *                     the form shows them without letting them be changed.
+ *                     What the bill fills in goes onto the item master, in
+ *                     ERPNext and SAP. A bill's HSN code SAP does not have
+ *                     yet is asked for with the receipt (20 Oct 2026, see
+ *                     hsnRequests.js); the sync holds the receipt until SAP
+ *                     has it.
  *   Stock Addition  - stock on the shelf with no bill: no value, no HSN. The
  *                     sync posts a SAP Goods Receipt at price 0 and an ERPNext
  *                     receipt at zero value.
@@ -241,6 +249,8 @@ const openOrders = async (company, byCode) => {
       [ORDER, "company", "=", company],
       [ORDER, "sync_status", "=", "Posted"],
       [ORDER, "status", "=", "Open"],
+      // Not one being cancelled (27 Oct 2026): a receipt against it would race the cancel in SAP.
+      [ORDER, "cancel_status", "!=", "Queued"],
     ],
     orderBy: "creation desc",
     limit: 200,
@@ -364,12 +374,20 @@ export const openPurchaseOrders = async (company) => {
     .filter((po) => po.lines.length);
   const orders = abbr ? await openOrders(abbr, byCode) : [];
 
+  // For the bill's tax code on each line: SAP's codes, and each supplier's state against the company's, which
+  // narrows them to CGST+SGST or IGST as checkTaxCode does.
+  const { vendors, taxCodes } = abbr ? await vendorsFor(abbr) : { vendors: [], taxCodes: [] };
+  const stateOf = new Map(vendors.map((v) => [tidy(v.code), v.state || ""]));
+  const all = [...orders, ...pos].map((p) => ({ ...p, vendorState: stateOf.get(tidy(p.vendorCode)) || "" }));
+
   return {
     company: abbr,
     refreshedAt: entry?.refreshed_at || refreshedAt,
     refreshing: requested,
     // The CMMS POs first: they are the new purchases.
-    pos: [...orders, ...pos],
+    pos: all,
+    taxCodes,
+    companyState: abbr ? (await itemMasterOptions())[abbr]?.company_info?.state || "" : "",
   };
 };
 
@@ -462,21 +480,34 @@ export const checkOrderLines = (po, wanted = []) => {
   });
 };
 
-/** The bill's HSN and tax rate for one line, checked; a new HSN code goes into newCodes. */
-const billTaxes = (line, w, product, options, label, newCodes) => {
-  const hsn = hsnDigits(w.hsnCode);
-  if (!hsn) throw badRequest(`The HSN code for ${line.name} is required - it is on the bill.`);
-  if (!(options.hsn || []).includes(hsn)) {
-    // A new code is asked for only for an item that has none yet; an item
-    // that has one keeps to SAP's list, as before.
-    if (product?.hsnCode) pickHsn(options.hsn, hsn, label);
+/**
+ * One line's tax from the bill, checked. Pure, so the rules can be tested
+ * without ERPNext.
+ *
+ * The tax code is asked on every line. The HSN and tax rate are the item's
+ * once it has them (27 Oct 2026): whatever was sent for them is ignored, and
+ * only an item without one takes the bill's. A new HSN code goes into newCodes.
+ *
+ * @param taxes { vendors, taxCodes, companyState } - what checkTaxCode needs
+ */
+export const billTaxes = (line, w = {}, product, options, label, newCodes, taxes = {}, vendorCode = "") => {
+  let hsn = hsnDigits(product?.hsnCode);
+  if (!hsn) {
+    hsn = hsnDigits(w.hsnCode);
+    if (!hsn) throw badRequest(`The HSN code for ${line.name} is required - it is on the bill.`);
     const problem = hsnProblem(hsn);
     if (problem) throw badRequest(`${line.name}: HSN ${hsn} - ${problem}.`);
-    if (!newCodes.has(hsn)) newCodes.set(hsn, line.itemCode);
   }
-  const tax = pickFrom(options.tax_rates, w.taxRate, "tax rate", label);
-  if (!tax) throw badRequest(`The tax rate for ${line.name} is required - it is on the bill.`);
-  return { hsn, tax };
+  // Asked for even when it is the item's own: an item can hold a code an earlier request has not got into SAP
+  // yet, and SAP refuses a GRPO line with a GST tax code and no HSN. The sync adopts a code SAP already has.
+  if (!(options.hsn || []).includes(hsn) && !newCodes.has(hsn)) newCodes.set(hsn, line.itemCode);
+  let tax = tidy(product?.taxRate);
+  if (!tax) {
+    tax = pickFrom(options.tax_rates, w.taxRate, "tax rate", label);
+    if (!tax) throw badRequest(`The tax rate for ${line.name} is required - it is on the bill.`);
+  }
+  const taxCode = checkTaxCode(taxes, vendorCode, w.taxCode, line.name);
+  return { hsn, tax, taxCode };
 };
 
 /**
@@ -517,6 +548,8 @@ export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null
   }
 
   const products = new Map((await catalogProducts()).map((p) => [p.code, p]));
+  // SAP's tax codes and the supplier's state, for the bill's tax code on each line.
+  const taxes = { ...(await vendorsFor(company)), companyState: options.company_info?.state || "" };
   const lines = [];
   const billChanges = [];
   // HSN codes SAP does not have yet: digits -> the item of the first line carrying it.
@@ -528,7 +561,7 @@ export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null
       const { line } = c;
       if (!line.inCatalog) throw badRequest(`${line.sapItemCode} is on the PO but not in the engineering catalog yet.`);
       const product = products.get(line.itemCode);
-      const { hsn, tax } = billTaxes(line, byLine.get(String(line.line)), product, options, label, newCodes);
+      const { hsn, tax, taxCode } = billTaxes(line, byLine.get(String(line.line)), product, options, label, newCodes, taxes, po.vendorCode);
       billChanges.push([product, hsn, tax]);
       lines.push({
         doctype: LINE,
@@ -544,7 +577,7 @@ export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null
         // For reading only, to the paisa; the sync works the cost out again from the bill, unrounded.
         rate: round(c.cost, 2),
         uom: line.unit,
-        tax_code: line.taxCode,
+        tax_code: taxCode,
         hsn_code: hsn,
         tax_rate: tax,
         warehouse: warehouseOf(options),
@@ -571,7 +604,7 @@ export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null
       );
     }
     const product = products.get(line.itemCode);
-    const { hsn, tax } = billTaxes(line, w, product, options, label, newCodes);
+    const { hsn, tax, taxCode } = billTaxes(line, w, product, options, label, newCodes, taxes, po.vendorCode);
     billChanges.push([product, hsn, tax]);
     lines.push({
       doctype: LINE,
@@ -582,7 +615,7 @@ export const createGoodsReceipt = async (body = {}, user, { onlyCompanies = null
       qty,
       rate: line.price,
       uom: line.unit,
-      tax_code: line.taxCode,
+      tax_code: taxCode,
       hsn_code: hsn,
       tax_rate: tax,
       warehouse: line.warehouse || warehouseOf(options),

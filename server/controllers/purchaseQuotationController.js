@@ -94,6 +94,15 @@ export const retry = async (req, res) => {
   }
 };
 
+/** @route POST /api/purchase-quotations/:id/cancel { reason } - cancelled in SAP by the sync (27 Oct 2026) */
+export const cancel = async (req, res) => {
+  try {
+    res.json(await quotations.cancelQuotation(req.params.id, req.body, req.user));
+  } catch (error) {
+    fail(res, error, "Could not cancel the quotation");
+  }
+};
+
 /** @route POST /api/purchase-quotations/:id/order - the PO, made from the quotation */
 export const order = async (req, res) => {
   try {

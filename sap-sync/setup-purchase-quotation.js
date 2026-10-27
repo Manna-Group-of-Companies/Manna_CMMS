@@ -49,7 +49,8 @@ const QUOTE_LINE = {
     f('vendor_uom', 'Vendor Unit', 'Data', { reqd: 1, in_list_view: 1, description: "From SAP's unit list for the company." }),
     f('vendor_qty', 'Qty (vendor unit)', 'Float', { reqd: 1, in_list_view: 1 }),
     f('price', 'Unit Price (vendor unit)', 'Currency', { reqd: 1, in_list_view: 1 }),
-    f('tax_code', 'SAP Tax Code', 'Data', { length: 20, reqd: 1 }),
+    // Not mandatory since 27 Oct 2026: the goods receipt takes the tax code off the bill (setup-tax-on-receipt.js).
+    f('tax_code', 'SAP Tax Code', 'Data', { length: 20, description: 'Not asked since 27 Oct 2026: the goods receipt takes the tax code off the bill.' }),
     HSN_FIELD(),
   ],
 };

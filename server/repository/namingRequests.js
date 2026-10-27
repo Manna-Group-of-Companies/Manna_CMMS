@@ -15,7 +15,6 @@ import {
   SAP_NAME_MAX,
   itemMasterOptions,
   pickFrom,
-  pickHsn,
   raiseSapFlag,
 } from "./sapCategories.js";
 
@@ -205,7 +204,7 @@ export const requestOptions = async () => {
  * Checks the SAP item master fields against the chosen company's published
  * SAP lists, returning SAP's own spellings.
  */
-const checkSapFields = async ({ company, itemGroup, subCategory, subCategoryB, foreignName, unit, hsnCode, taxRate, minStock }) => {
+const checkSapFields = async ({ company, itemGroup, subCategory, subCategoryB, foreignName, unit, minStock }) => {
   const abbr = tidy(company).toUpperCase();
   const options = (await itemMasterOptions())[abbr];
   if (!options) throw badRequest("Choose the SAP company the item belongs to.");
@@ -238,8 +237,9 @@ const checkSapFields = async ({ company, itemGroup, subCategory, subCategoryB, f
       sap_sub_type_b: b,
       foreign_name: foreign,
       sap_uom: sapUnit,
-      hsn_code: pickHsn(options.hsn, hsnCode, label),
-      tax_rate: pickFrom(options.tax_rates, taxRate, "tax rate", label),
+      // Off a bill, so only the goods receipt fills them (27 Oct 2026); a new item starts without either.
+      hsn_code: "",
+      tax_rate: "",
       min_stock: min,
     },
   };

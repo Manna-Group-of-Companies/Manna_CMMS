@@ -1,6 +1,6 @@
 import express from "express";
 
-import { list, detail, raise, retry, companies, vendors, retryOrder, dropLine, reopenLine } from "../controllers/purchaseRequestController.js";
+import { list, detail, raise, retry, cancel, companies, vendors, retryOrder, dropLine, reopenLine } from "../controllers/purchaseRequestController.js";
 import { protect, requireRole } from "../middleware/session.js";
 import { requireView } from "../config/access.js";
 
@@ -23,6 +23,8 @@ router.get("/vendors", BUY, vendors);
 router.get("/:id", requireView("purchaseRequests"), detail);
 router.post("/", WRITE, raise);
 router.post("/:id/retry", WRITE, retry);
+// Whoever may raise one, and the buyers (27 Oct 2026); the controller keeps a raiser to their own requests.
+router.post("/:id/cancel", requireRole("Maintenance Manager", "Production Manager", "Purchase Manager", "Manager"), cancel);
 // The PO is made from a quotation since 24 Oct 2026 (purchaseQuotationRoutes.js),
 // not on the request. One made here before then that SAP refused can still be
 // sent again, so none is stranded.

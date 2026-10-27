@@ -37,7 +37,7 @@ const LINE = {
     f('qty', 'Quantity', 'Float', { reqd: 1, in_list_view: 1 }),
     f('rate', 'Rate', 'Currency', { in_list_view: 1, description: 'Price per unit before tax: the PO price, or 0 for a stock addition.' }),
     f('uom', 'Unit', 'Data'),
-    f('tax_code', 'SAP Tax Code', 'Data', { description: 'From the PO line, e.g. CG+SG@18 / IGST@18.' }),
+    f('tax_code', 'SAP Tax Code', 'Data', { description: "From the bill, typed on the receipt (27 Oct 2026); before then, the PO line's." }),
     f('hsn_code', 'HSN Code', 'Data', { length: 20 }),
     f('tax_rate', 'Tax Rate', 'Data', { length: 20 }),
     f('warehouse', 'SAP Warehouse', 'Data', { length: 20 }),
