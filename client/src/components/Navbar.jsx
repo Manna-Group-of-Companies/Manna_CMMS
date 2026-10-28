@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNotifications } from "../context/NotificationContext";
 import { useAuth } from "../context/AuthContext";
 import { Bell, Check, CheckSquare, Menu } from "lucide-react";
-import SapSyncButton from "./SapSyncButton";
+import SapSyncStatus from "./SapSyncStatus";
 import ErpRefreshButton from "./ErpRefreshButton";
 
 const initials = (name = "") =>
@@ -12,12 +12,6 @@ const initials = (name = "") =>
     .slice(0, 2)
     .map((w) => w[0].toUpperCase())
     .join("") || "?";
-
-/**
- * VITE_SAP_SYNC_BUTTON=off hides the SAP sync button (26 Oct 2026): on a PC with a local ERPNext copy nothing
- * runs the sync, so the button would wait forever. Shown unless switched off, so the deployed build keeps it.
- */
-const SAP_SYNC_BUTTON = import.meta.env.VITE_SAP_SYNC_BUTTON !== "off";
 
 const Navbar = ({ title, subtitle, onMenuClick, sapSync = false }) => {
   const { user } = useAuth();
@@ -108,11 +102,9 @@ const Navbar = ({ title, subtitle, onMenuClick, sapSync = false }) => {
 
       {/* Actions */}
       <div className="flex items-center gap-2 shrink-0">
-        {/* Only where SAP is actually behind the screen. One run serves the
-            whole system, so this is the same job wherever it is pressed - on a
-            screen SAP has nothing to do with, it would run and change nothing
-            in sight. */}
-        {sapSync && SAP_SYNC_BUTTON && <SapSyncButton />}
+        {/* When SAP last ran - only where SAP is behind the screen. No button
+            since 28 Oct 2026: every save starts the sync itself. */}
+        {sapSync && <SapSyncStatus />}
 
         {/* Re-reads ERPNext, on any screen whose list comes from it. */}
         <ErpRefreshButton />
