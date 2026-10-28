@@ -22,6 +22,7 @@ import {
 import { MAINTENANCE_ROOT, MAINTENANCE_SUFFIX } from "../integrations/erpnext/masterData.js";
 import { buildReconciliation } from "../integrations/erpnext/openingStock.js";
 import { resolveUom } from "../integrations/erpnext/uom.js";
+import { erpNow } from "../integrations/erpnext/time.js";
 
 /**
  * The engineering catalog, read from ERPNext.
@@ -59,6 +60,15 @@ const freshEnough = (entry) => entry && Date.now() - entry.at < CACHE_MS;
 /** Drops the cache, for after a write this process performed. */
 export const forgetCatalog = () => {
   cache = null;
+};
+
+/** How long after the sync creates an item its request is checked against the cached catalog (see pendingItems). */
+const JUST_CREATED_MS = 10 * 60_000;
+
+/** The just-created requests whose Item these products lack. */
+export const missingFromCatalog = (created, products) => {
+  const codes = new Set((products || []).map((p) => p.code));
+  return (created || []).map((r) => String(r.erp_item || "").trim()).filter((code) => code && !codes.has(code));
 };
 
 /**
@@ -450,6 +460,19 @@ export const listCatalog = async ({
  * over — no client change needed.
  */
 export const pendingItems = async () => {
+  // A request the sync has just turned Created leaves the Queued list at once, but its new Item can be missing from
+  // a catalog cached up to CACHE_MS earlier - and the row vanished until the cache ran out (28 Oct 2026, a V-belt made
+  // in the demo company). Dropping the cache then makes this same response show the Item, with its SAP code.
+  const created = await listDocs("CMMS Item Naming Request", {
+    fields: ["erp_item"],
+    filters: [
+      ["CMMS Item Naming Request", "sap_create_status", "=", "Created"],
+      ["CMMS Item Naming Request", "modified", ">=", erpNow(new Date(Date.now() - JUST_CREATED_MS))],
+    ],
+    limit: 50,
+  }).catch(() => []);
+  if (cache && missingFromCatalog(created, cache.products).length) forgetCatalog();
+
   const rows = await listDocs("CMMS Item Naming Request", {
     fields: [
       "name", "proposed_name", "sap_company", "sap_item_group",

@@ -59,11 +59,10 @@ export const getProducts = async (req, res) => {
       });
     }
 
-    const [catalog, pending] = await Promise.all([
-      listCatalog({ search, category, subCategory, subCategoryB, storeRoom, stockStatus }),
-      // Items queued for SAP that do not exist in ERPNext yet.
-      stockStatus ? [] : pendingItems(),
-    ]);
+    // Items queued for SAP that do not exist in ERPNext yet - read first, as it drops a cached catalog that lacks an
+    // item SAP has just created, so the item takes its queued row's place with no gap.
+    const pending = stockStatus ? [] : await pendingItems();
+    const catalog = await listCatalog({ search, category, subCategory, subCategoryB, storeRoom, stockStatus });
 
     res.json([...catalog, ...pending].map(valueFor(req.user.role)));
   } catch (error) {
