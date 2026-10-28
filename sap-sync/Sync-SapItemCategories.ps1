@@ -196,8 +196,17 @@ function Save-LoginBlocked {
 function Login-Reason([string] $Db) { "SAP login refused for $Db - not retried; a person must check the password and delete logs\login-blocked.json" }
 
 # The company's CMMS store = the ERPNext copy's default warehouse (see Manna_CMMS server stores.js).
-$storeByAbbr = @{ MRPPL = 'Manna Rubber Products Store - MRPPL'; MT = 'Stores - MT'; HRI = 'Stores - HRI'; MTR = 'Stores - MTR' }
-$companyByAbbr = @{ MRPPL = 'Manna Rubber Products Private Limited'; MT = 'Manna Treads'; HRI = 'Hi-Tech Rubber Industries'; MTR = 'Manna Tyre Retreads' }
+$storeByAbbr = @{ MRPPL = 'Manna Rubber Products Store - MRPPL'; MT = 'Stores - MT'; HRI = 'Stores - HRI'; MTR = 'Stores - MTR'; HRD = 'Stores - HRD' }
+$companyByAbbr = @{ MRPPL = 'Manna Rubber Products Private Limited'; MT = 'Manna Treads'; HRI = 'Hi-Tech Rubber Industries'; MTR = 'Manna Tyre Retreads'; HRD = 'Hi-Tech Rubber DEMO' }
+# The demo company (28 Oct 2026) and SAP's test database belong to each other and to nothing else: HRD posts only to
+# HITECH_RUBBER, and no other company may name it. A mismatch is skipped with an error, before any SAP login.
+$demoAbbr = 'HRD'; $demoDb = 'HITECH_RUBBER'
+function Demo-Mismatch([string] $Abbr, [string] $Db) {
+    $isDemo = "$Abbr".Trim().ToUpper() -eq $demoAbbr; $isTestDb = "$Db".Trim().ToUpper() -eq $demoDb
+    if ($isDemo -and -not $isTestDb) { return "demo company $demoAbbr may only post to $demoDb, not $Db" }
+    if ($isTestDb -and -not $isDemo) { return "$demoDb is the demo company's ($demoAbbr) test database, not $Abbr's" }
+    return ''
+}
 
 try {
     if (-not (Test-Path -LiteralPath $ConfigPath)) { throw "config not found: $ConfigPath" }
@@ -223,6 +232,12 @@ try {
     if ($cfg.PSObject.Properties['edit_fields'] -and @($cfg.edit_fields).Count) { $editFields = @($cfg.edit_fields | ForEach-Object { "$_" }) }
     $bad = @($editFields | Where-Object { $allEditFields -notcontains $_ }); if ($bad.Count) { throw "config edit_fields has unknown field(s): $($bad -join ', ')" }
     function Cfg-On([string] $Name) { $cfg.PSObject.Properties[$Name] -and [bool]$cfg.$Name }
+    # config.json "demo_company": { "abbr", "sap_db" } overrides the pair above - a developer PC, whose copy files HRI
+    # under the test database, sets it to HRI (MannaHRM localdev/sap/run-sync.mjs). The server leaves it out.
+    if ($cfg.PSObject.Properties['demo_company'] -and $cfg.demo_company) {
+        if ("$($cfg.demo_company.abbr)".Trim()) { $demoAbbr = "$($cfg.demo_company.abbr)".Trim().ToUpper() }
+        if ("$($cfg.demo_company.sap_db)".Trim()) { $demoDb = "$($cfg.demo_company.sap_db)".Trim().ToUpper() }
+    }
     $createItems = Cfg-On 'create_items'
     $postReceipts = Cfg-On 'post_receipts'
     $createGroups = Cfg-On 'create_groups'
@@ -516,9 +531,15 @@ try {
 
     # Work per SAP company.
     $work = @{}
+    $demoRefused = @{}
     function Work-For([string] $Abbr) {
         $o = $options.$Abbr
         if (-not $o) { return $null }
+        $demoWhy = Demo-Mismatch $Abbr "$($o.sap_db)"
+        if ($demoWhy) {
+            if (-not $demoRefused.ContainsKey($Abbr)) { $demoRefused[$Abbr] = $true; $result.failures++; Log ERROR ("{0}: refused - {1}" -f $Abbr, $demoWhy) }
+            return $null
+        }
         if (-not $work.ContainsKey($o.sap_db)) { $work[$o.sap_db] = @{ abbr = $Abbr; opt = $o; creates = New-Object System.Collections.ArrayList; edits = New-Object System.Collections.ArrayList; receipts = New-Object System.Collections.ArrayList; groups = New-Object System.Collections.ArrayList; prs = New-Object System.Collections.ArrayList; openPrs = New-Object System.Collections.ArrayList; issues = New-Object System.Collections.ArrayList; orders = New-Object System.Collections.ArrayList; quotes = New-Object System.Collections.ArrayList; qorders = New-Object System.Collections.ArrayList; hsnReqs = New-Object System.Collections.ArrayList; cancels = New-Object System.Collections.ArrayList } }
         $work[$o.sap_db]
     }
@@ -623,6 +644,9 @@ try {
     foreach ($db in $work.Keys) {
         $w = $work[$db]; $abbr = $w.abbr; $opt = $w.opt
         if ($skipDbs -contains "$db".ToUpper()) { Log WARN ("{0}: skipped (skip_companies) - not logged in; its CMMS work stays Queued" -f $db); continue }
+        # Second check, right before the login (Work-For is the first).
+        $demoWhy = Demo-Mismatch $abbr $db
+        if ($demoWhy) { $result.failures++; Log ERROR ("{0}: not logged in - {1}" -f $db, $demoWhy); continue }
         $dbUp = "$db".ToUpper()
         if ($loginBlocked.ContainsKey($dbUp)) {
             $reason = Login-Reason $db
