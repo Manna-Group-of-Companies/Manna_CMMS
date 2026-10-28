@@ -1,7 +1,6 @@
 import { plainQuotes } from "../utils/quotes.js";
 import { createDoc, getDoc, listDocs, updateDoc } from "../integrations/erpnext/client.js";
 import { erpNow } from "../integrations/erpnext/time.js";
-import { resolveUom } from "../integrations/erpnext/uom.js";
 import { catalogProducts, forgetCatalog, levelKey } from "./catalog.js";
 
 /**
@@ -90,12 +89,23 @@ export const categorySyncStatus = async () => {
  * One flag for the whole item master: the same run creates approved items in
  * SAP and pushes pending edits.
  */
-export const raiseSapFlag = async (email) =>
-  updateDoc(CONTROL, CONTROL, {
-    sync_requested: 1,
-    sync_requested_by: email || "",
-    sync_requested_at: erpNow(),
-  });
+export const raiseSapFlag = async (email) => {
+  // The watcher writes this Single every few seconds (heartbeat, claim, result), and MariaDB answers a write that
+  // meets one with "Record has changed since last read" (QueryDeadlockError, 27 Oct 2026, cancelling PR-2026-00416).
+  // The client marks that retryable but leaves the retry to its caller; a person's click is that caller here.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await updateDoc(CONTROL, CONTROL, {
+        sync_requested: 1,
+        sync_requested_by: email || "",
+        sync_requested_at: erpNow(),
+      });
+    } catch (error) {
+      if (!error?.retryable || attempt >= 4) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    }
+  }
+};
 const raiseFlag = raiseSapFlag;
 
 let optionsCache = null;
@@ -128,29 +138,6 @@ export const pickFrom = (list, value, what, company) => {
     throw badRequest(`"${clean}" is not a ${what} set up in SAP for ${company}. Pick one from the list, or have it added in the SAP client first.`);
   }
   return hit;
-};
-
-/** Two spellings of one unit: "MTR" and the Item's ERPNext "Meter", say. */
-const sameUnit = (a, b) => {
-  if (levelKey(a) === levelKey(b)) return true;
-  const x = resolveUom(a);
-  const y = resolveUom(b);
-  return x.exact && y.exact && x.uom === y.uom;
-};
-
-/**
- * The unit a supplier bills an item in when it is not the item's own unit -
- * flex billed in KGS and stocked in MTR (22 Oct 2026). From the company's SAP
- * unit list; "" = billed in the item's own unit, as every item was until now.
- * CMMS only: the item keeps its one unit in SAP, and each goods receipt line
- * carries the bill's quantity and the ratio to the stock unit.
- */
-export const pickBillUnit = (list, value, stockUnit, company) => {
-  const unit = pickFrom(list, value, "unit", company);
-  if (unit && sameUnit(unit, stockUnit)) {
-    throw badRequest(`The bill unit ${unit} is the item's own unit. Leave it empty unless the supplier bills in a different unit.`);
-  }
-  return unit;
 };
 
 /** HSN codes are compared as digits: "8481.90.90" = "84819090". */
@@ -315,13 +302,13 @@ export const renameCategoryValue = async ({ level, category, subCategory, from, 
 
 /**
  * Edits a SAP-mirrored item: description (the SOP name), foreign name, HSN,
- * tax rate, minimum stock, brand, bill unit, and the three category levels.
+ * tax rate, minimum stock, brand, and the three category levels.
  *
- * Every field but brand and bill unit is a SAP field, so a change marks the
- * item pending and raises the flag; the sync patches SAP (ItemName,
- * ForeignName, ChapterID, U_TaxRate, MinInventory, ItemsGroupCode,
- * U_SubTypeA/B). Brand and bill unit are the CMMS's own. The unit is not
- * editable: SAP refuses a new inventory unit once an item has transactions.
+ * Every field but brand is a SAP field, so a change marks the item pending and
+ * raises the flag; the sync patches SAP (ItemName, ForeignName, ChapterID,
+ * U_TaxRate, MinInventory, ItemsGroupCode, U_SubTypeA/B). Brand is the CMMS's
+ * own. The unit is not editable: SAP refuses a new inventory unit once an item
+ * has transactions.
  */
 export const updateSapItem = async (code, body = {}, user, { resolveName, ensureBrand } = {}) => {
   const product = await findProduct(code);
@@ -352,8 +339,8 @@ export const updateSapItem = async (code, body = {}, user, { resolveName, ensure
     if (foreign.length > SAP_NAME_MAX) throw badRequest(`The foreign name can be at most ${SAP_NAME_MAX} characters.`);
     set("custom_sap_foreign_name", foreign, product.foreignName);
   }
-  if (body.hsnCode !== undefined) set("custom_sap_hsn_code", pickHsn(options.hsn, body.hsnCode, company), product.hsnCode);
-  if (body.taxRate !== undefined) set("custom_sap_tax_rate", pickFrom(options.tax_rates, body.taxRate, "tax rate", company), product.taxRate);
+  // HSN and tax rate are not edited here (27 Oct 2026): the goods receipt fills them in from the bill for an item
+  // without them, and an item's own are not changed after that.
   if (body.minStock !== undefined) {
     const min = Number(body.minStock);
     if (!Number.isFinite(min) || min < 0) throw badRequest("Minimum stock must be zero or more.");
@@ -363,9 +350,6 @@ export const updateSapItem = async (code, body = {}, user, { resolveName, ensure
     const brand = tidy(body.brand);
     if (brand && brand !== product.brand) await ensureBrand(brand);
     set("brand", brand, product.brand, false);
-  }
-  if (body.billUnit !== undefined) {
-    set("custom_bill_uom", pickBillUnit(options.units, body.billUnit, product.unit, company), product.billUnit, false);
   }
 
   const levels = ["category", "subCategory", "subCategoryB"].some((k) => body[k] !== undefined);

@@ -115,6 +115,16 @@ export const VIEWS = {
   purchaseRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, PURCHASE_MANAGER],
 
   /**
+   * The chosen vendor's quotation for a request, and the PO made from it (24 Oct
+   * 2026). The purchase manager's, with the Admin as the usual fallback - the
+   * same two that made POs on the request before. Maintenance and the plant
+   * heads follow a request to its PO on the request card, and receive against
+   * it in Goods Receipts - routes/purchaseQuotationRoutes.js.
+   */
+  purchaseQuotations: [MANAGER, PURCHASE_MANAGER],
+  purchaseOrders: [MANAGER, PURCHASE_MANAGER],
+
+  /**
    * Low value purchase requests (20 Oct 2026): the Purchase Request Sheet that
    * was a Google Sheet - small buys and repairs made locally, kept in ERPNext
    * and never posted to SAP. Every manager and the plant heads add rows, on the
@@ -233,6 +243,7 @@ export const VIEWS = {
 // purchaseRequests released 14 Oct 2026, so the Admin can follow the purchase queue.
 // engineeringStock and goodsReceipts released 14 Oct 2026: the plant heads run their own store.
 // lowValuePurchases released 20 Oct 2026, with the purchase manager's view.
+// purchaseQuotations and purchaseOrders released 24 Oct 2026: the PO is made from a quotation from now on.
 export const RELEASED = new Set([
   "breakdowns",
   "maintenanceRequests",
@@ -241,6 +252,8 @@ export const RELEASED = new Set([
   "engineeringStock",
   "goodsReceipts",
   "lowValuePurchases",
+  "purchaseQuotations",
+  "purchaseOrders",
 ]);
 
 

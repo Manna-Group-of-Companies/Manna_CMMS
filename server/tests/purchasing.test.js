@@ -1,5 +1,6 @@
-// The purchase manager's side (20 Oct 2026): making a SAP PO from a purchase
-// request, and the low value purchase requests that stay in ERPNext.
+// The purchase manager's side (20 Oct 2026): their role and screens, and the
+// low value purchase requests that stay in ERPNext. Quotations and the PO made
+// from one are in quotations.test.js.
 //
 //   node --test tests/
 
@@ -8,7 +9,6 @@ import { describe, it } from "node:test";
 
 import { maySee } from "../config/access.js";
 import { cmmsRoleFor } from "../integrations/erpnext/auth.js";
-import { checkOrder as checkPo, mayOrder } from "../repository/purchaseRequests.js";
 import { checkEdit, checkNew, editableFields, mayDelete } from "../repository/lowValuePurchases.js";
 import { sheetCompaniesFor } from "../integrations/erpnext/lowValuePurchaseDoctype.js";
 
@@ -22,6 +22,8 @@ describe("the purchase manager", () => {
     assert.equal(cmmsRoleFor(["Purchase Manager"]), null);
     assert.ok(maySee("Purchase Manager", "purchaseRequests"));
     assert.ok(maySee("Purchase Manager", "lowValuePurchases"));
+    assert.ok(maySee("Purchase Manager", "purchaseQuotations"));
+    assert.ok(maySee("Purchase Manager", "purchaseOrders"));
     assert.ok(!maySee("Purchase Manager", "breakdowns"));
   });
 
@@ -30,58 +32,6 @@ describe("the purchase manager", () => {
       assert.ok(maySee(role, "lowValuePurchases"), role);
     }
     assert.ok(!maySee("Supervisor", "lowValuePurchases"));
-  });
-});
-
-describe("a PO from a purchase request", () => {
-  const request = (extra = {}) => ({
-    company: "HRI",
-    status: "In SAP",
-    sap_doc_entry: 77,
-    po_status: "",
-    lines: [
-      { name: "l1", idx: 1, item: "HRI-ENG-7", item_name: "Pipe", qty: 6 },
-      { name: "l2", idx: 2, item: "HRI-ENG-4", item_name: "Coupling", qty: 2 },
-    ],
-    ...extra,
-  });
-  const published = { vendors: [{ code: "V1", name: "Steel Co" }], taxCodes: [{ code: "G18", name: "GST 18", rate: 18 }] };
-  const body = (extra = {}) => ({
-    vendorCode: "V1",
-    dueDate: "2026-10-30",
-    lines: [{ itemCode: "HRI-ENG-7", qty: 6, price: 450, taxCode: "G18" }],
-    ...extra,
-  });
-
-  it("is made only from a request already in SAP with no PO", () => {
-    assert.ok(mayOrder(request()));
-    assert.ok(!mayOrder(request({ status: "Queued", sap_doc_entry: null })));
-    assert.ok(!mayOrder(request({ status: "Ordered" })));
-    assert.ok(!mayOrder(request({ po_status: "Queued" })));
-    assert.ok(mayOrder(request({ po_status: "Failed" })), "a failed one is made again");
-    refusal(() => checkPo(request({ status: "Queued", sap_doc_entry: null }), body(), published, TODAY), /not in SAP yet/);
-    refusal(() => checkPo(request({ po_status: "Posted" }), body(), published, TODAY), /already/);
-  });
-
-  it("writes the vendor, the dates and the lines ordered", () => {
-    const edits = checkPo(request(), body(), published, TODAY);
-    assert.equal(edits.po_status, "Queued");
-    assert.equal(edits.po_vendor_name, "Steel Co");
-    assert.equal(edits.po_date, TODAY);
-    assert.deepEqual(edits.lines.map((l) => [l.item, l.po_qty, l.po_price, l.po_tax_code]), [
-      ["HRI-ENG-7", 6, 450, "G18"],
-      ["HRI-ENG-4", 0, 0, ""],
-    ]);
-  });
-
-  it("refuses what SAP would", () => {
-    refusal(() => checkPo(request(), body({ vendorCode: "" }), published, TODAY), /vendor/);
-    refusal(() => checkPo(request(), body({ vendorCode: "NOPE" }), published, TODAY), /not among the SAP suppliers/);
-    refusal(() => checkPo(request(), body({ dueDate: "2026-10-01" }), published, TODAY), /before the PO date/);
-    refusal(() => checkPo(request(), body({ lines: [{ itemCode: "HRI-ENG-7", qty: 7, price: 1 }] }), published, TODAY), /Only 6/);
-    refusal(() => checkPo(request(), body({ lines: [{ itemCode: "HRI-ENG-7", qty: 1, price: 0 }] }), published, TODAY), /price/);
-    refusal(() => checkPo(request(), body({ lines: [{ itemCode: "HRI-ENG-7", qty: 1, price: 5, taxCode: "X" }] }), published, TODAY), /tax code/);
-    refusal(() => checkPo(request(), body({ lines: [] }), published, TODAY), /at least one/);
   });
 });
 

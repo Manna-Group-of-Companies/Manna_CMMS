@@ -1,6 +1,7 @@
 // Tiny read helper for ERPNext using server/.env creds. Never prints creds.
+// CMMS_ENV points it at another checkout's .env - a developer PC against its local ERPNext copy.
 const fs = require('fs');
-const env = Object.fromEntries(fs.readFileSync('C:/Users/eldhose/Manna_CMMS/server/.env','utf8').split(/\r?\n/)
+const env = Object.fromEntries(fs.readFileSync(process.env.CMMS_ENV || 'C:/Users/eldhose/Manna_CMMS/server/.env','utf8').split(/\r?\n/)
   .filter(l => /^[A-Z_]+=/.test(l)).map(l => [l.slice(0,l.indexOf('=')), l.slice(l.indexOf('=')+1).trim()]));
 const h = { Authorization: 'token ' + env.ERPNEXT_API_KEY + ':' + env.ERPNEXT_API_SECRET };
 const enc = o => new URLSearchParams(Object.fromEntries(Object.entries(o).map(([k,v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])));

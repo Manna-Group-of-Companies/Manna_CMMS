@@ -103,6 +103,15 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
+    // The server ends the Frappe session too. Not awaited: the screen signs out
+    // at once whatever the network does, and a session left behind expires by
+    // itself. The token is passed here because the request interceptor reads
+    // storage after it has been cleared below.
+    const token = localStorage.getItem("token");
+    if (token) {
+      // {} rather than null: axios would send the JSON text "null", which express.json refuses with a 400.
+      API.post("/session/logout", {}, { headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+    }
     setUser(null);
     localStorage.removeItem("token");
     localStorage.removeItem("user");

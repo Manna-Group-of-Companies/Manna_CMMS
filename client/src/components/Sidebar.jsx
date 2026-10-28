@@ -33,6 +33,8 @@ const SECTIONS = [
       "lowStock",
       "goodsReceipts",
       "purchaseRequests",
+      "purchaseQuotations",
+      "purchaseOrders",
       "lowValuePurchases",
     ],
   },

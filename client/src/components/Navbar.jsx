@@ -13,6 +13,12 @@ const initials = (name = "") =>
     .map((w) => w[0].toUpperCase())
     .join("") || "?";
 
+/**
+ * VITE_SAP_SYNC_BUTTON=off hides the SAP sync button (26 Oct 2026): on a PC with a local ERPNext copy nothing
+ * runs the sync, so the button would wait forever. Shown unless switched off, so the deployed build keeps it.
+ */
+const SAP_SYNC_BUTTON = import.meta.env.VITE_SAP_SYNC_BUTTON !== "off";
+
 const Navbar = ({ title, subtitle, onMenuClick, sapSync = false }) => {
   const { user } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
@@ -106,7 +112,7 @@ const Navbar = ({ title, subtitle, onMenuClick, sapSync = false }) => {
             whole system, so this is the same job wherever it is pressed - on a
             screen SAP has nothing to do with, it would run and change nothing
             in sight. */}
-        {sapSync && <SapSyncButton />}
+        {sapSync && SAP_SYNC_BUTTON && <SapSyncButton />}
 
         {/* Re-reads ERPNext, on any screen whose list comes from it. */}
         <ErpRefreshButton />

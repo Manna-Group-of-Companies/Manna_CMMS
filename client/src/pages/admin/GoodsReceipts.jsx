@@ -302,7 +302,7 @@ const ReceiptCard = ({ receipt: r, canRetry, canFix, busy, onRetry, onDelete, on
               <>
                 <KV
                   label="Purchase order"
-                  value={[r.poNumber && `PO ${r.poNumber}`, r.vendorName].filter(Boolean).join(" · ")}
+                  value={[r.poNumber && `PO ${r.poNumber}`, r.purchaseOrder, r.vendorName].filter(Boolean).join(" · ")}
                 />
                 <KV label="Bill" value={[r.billNo, day(r.billDate)].filter(Boolean).join(" · ")} />
               </>
@@ -323,11 +323,22 @@ const ReceiptCard = ({ receipt: r, canRetry, canFix, busy, onRetry, onDelete, on
                   <span className="mono text-[11px] text-slate-500">{l.sapItemCode}</span>
                 </span>
                 <span className="whitespace-nowrap text-slate-700">
-                  × {l.qty} {l.unit} @ {Number(l.rate) > 0 ? formatCurrency(l.rate) : "Nil"}
-                  {l.billUnit && (
-                    <span className="ml-2 text-[11px] text-slate-500">
-                      ({l.billQty} {l.billUnit} on the bill)
-                    </span>
+                  {l.orderLine ? (
+                    // Billed in the vendor's unit: the bill, and what it came to in the item's own unit.
+                    <>
+                      × {l.vendorQty} {l.vendorUnit} @ {formatCurrency(l.billPrice)}
+                      <span className="text-slate-500">
+                        {" "}
+                        ({l.qty} {l.unit} at {formatCurrency(l.rate)})
+                      </span>
+                      {Math.abs(Number(l.billPrice) - Number(l.quotedPrice)) >= 0.005 && (
+                        <span className="ml-1 text-[11px] text-amber-700">quoted {formatCurrency(l.quotedPrice)}</span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      × {l.qty} {l.unit} @ {Number(l.rate) > 0 ? formatCurrency(l.rate) : "Nil"}
+                    </>
                   )}
                   {(l.hsnCode || l.taxRate) && (
                     <span className="ml-2 mono text-[11px] text-slate-500">

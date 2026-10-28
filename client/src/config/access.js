@@ -6,6 +6,8 @@ import {
   ClipboardCheck,
   Contact,
   Factory,
+  FileCheck,
+  FileText,
   Gauge,
   Hammer,
   LayoutDashboard,
@@ -105,6 +107,13 @@ export const VIEWS = {
   purchaseRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, PURCHASE_MANAGER],
 
   /**
+   * The chosen vendor's quotation for a request, and the PO made from it (24 Oct
+   * 2026): the purchase manager's, with the Admin as the usual fallback.
+   */
+  purchaseQuotations: [MANAGER, PURCHASE_MANAGER],
+  purchaseOrders: [MANAGER, PURCHASE_MANAGER],
+
+  /**
    * Low value purchase requests (20 Oct 2026): small buys made locally, kept in
    * ERPNext and never posted to SAP. Every manager and the plant heads raise
    * them; the purchase manager buys them.
@@ -182,6 +191,7 @@ export const VIEWS = {
 // engineeringStock and goodsReceipts released 14 Oct 2026: the plant heads run their own store.
 // lowValuePurchases released 20 Oct 2026, with the purchase manager's view.
 // dashboard released 22 Oct 2026, as the home of everyone who follows maintenance.
+// purchaseQuotations and purchaseOrders released 24 Oct 2026: the PO is made from a quotation from now on.
 export const RELEASED = new Set([
   "dashboard",
   "breakdowns",
@@ -190,6 +200,8 @@ export const RELEASED = new Set([
   "engineeringStock",
   "goodsReceipts",
   "lowValuePurchases",
+  "purchaseQuotations",
+  "purchaseOrders",
 ]);
 
 
@@ -251,6 +263,8 @@ export const NAV = [
   { view: "engineeringStock", label: "Engineering Stock", path: "products", icon: Boxes },
   { view: "goodsReceipts", label: "Goods Receipts", path: "goods-receipts", icon: ClipboardCheck },
   { view: "purchaseRequests", label: "Purchase Requests", path: "purchase-requests", icon: ShoppingCart },
+  { view: "purchaseQuotations", label: "Purchase Quotations", path: "purchase-quotations", icon: FileText },
+  { view: "purchaseOrders", label: "Purchase Orders", path: "purchase-orders", icon: FileCheck },
   { view: "lowStock", label: "Low Stock", path: "low-stock", icon: AlertTriangle },
   { view: "breakdowns", label: "Breakdowns", path: "breakdowns", icon: Wrench },
   {

@@ -22,6 +22,8 @@ Read `C:\Users\eldhose\sap-tools\BRIEFING.md` before changing anything here.
 | `setup-goods-receipt.js` | 9 Oct: *CMMS Goods Receipt* (+ *Line*), *CMMS SAP Item Group Request*, `opening_qty` on the naming request, `open_po_lines` on the Single. Applied 9 Oct. |
 | `setup-purchase-request.js` | 9 Oct: *CMMS Purchase Request* (+ *Line*). Applied 9 Oct. |
 | `setup-goods-issue.js` | 10 Oct: *CMMS Goods Issue* (+ *Line*) - spares issued to breakdowns. Applied 12 Oct 2026. |
+| `setup-cancel.js` | 27 Oct: the cancel fields on the purchase request, quotation and PO (see "Cancelling from the CMMS"). Applied to the dev PC's local copy 27 Oct 2026; **not yet live**. |
+| `setup-tax-on-receipt.js` | 27 Oct: `tax_code` on *CMMS Purchase Quotation Line* optional - tax is asked only on the goods receipt (see below). Applied to the dev PC's local copy 27 Oct 2026; **not yet live**. |
 | `setup-hsn-request.js` | 20 Oct: *CMMS SAP HSN Request* - new HSN codes typed on a goods receipt (PASS H). Applied 20 Oct 2026. |
 | `setup-erpnext.js` | Created the Item fields and the `SAP Item Category Sync Control` Single. Idempotent. |
 | `backfill-categories.js` | Filled the three category fields on the 567 items from SAP and published `engineering_groups`. |
@@ -158,6 +160,76 @@ setting the item's HSN and pending flag as it does for any bill HSN. Goods recei
 - Tested 20 Oct 2026 in the demo company `HITECH_PRETREADS_DB`: POST 73/18/1500 → AbsEntry 19,
   ChapterID `73.18.1500`; and the GST-relevance behaviour above (item I-10249, restored afterwards).
 
+## Tax only on the goods receipt (27 Oct 2026)
+
+Asked for by melvinmathew@mannarubber.com: the tax code, HSN and tax rate are on the supplier's bill, so the
+**goods receipt is the one document that asks for them**. Nothing before it does - not the purchase request, the
+quotation, the PO, nor the new-item or item-edit forms.
+
+| Document | Tax code | HSN | Tax rate |
+|---|---|---|---|
+| Purchase request, quotation, PO | - | - | - |
+| New item / item edit | - | shown on edit, not editable | shown on edit, not editable |
+| **Goods receipt (GRPO)** | **asked on every line**, CGST+SGST or IGST by the supplier's state | asked **only if the item has none**; an item's own is shown, not editable | same as HSN |
+
+What the receipt fills in goes onto the item master (ERPNext, then SAP through PASS B before the GRPO), and a new
+HSN code is created in SAP by PASS H as before. Once an item has an HSN and tax rate they are not changed.
+
+**What SAP does with it** (all tested in `HITECH_RUBBER` the same day):
+- A purchase request, quotation and PO with no tax code and no HSN are accepted. SAP still fills in a default tax
+  code on a line whose item has an HSN; harmless, since the GRPO line sends the bill's.
+- A GRPO line with a GST tax code needs an HSN, and SAP takes it **only from the PO line it is based on** - an
+  `HSNEntry` sent on the GRPO line is ignored ("You must select HSN in line 1, since GST tax code is selected",
+  GR-2026-00410). So before posting, the sync PATCHes each PO line that has none with the item's `ChapterID`
+  (log: "HSN set on SAP PO …"), then posts the GRPO with the bill's `TaxCode`. A receipt entered before this
+  change carries no tax code of its own and keeps the PO line's.
+- End to end on the dev PC: request → quotation → PO → GRPO took 7-10 s per step (PR-2026-00412, PQ-2026-00413,
+  PO 304, GRPO 403: tax `CG+SG@18`, HSN on every line, the new HSN on ENG-11).
+
+**ERPNext schema:** `setup-tax-on-receipt.js` (dry run, then `--apply`) makes `tax_code` on *CMMS Purchase
+Quotation Line* optional - `setup-purchase-quotation.js` had made it mandatory, and a quotation without one is
+refused until this runs - and redescribes the receipt line's `tax_code` as the bill's.
+
+**Deploy in this order**, or receipts fail in between:
+1. `node setup-tax-on-receipt.js --apply` against the live site.
+2. `Sync-SapItemCategories.ps1` onto the SAP server (it sends the receipt's tax code and puts the HSN on the PO
+   line). The old sync would post a GRPO with the PO's tax code and no HSN on the PO line, which SAP refuses.
+3. The CMMS server and client.
+
+## Cancelling from the CMMS (27 Oct 2026)
+
+Before this, documents were cancelled in the SAP client only and the routine run noticed (rule 7). Now a purchase
+request, quotation or PO has a **Cancel** button (with a reason, which goes into the CMMS note with who pressed it).
+Decided by melvinmathew@mannarubber.com:
+
+| | Who | Allowed when | SAP | CMMS afterwards |
+|---|---|---|---|---|
+| Purchase request | purchase manager, Admin, and whoever raised it | in SAP with no live quotation or PO - those are cancelled first, one by one (no cascade) | `PurchaseRequests(n)/Cancel` | Closed |
+| Quotation | purchase manager, Admin | SAP has it and no PO is made from it (one SAP has not got is **deleted** as before) | `PurchaseQuotations(n)/Cancel` | Cancelled; its request lines open for a new quotation |
+| PO | purchase manager, Admin | Open, nothing received, no goods receipt waiting to post | `PurchaseOrders(n)/Cancel` | Closed; its quotation Cancelled (SAP keeps it closed); its request lines **open for a new quotation** and the request back to In SAP |
+
+The server checks it may be cancelled (`cancelRefusal` in `server/repository/purchaseRequests.js`,
+`purchaseQuotations.js`, `purchaseOrders.js`), sets `cancel_status = Queued` and raises the flag; **PASS X** in the
+sync (Job runs, before PASS Q) cancels in SAP and sets `Done`, or `Failed` with SAP's reason - Cancel can then be
+pressed again. A document SAP refused, and so never had, is cancelled in the CMMS at once. Notes start "Cancelled in
+SAP", as rule 7's do, so the routine run reads them alike. The watcher's safety net also looks for queued cancels.
+
+Found in `HITECH_RUBBER` the same day:
+- A quotation does not use up its request's quantity; **a PO does**, and cancelling the PO does not give it back - a
+  PO for a line's whole quantity leaves the SAP request **closed** (PR 54). So the next quotation on those lines goes
+  with **no base document** (PASS Q logs "quoted with no base document"); the CMMS keeps the tie to the request.
+- A request or quotation SAP has already closed cannot be cancelled there ("Document is already closed"); PASS X takes
+  it as done and says so in the note.
+- End to end (PR-2026-00416, 00419): every cancel finished in SAP and the CMMS 6-8 s after Cancel was pressed.
+
+Not changed: a PO **cancelled in the SAP client** still drops its request lines (rule 7, the 24 Oct decision).
+
+**Schema:** `setup-cancel.js` (dry run, then `--apply`) adds `cancel_status`, `cancel_reason`, `cancel_requested_by`,
+`cancel_requested_at` to the three doctypes. Applied to the dev PC's local copy 27 Oct 2026; **not yet live**.
+
+**Deploy:** `setup-cancel.js --apply` first - the server reads the fields on every list - then the sync and the
+watcher onto the SAP server, then the CMMS server and client.
+
 ## How an edit reaches SAP (a flagged sync, BRIEFING §5)
 
 1. CMMS (catalog folder button, or Categories → rename) writes the new values on the ERPNext Item,
@@ -199,6 +271,92 @@ The Single starts with **`dry_run = 1`**: the sync reads SAP and reports what it
 A kind that is off is left `Queued` and goes the run after it is turned on. The 9 Oct session wrote them
 off by default because the agent's edit switching them on was stopped by the auto-mode classifier - turning
 them on is your call, after a dry run.
+
+## Fast sync (job and routine runs, 27 Oct 2026)
+
+What was three PowerShell processes per run (watcher → poller → sync, 2-minute cooldown, 5-second flag
+check, every bulk read on every flag) is now **one process** running a Job: 2-second flag check, a 3-second
+coalesce wait so several saves go in one run, no cooldown. A document saved in the CMMS reaches SAP in
+**about 5-10 seconds** instead of minutes. The SAP → CMMS reads (PASS E, open PO lines, cancelled-in-SAP,
+HSN list, units, next codes, suppliers and tax codes) move to a **routine run three times a day** at
+**07:00, 13:00 and 19:00** (`-RoutineTimes` on the registration script).
+
+### What runs
+
+| Mode | Who starts it | Does |
+|---|---|---|
+| **Job** | the watcher, on the flag | logs in only to companies with queued work; runs only the passes that have work (PASS H, 0, A, B, D, Q, G, P, C, F); skips PASS E, the open PO lines read, the cancelled-in-SAP checks, the HSN list / units / next codes refresh, and the hourly supplier refresh (unless the company is in `vendor_refresh_requested`). Marks a purchase request **Ordered** in-run after PASS G / PASS P, with the PO number in `po_numbers`. |
+| **Routine** | Task Scheduler, 3x a day | everything today's run does, for every company. Writes `routine_last_at` and `routine_last_result` on the control Single. |
+
+A Job run with **nothing queued and no vendor refresh asked for falls through to a Routine** so today's
+app's Sync / "Fetch from SAP" buttons still do what they did. The compatibility fallback goes away when
+the app drops those buttons.
+
+`-DryRun -Mode Job` with one queued record logs in to that one company only; `-DryRun -Mode Routine` logs
+in to every company. All existing switches in `config.json` (`create_items`, `post_receipts`,
+`post_purchase_requests`, `post_purchase_orders`, `post_purchase_quotations`,
+`post_quotation_purchase_orders`, `post_quotation_receipts`, `post_issues`, `create_hsn`, `create_groups`,
+`revalue_nil_stock`, `pull_from_sap`, `skip_companies`, `edit_fields`) and `dry_run` on the control
+Single keep working in both modes.
+
+### Files
+
+| File | What it is |
+|---|---|
+| `Watch-CmmsSapSync.ps1` | **The watcher.** Started by `SAP-CMMS-Watch` every minute, runs ~55 s. Checks `sync_requested` every 2 s, waits 3 s, runs `Sync-SapItemCategories.ps1 -Mode Job` in this same process. Also: writes `watcher_seen_at` + `watcher_version` as a heartbeat (at least every 60 s); 30-second safety net that runs a Job if any CMMS doctype has had a record Queued for over 60 s; takes over a `status = Running` older than 15 min; a named mutex `Global\MannaCmmsSapSync` stops a job and a routine overlapping. |
+| `Invoke-CmmsSapRoutine.ps1` | Thin shim that calls `Watch-CmmsSapSync.ps1 -Routine`. Takes the same mutex (waits up to 10 min for a job run to finish). |
+| `Register-CmmsSyncTasks.ps1` | **Run elevated.** Preview by default; `-Apply` registers `SAP-CMMS-Watch` (every minute) and `SAP-CMMS-Routine` (daily at `-RoutineTimes`), and removes `SAP-Watch-Categories` and any task running `Invoke-SapCategorySyncPoller.ps1`. Touches no other task. `-Disable` disables both new tasks (rollback step 1). |
+| `setup-sync-jobs.js` | Adds five Custom Fields to the Single (dry by default, `--apply`): `watcher_seen_at`, `watcher_version`, `routine_last_at`, `routine_last_result`, `vendor_refresh_requested`. Each script works before the fields are there - a missing field is treated as empty with a warning in the log. |
+
+The old `Invoke-FlagWatch.ps1` + `Invoke-SapCategorySyncPoller.ps1` chain is kept in the repo for reference
+but no scheduled task runs it any more after `Register-CmmsSyncTasks.ps1 -Apply`.
+
+### Settings
+
+- **No cooldown.** `cooldown_minutes` / `cooldown_until` are ignored; the watcher clears
+  `cooldown_until` every time it writes a result, so the app's status widget never shows a stale cooldown.
+- **A refused login** (400 or 401 at SAP `/Login`) is **never retried automatically** - SAP locks the
+  user after 3 wrong passwords. The sync writes `logs\login-blocked.json` and skips that company in
+  every later run until a person deletes the file.
+- **One SAP Service Layer user** (`eldhose` as `config.json` has it). Do not add users.
+
+### Deploy and rollback
+
+Deploy (after the dev PC's end-to-end test passed):
+
+```
+# on the SAP server, PowerShell
+Copy-Item C:\Users\eldhose\sap-engineering-sync C:\Users\eldhose\sap-engineering-sync-backup-<yyyyMMdd> -Recurse
+# copy the four new / changed files from the repo (sap-sync\) into C:\Users\eldhose\sap-engineering-sync\:
+#   Sync-SapItemCategories.ps1, Watch-CmmsSapSync.ps1, Invoke-CmmsSapRoutine.ps1, Register-CmmsSyncTasks.ps1
+#   plus setup-sync-jobs.js
+# config.json, poller.config.json and logs\ stay as they are.
+
+cd C:\Users\eldhose\sap-engineering-sync
+node setup-sync-jobs.js             # dry run
+node setup-sync-jobs.js --apply     # add the five fields
+
+# elevated:
+.\Register-CmmsSyncTasks.ps1        # preview
+.\Register-CmmsSyncTasks.ps1 -Apply # register the new tasks, remove SAP-Watch-Categories
+```
+
+Rollback:
+
+```
+# elevated:
+.\Register-CmmsSyncTasks.ps1 -Disable -Apply
+# restore the backup folder, if the sync script also needs rolling back:
+Remove-Item C:\Users\eldhose\sap-engineering-sync -Recurse -Force
+Rename-Item C:\Users\eldhose\sap-engineering-sync-backup-<yyyyMMdd> sap-engineering-sync
+# re-register the OLD watcher only if you want it (the user disabled the sales-dashboard watchers,
+# so DO NOT run sap-order-sync\Register-FlagWatchTasks.ps1 - it re-registers all five of those).
+# To re-register just the old category watcher, use the actions from the 24 Oct README commit.
+```
+
+The CMMS app itself does not need any change for the fast sync: `watcher_seen_at` and
+`vendor_refresh_requested` are read / written by the app later, when the "SAP sync offline since" line
+and the vendor-refresh button are added.
 
 ## The Manna Rubber clean-up (10 Oct 2026)
 

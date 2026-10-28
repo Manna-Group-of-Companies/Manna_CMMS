@@ -205,14 +205,8 @@ const PreventiveMaintenance = () => {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canEdit && (
-            <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}>
-              <Plus className="h-4 w-4" />
-              New checklist
-            </button>
-          )}
-        </div>
+        {/* No "New checklist" here (26 Oct 2026): a checklist is added from its asset, with the
+            asset's own Add checklist button. */}
       </div>
 
       {error && (
@@ -336,7 +330,10 @@ const PreventiveMaintenance = () => {
             <div className="empty">
               <ListChecks className="h-8 w-8 text-slate-300 mb-2" />
               <p className="empty-title">Choose an asset</p>
-              <p className="empty-sub">Its checklists, and how often each is done, show here.</p>
+              <p className="empty-sub">
+                Its checklists, and how often each is done, show here
+                {canEdit ? " - and Add checklist adds one to it" : ""}.
+              </p>
             </div>
           </div>
         )}

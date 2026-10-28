@@ -24,6 +24,8 @@ import AdminProductList from "./pages/admin/ProductList";
 import AdminLowStock from "./pages/admin/LowStockReport";
 import GoodsReceipts from "./pages/admin/GoodsReceipts";
 import PurchaseRequests from "./pages/admin/PurchaseRequests";
+import PurchaseQuotations from "./pages/admin/PurchaseQuotations";
+import PurchaseOrders from "./pages/admin/PurchaseOrders";
 import LowValuePurchases from "./pages/admin/LowValuePurchases";
 import ProductList from "./pages/supervisor/ProductList";
 import MyReturns from "./pages/supervisor/MyReturns";
@@ -125,6 +127,25 @@ function App() {
                 element={
                   <RequireView view="purchaseRequests">
                     <PurchaseRequests />
+                  </RequireView>
+                }
+              />
+              {/* The chosen vendor's quotation for a request, printed for
+                  signature, and the PO made from it (24 Oct 2026). The
+                  purchase manager's and the Admin's. */}
+              <Route
+                path="purchase-quotations"
+                element={
+                  <RequireView view="purchaseQuotations">
+                    <PurchaseQuotations />
+                  </RequireView>
+                }
+              />
+              <Route
+                path="purchase-orders"
+                element={
+                  <RequireView view="purchaseOrders">
+                    <PurchaseOrders />
                   </RequireView>
                 }
               />

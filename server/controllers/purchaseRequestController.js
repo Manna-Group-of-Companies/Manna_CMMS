@@ -74,7 +74,7 @@ export const companies = async (req, res) => {
   }
 };
 
-/** @route GET /api/purchase-requests/vendors?company=HRI - the SAP suppliers, for the PO form */
+/** @route GET /api/purchase-requests/vendors?company=HRI - the SAP suppliers and tax codes */
 export const vendors = async (req, res) => {
   try {
     res.json(await requests.vendorsFor(req.query.company));
@@ -83,16 +83,25 @@ export const vendors = async (req, res) => {
   }
 };
 
-/** @route POST /api/purchase-requests/:id/order - the purchase manager makes the PO */
-export const order = async (req, res) => {
+/** @route POST /api/purchase-requests/:id/lines/:line/drop - nobody will quote it */
+export const dropLine = async (req, res) => {
   try {
-    res.json(await requests.orderRequest(req.params.id, req.body, req.user));
+    res.json(await requests.dropLine(req.params.id, req.params.line, req.body?.reason));
   } catch (error) {
-    fail(res, error, "Could not save the purchase order");
+    fail(res, error, "Could not drop the line");
   }
 };
 
-/** @route POST /api/purchase-requests/:id/order/retry */
+/** @route POST /api/purchase-requests/:id/lines/:line/reopen */
+export const reopenLine = async (req, res) => {
+  try {
+    res.json(await requests.reopenLine(req.params.id, req.params.line));
+  } catch (error) {
+    fail(res, error, "Could not open the line again");
+  }
+};
+
+/** @route POST /api/purchase-requests/:id/order/retry - a PO made on the request before 24 Oct 2026 */
 export const retryOrder = async (req, res) => {
   try {
     res.json(await requests.retryOrder(req.params.id, req.user));
@@ -102,6 +111,27 @@ export const retryOrder = async (req, res) => {
 };
 
 /** @route POST /api/purchase-requests/:id/retry */
+/**
+ * @route POST /api/purchase-requests/:id/cancel  { reason }
+ * The purchase manager and the Admin cancel any; a Maintenance Manager or plant head only one they raised
+ * themselves (27 Oct 2026).
+ */
+export const cancel = async (req, res) => {
+  try {
+    const found = await requests.getRequest(req.params.id);
+    if (!found || !withinCompany(await scopeFor(req.user), found.company)) {
+      return res.status(404).json({ message: "Purchase request not found" });
+    }
+    const buyer = ["Purchase Manager", "Manager"].includes(req.user?.role);
+    if (!buyer && found.raisedBy !== req.user?.email) {
+      return res.status(403).json({ message: "Only whoever raised it, the purchase manager or the Admin can cancel a purchase request." });
+    }
+    res.json(await withRequestNames(await requests.cancelRequest(req.params.id, req.body, req.user)));
+  } catch (error) {
+    fail(res, error, "Could not cancel the purchase request");
+  }
+};
+
 export const retry = async (req, res) => {
   try {
     const found = await requests.getRequest(req.params.id);

@@ -35,6 +35,9 @@ const MAP = new Map([
   ...["set", "sets"].map((k) => [k, "Set"]),
   ...["pair", "pairs", "pr"].map((k) => [k, "Pair"]),
   ...["roll", "rolls"].map((k) => [k, "Roll"]),
+  // SAP's BRL (added 26 Oct 2026). ERPNext's only barrels are its standard
+  // "Barrel (Oil)" and "Barrel(Beer)"; the store's are oil and grease.
+  ...["barrel", "barrels", "brl"].map((k) => [k, "Barrel (Oil)"]),
   ...["unit", "units"].map((k) => [k, "Unit"]),
 ]);
 
@@ -60,15 +63,6 @@ export const resolveUom = (unit) => {
   if (mapped) return { uom: mapped, exact: true, input: raw };
 
   return { uom: DEFAULT_UOM, exact: false, input: raw };
-};
-
-/** ERPNext UOMs that count whole things: half a bearing is not received. */
-const COUNTED = new Set(["Nos", "Pair", "Set", "Box", "Roll", "Packet", "Unit"]);
-
-/** True for a unit known to count whole things ("NOS", "Pcs", "PAIR"); false for lengths, weights and the unknown. */
-export const isCountUnit = (unit) => {
-  const { uom, exact } = resolveUom(unit);
-  return exact && COUNTED.has(uom);
 };
 
 /** Groups a catalog's units into what will be sent and what was guessed. */

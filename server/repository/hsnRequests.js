@@ -65,8 +65,9 @@ export const requestsForReceipts = async (names) => {
  * error rises, so the caller can take the receipt back too.
  *
  * @param codes Map of hsn digits -> the item of the first line carrying it
+ * @param quotation instead of `receipt`, since 24 Oct 2026: the quotation is held, as a receipt is, until SAP has the code
  */
-export const raiseHsnRequests = async ({ company, receipt, codes, user }) => {
+export const raiseHsnRequests = async ({ company, receipt, quotation, codes, user }) => {
   const made = [];
   try {
     for (const [hsn, item] of codes) {
@@ -75,7 +76,7 @@ export const raiseHsnRequests = async ({ company, receipt, codes, user }) => {
         company,
         hsn_code: hsn,
         status: "Queued",
-        goods_receipt: receipt,
+        ...(quotation ? { purchase_quotation: quotation } : { goods_receipt: receipt }),
         item,
         raised_by: user?.email || "",
         raised_at: erpNow(),
@@ -90,15 +91,18 @@ export const raiseHsnRequests = async ({ company, receipt, codes, user }) => {
 };
 
 /** Takes back a Queued receipt's Queued requests, when the receipt itself is deleted. */
-export const dropQueuedRequests = async (receipt) => {
+export const dropQueuedRequests = async (receipt, field = "goods_receipt") => {
   const rows = await listDocs(HSN_REQUEST, {
     fields: ["name"],
-    filters: [[HSN_REQUEST, "goods_receipt", "=", receipt], [HSN_REQUEST, "status", "=", "Queued"]],
+    filters: [[HSN_REQUEST, field, "=", receipt], [HSN_REQUEST, "status", "=", "Queued"]],
     limit: 100,
   });
   for (const r of rows) await deleteDoc(HSN_REQUEST, r.name);
   return rows.length;
 };
+
+/** The same for a quotation: deleted, or changed and about to raise its codes again. */
+export const dropQueuedForQuotation = (quotation) => dropQueuedRequests(quotation, "purchase_quotation");
 
 const loadFailed = async (id) => {
   const doc = await getDoc(HSN_REQUEST, id).catch(() => null);
