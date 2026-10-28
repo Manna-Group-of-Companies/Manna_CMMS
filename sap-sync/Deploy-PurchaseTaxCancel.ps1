@@ -27,12 +27,15 @@
   After it: merge PR #19 (deploys the client and the API), then test one small real purchase.
 
 .PARAMETER Apply   Do it. Without it, nothing is changed.
+.PARAMETER SkipErpnext  Leave out step 3 (and the Node check): live ERPNext was already set up another way
+                        (27 Oct 2026, through the Composio connector, matching the local copy field for field).
 .PARAMETER Repo    The Manna_CMMS checkout on this server.
 .PARAMETER Live    The live sync folder.
 
 .EXAMPLE
   .\Deploy-PurchaseTaxCancel.ps1           # preview
   .\Deploy-PurchaseTaxCancel.ps1 -Apply    # do it
+  .\Deploy-PurchaseTaxCancel.ps1 -SkipErpnext -Apply   # ERPNext already done; no Node needed
 
 .NOTES
   Rollback: sap-sync\README.md, "Deploy and rollback" (Register-CmmsSyncTasks.ps1 -Disable -Apply, then restore the
@@ -40,6 +43,7 @@
 #>
 param(
     [switch] $Apply,
+    [switch] $SkipErpnext,
     [string] $Repo = 'C:\Users\eldhose\Manna_CMMS',
     [string] $Live = 'C:\Users\eldhose\sap-engineering-sync'
 )
@@ -76,7 +80,7 @@ Write-Host "Checkout: $Repo on $branch @ $commit"
 if ($branch -ne 'purchase-tax-cancel' -and $branch -ne 'main') { Fail "check out purchase-tax-cancel (or main after the merge) first" }
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { Fail 'run this from an elevated PowerShell (Run as administrator) - the scheduled tasks need it' }
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail 'node is not on PATH' }
+if (-not $SkipErpnext -and -not (Get-Command node -ErrorAction SilentlyContinue)) { Fail 'node is not on PATH (use -SkipErpnext if live ERPNext is already set up)' }
 foreach ($f in $Files) { if (-not (Test-Path (Join-Path $src $f))) { Fail "$f is not in $src" } }
 Write-Host 'OK'
 
@@ -101,6 +105,7 @@ foreach ($f in $Files) {
 
 # ---- 3. live ERPNext
 Step '3. Live ERPNext (dry run first)'
+if ($SkipErpnext) { Write-Host 'Skipped (-SkipErpnext): live ERPNext already set up.' } else {
 $env:CMMS_ENV = Join-Path $Repo 'server\.env'
 foreach ($s in $Setups) {
     Write-Host "-- $s (dry run)" -ForegroundColor DarkCyan
@@ -117,6 +122,7 @@ if ($Apply) {
     Run-Node (Join-Path $Repo 'server') @('scripts/syncPurchasing.js')
 }
 Remove-Item Env:\CMMS_ENV
+}
 
 # ---- 4. switches
 Step '4. Posting switches in config.json'
