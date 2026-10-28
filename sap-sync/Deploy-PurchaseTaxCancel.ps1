@@ -77,7 +77,7 @@ foreach ($p in @($src, $Live, (Join-Path $Repo 'server\.env'), (Join-Path $Live 
 $branch = (& git -C $Repo rev-parse --abbrev-ref HEAD).Trim()
 $commit = (& git -C $Repo rev-parse --short HEAD).Trim()
 Write-Host "Checkout: $Repo on $branch @ $commit"
-if ($branch -ne 'purchase-tax-cancel' -and $branch -ne 'main') { Fail "check out purchase-tax-cancel (or main after the merge) first" }
+if ($branch -notin @('purchase-tax-cancel', 'demo-company', 'main')) { Fail "check out purchase-tax-cancel, demo-company (or main after the merge) first" }
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { Fail 'run this from an elevated PowerShell (Run as administrator) - the scheduled tasks need it' }
 if (-not $SkipErpnext -and -not (Get-Command node -ErrorAction SilentlyContinue)) { Fail 'node is not on PATH (use -SkipErpnext if live ERPNext is already set up)' }
