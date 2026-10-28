@@ -61,6 +61,9 @@ export const STORES = [
   // Retreads was a plant with no store, so its head would have been shown an
   // empty catalog.
   { key: "manna-tyre-retreads", label: "Manna Tyre Retreads", warehouse: "Stores - MTR", company: "Manna Tyre Retreads", abbr: "MTR" },
+  // 28 Oct 2026: a company to demonstrate the CMMS in, on the live site. Its own ERPNext company, and SAP's test
+  // database HITECH_RUBBER (a copy of Hi-Tech Rubber Industries) - the sync refuses it any other database.
+  { key: "hi-tech-rubber-demo", label: "Hi-Tech Rubber DEMO", warehouse: "Stores - HRD", company: "Hi-Tech Rubber DEMO", abbr: "HRD", isDemo: true },
 ];
 
 /** The store of the ERPNext company with this abbreviation (= SAP item code prefix), or null. */

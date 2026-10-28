@@ -47,6 +47,14 @@ Read `C:\Users\eldhose\sap-tools\BRIEFING.md` before changing anything here.
 
 `MANNA_TYRE_LIVE` has its own SAP password (`sap.password_overrides` in `config.json`).
 
+**The demo company (28 Oct 2026).** `HITECH_RUBBER`, SAP's test copy of Hi-Tech Rubber Industries, is the
+ERPNext company **Hi-Tech Rubber DEMO** (`HRD-`, store `Stores - HRD`, group 108 Engineering Stocks), on the live
+site, for demonstrating the CMMS without writing to a live SAP company. The sync holds the two to each other
+(`Demo-Mismatch`): HRD is refused any other database, and any other company is refused `HITECH_RUBBER` - checked
+when the work is gathered and again before the login. Its items and on-hand stock come in by PASS E on the routine
+run (stock at nil value, in its own company's books). A developer PC whose copy files HRI under the test database
+sets `"demo_company": { "abbr": "HRI", "sap_db": "HITECH_RUBBER" }` in its config (MannaHRM `run-sync.mjs` does).
+
 ## The three category levels
 
 | CMMS | ERPNext Item field | SAP Items field |
