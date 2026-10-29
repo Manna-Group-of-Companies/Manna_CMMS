@@ -88,6 +88,12 @@ android {
                 // before the tablets go out.
                 signingConfigs.getByName("debug")
             }
+            // R8 strips the reflection flutter_local_notifications (Gson) and
+            // workmanager rely on: notifications silently never showed, and
+            // the 28 Oct 2026 release stuck on the splash. Shipped unshrunk
+            // until the plugins' keep rules are sorted.
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
