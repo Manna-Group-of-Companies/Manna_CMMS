@@ -12,11 +12,13 @@ import 'maintenance_repository.dart';
 /// The phone shows these on the Breakdowns and Requests screens; there is no
 /// combined screen.
 
-/// The one role this queue is for. The server already gives it every plant -
-/// it is not on `PLANT_SCOPED_ROLES` - so nothing here narrows the list.
-const incomingRole = 'Maintenance Manager';
+/// The roles this queue is for: the Maintenance Manager, and since 3 Nov 2026
+/// Higher Management (the GM), who is told of the same breakdowns and requests.
+/// The server gives both every plant - neither is on `PLANT_SCOPED_ROLES` - so
+/// nothing here narrows the list. Mirrors PUSH_ROLES in server/integrations/push.js.
+const incomingRoles = {'Maintenance Manager', 'Higher Management'};
 
-bool canSeeIncoming(String role) => role == incomingRole;
+bool canSeeIncoming(String role) => incomingRoles.contains(role);
 
 enum IncomingKind { breakdown, request }
 

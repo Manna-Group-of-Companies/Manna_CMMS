@@ -20,7 +20,7 @@ void main() {
     const expectRequests = {
       'Manager': true,
       'Maintenance Manager': true,
-      'Higher Management': false,
+      'Higher Management': true,
       'Production Manager': true,
       'Supervisor': true,
       'VP Operations': false,

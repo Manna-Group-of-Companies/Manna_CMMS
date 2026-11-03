@@ -52,6 +52,8 @@ const _requestRoles = {
   'Maintenance Manager',
   'Production Manager',
   'Supervisor',
+  // Reading only, since 3 Nov 2026, so the GM can open what they are notified of.
+  'Higher Management',
 };
 
 /// Low value purchase requests: every manager and the plant heads raise them,

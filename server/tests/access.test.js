@@ -11,6 +11,7 @@ import {
   PRODUCTION_MANAGER,
   maySee,
   maySeeItemValue,
+  requireAnyView,
   rolesFor,
 } from "../config/access.js";
 
@@ -52,5 +53,33 @@ describe("item value", () => {
     ]) {
       assert.ok(!maySeeItemValue(role), String(role));
     }
+  });
+});
+
+describe("the GM's reports (3 Nov 2026)", () => {
+  /** What a guard does with one role: true when it lets them through. */
+  const admits = (guard, role) => {
+    let passed = false;
+    const res = { status: () => ({ json: () => {} }) };
+    guard({ user: { role } }, res, () => {
+      passed = true;
+    });
+    return passed;
+  };
+
+  it("are Higher Management's screen and nobody else's", () => {
+    assert.deepEqual(rolesFor("reports"), ["Higher Management"]);
+  });
+
+  it("let the GM read the reliability report without opening Breakdown Report", () => {
+    const guard = requireAnyView("breakdownReport", "reports");
+    assert.ok(admits(guard, "Higher Management"));
+    assert.ok(admits(guard, MAINTENANCE_MANAGER), "the Maintenance Manager keeps it");
+    assert.ok(!admits(guard, PRODUCTION_MANAGER));
+    assert.ok(!maySee("Higher Management", "breakdownReport"));
+  });
+
+  it("refuse a screen the table does not know at import", () => {
+    assert.throws(() => requireAnyView("reports", "no-such-screen"), /no-such-screen/);
   });
 });

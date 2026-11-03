@@ -16,6 +16,7 @@ import Login from "./pages/auth/Login";
 import ChecklistSheetPreview from "./pages/maintenance/ChecklistSheetPreview";
 import NoAccess from "./pages/auth/NoAccess";
 import Settings from "./pages/admin/Settings";
+import Reports from "./pages/admin/Reports";
 import AssetManagement from "./pages/maintenance/AssetManagement";
 import MaintenanceRequests from "./pages/maintenance/MaintenanceRequests";
 import PreventiveMaintenance from "./pages/maintenance/PreventiveMaintenance";
@@ -201,6 +202,14 @@ function App() {
                 element={
                   <RequireView view="breakdownReport">
                     <BreakdownReport />
+                  </RequireView>
+                }
+              />
+              <Route
+                path="reports"
+                element={
+                  <RequireView view="reports">
+                    <Reports />
                   </RequireView>
                 }
               />

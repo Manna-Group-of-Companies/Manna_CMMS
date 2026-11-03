@@ -22,7 +22,7 @@ import {
   requestCategorySync,
 } from "../controllers/productController.js";
 import { protect, requireRole } from "../middleware/session.js";
-import { requireView } from "../config/access.js";
+import { maySee, requireView } from "../config/access.js";
 
 const router = express.Router();
 
@@ -53,7 +53,20 @@ const notYetMoved = (what) => (_req, res) =>
  * enforced on the screen rather than here; widening this to the Low Stock
  * audience would take Engineering Stock away from everyone else.
  */
-router.use(protect, requireView("engineeringStock"));
+const READ = requireView("engineeringStock");
+
+/**
+ * The one read the GM's Reports screen makes here (3 Nov 2026): the low stock
+ * list, and nothing else of the catalog. Matched on the exact request so it
+ * cannot be stretched to the rest of the catalog or to a write.
+ */
+const isReportsLowStock = (req) =>
+  req.method === "GET" &&
+  req.path === "/" &&
+  req.query.stockStatus === "low" &&
+  maySee(req.user?.role, "reports");
+
+router.use(protect, (req, res, next) => (isReportsLowStock(req) ? next() : READ(req, res, next)));
 
 router.get("/", getProducts);
 router.get("/categories", getCategories);

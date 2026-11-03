@@ -34,9 +34,11 @@ const notYetMoved = (what) => (_req, res) =>
     message: `${what} has not been moved to ERPNext yet. Do it in ERPNext directly for now.`,
   });
 
+// Higher Management for the Store filter on the GM's low stock report
+// (3 Nov 2026); the writes below stay the Manager's.
 router.use(
   protect,
-  requireRole("Manager", "Maintenance Manager", "Supervisor", "Production Manager")
+  requireRole("Manager", "Maintenance Manager", "Supervisor", "Production Manager", "Higher Management")
 );
 
 router.get("/", listStores);

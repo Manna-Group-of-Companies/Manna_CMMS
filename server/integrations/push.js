@@ -24,8 +24,12 @@ import { devicesForRole, forgetDevices } from "../repository/devices.js";
  * Without it everything else still works and the phones keep polling.
  */
 
-/** The role the phones are rung for; the app registers only this role. */
-export const PUSH_ROLE = "Maintenance Manager";
+/**
+ * The roles the phones are rung for; the app registers only these
+ * (`canSeeIncoming` in mobile/lib/data/incoming_feed.dart). The GM's since
+ * 3 Nov 2026: Higher Management is told of every breakdown and request too.
+ */
+export const PUSH_ROLES = ["Maintenance Manager", "Higher Management"];
 
 /**
  * The service account, from `FIREBASE_SERVICE_ACCOUNT_FILE` (a path) or
@@ -117,7 +121,7 @@ const DEAD_TOKEN = new Set([
 ]);
 
 /**
- * Sends one data message to every phone registered under [PUSH_ROLE].
+ * Sends one data message to every phone registered under [PUSH_ROLES].
  *
  * High priority, so Android delivers it through Doze rather than holding it
  * for the next maintenance window; an hour's time-to-live, because a
@@ -127,7 +131,7 @@ export const pushToMaintenanceManagers = async (data) => {
   const fcm = messaging();
   if (!fcm) return { sent: 0, skipped: disabledReason };
 
-  const devices = await devicesForRole(PUSH_ROLE);
+  const devices = (await Promise.all(PUSH_ROLES.map(devicesForRole))).flat();
   if (!devices.length) return { sent: 0, skipped: "no phones registered" };
 
   const dead = [];

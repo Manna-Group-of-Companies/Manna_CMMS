@@ -17,7 +17,7 @@ import {
   resendSpares,
 } from "../controllers/breakdownController.js";
 import { protect, requireRole } from "../middleware/session.js";
-import { requireView } from "../config/access.js";
+import { requireAnyView, requireView } from "../config/access.js";
 
 const router = express.Router();
 
@@ -47,8 +47,9 @@ router.get("/machines", READ, machines);
 router.get("/stages", READ, stages);
 router.get("/lookups", READ, lookups);
 // Downtime and reliability across the group: operations, maintenance and the
-// Admin. Narrower than the breakdown list itself, and deliberately so.
-router.get("/report", requireView("breakdownReport"), reliabilityReport);
+// Admin. Narrower than the breakdown list itself, and deliberately so. The
+// GM's Reports screen shows it too (3 Nov 2026).
+router.get("/report", requireAnyView("breakdownReport", "reports"), reliabilityReport);
 router.get("/plants", READ, plants);
 
 router.get("/", READ, list);

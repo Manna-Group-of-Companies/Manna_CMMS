@@ -175,13 +175,27 @@ export const VIEWS = {
 
   /** Value written off. */
   scrap: [MANAGER, PRODUCTION_MANAGER, HIGHER_MANAGEMENT],
+  /**
+   * The GM's reports (3 Nov 2026): the MD, the executive director and the GM
+   * asked for every report on one screen. It reads what the Breakdown Report
+   * and Low Stock read - see the guards in routes/breakdownRoutes.js and
+   * routes/productRoutes.js, which admit this screen alongside their own - and
+   * nothing it shows can be acted on from it.
+   */
+  reports: [HIGHER_MANAGEMENT],
 
   /**
    * The two Module 2 screens the restrictions said nothing about, left at the
    * audience they already had. A plant head raises and closes their own site's
    * requests, which is the reason the record exists.
    */
-  maintenanceRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR],
+  /**
+   * Higher Management reads them since 3 Nov 2026, so the GM can open the
+   * request a phone notification is about. Reading only: who moves a request
+   * on is decided per stage in maintenanceRequestStages.js, and raising one is
+   * the plant's - routes/maintenanceRequestRoutes.js.
+   */
+  maintenanceRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR, HIGHER_MANAGEMENT],
   /**
    * The maintenance team register - who may be named on a repair.
    *
@@ -244,6 +258,7 @@ export const VIEWS = {
 // engineeringStock and goodsReceipts released 14 Oct 2026: the plant heads run their own store.
 // lowValuePurchases released 20 Oct 2026, with the purchase manager's view.
 // purchaseQuotations and purchaseOrders released 24 Oct 2026: the PO is made from a quotation from now on.
+// reports released 3 Nov 2026, for the GM.
 export const RELEASED = new Set([
   "breakdowns",
   "maintenanceRequests",
@@ -254,6 +269,7 @@ export const RELEASED = new Set([
   "lowValuePurchases",
   "purchaseQuotations",
   "purchaseOrders",
+  "reports",
 ]);
 
 
@@ -313,7 +329,7 @@ export const isPlantScoped = (role) => PLANT_SCOPED_ROLES.includes(role);
  * Stock — still take an explicit role list, because narrowing them to one
  * screen's audience would break the other's.
  */
-export const requireView = (view) => {
+export const requireAnyView = (...views) => {
   /**
    * A screen this table has never heard of is a mistake in the routes, not a
    * screen nobody may see.
@@ -325,15 +341,16 @@ export const requireView = (view) => {
    * into a silent deny-all that looked exactly like a permissions decision
    * somebody had made on purpose.
    */
-  if (!Object.hasOwn(VIEWS, view)) {
+  const unknown = views.find((view) => !Object.hasOwn(VIEWS, view));
+  if (unknown !== undefined) {
     throw new Error(
-      `requireView("${view}"): no such screen. Add it to VIEWS in config/access.js ` +
+      `requireView("${unknown}"): no such screen. Add it to VIEWS in config/access.js ` +
         `(and mirror it in client/src/config/access.js). Known screens: ${Object.keys(VIEWS).join(", ")}`
     );
   }
 
   return (req, res, next) => {
-    if (!req.user || !maySee(req.user.role, view)) {
+    if (!req.user || !views.some((view) => maySee(req.user.role, view))) {
       return res.status(403).json({
         message: `Role (${req.user?.role || "none"}) is not allowed to access this resource`,
       });
@@ -341,3 +358,11 @@ export const requireView = (view) => {
     return next();
   };
 };
+
+/**
+ * One screen's guard - the usual case.
+ *
+ * `requireAnyView` is for an endpoint two screens read, such as the
+ * reliability report, which the GM's Reports screen shows as well.
+ */
+export const requireView = (view) => requireAnyView(view);

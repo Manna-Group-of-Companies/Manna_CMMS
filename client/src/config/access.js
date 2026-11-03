@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   KeyRound,
   PackageOpen,
+  PieChart,
   ReceiptIndianRupee,
   Settings,
   ShoppingCart,
@@ -133,6 +134,12 @@ export const VIEWS = {
   assets: ROLES,
   breakdownReport: [MANAGER, MAINTENANCE_MANAGER, VP_OPERATIONS],
   scrap: [MANAGER, PRODUCTION_MANAGER, HIGHER_MANAGEMENT],
+  /**
+   * The GM's reports (3 Nov 2026): the Breakdown Report and Low Stock as tabs
+   * of one read-only screen, for the MD, the executive director and the GM.
+   * The server admits this screen to those two reports' reads.
+   */
+  reports: [HIGHER_MANAGEMENT],
 
   /**
    * The two Module 2 screens the restrictions said nothing about.
@@ -142,7 +149,8 @@ export const VIEWS = {
    * one mistake a permissions change cannot be forgiven for. Plant heads are
    * still confined to their own plant on both.
    */
-  maintenanceRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR],
+  /** Higher Management reads them since 3 Nov 2026, for the GM's notifications. */
+  maintenanceRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR, HIGHER_MANAGEMENT],
   /**
    * The maintenance team register - who may be named on a repair.
    *
@@ -192,6 +200,7 @@ export const VIEWS = {
 // lowValuePurchases released 20 Oct 2026, with the purchase manager's view.
 // dashboard released 22 Oct 2026, as the home of everyone who follows maintenance.
 // purchaseQuotations and purchaseOrders released 24 Oct 2026: the PO is made from a quotation from now on.
+// reports released 3 Nov 2026, for the GM.
 export const RELEASED = new Set([
   "dashboard",
   "breakdowns",
@@ -202,6 +211,7 @@ export const RELEASED = new Set([
   "lowValuePurchases",
   "purchaseQuotations",
   "purchaseOrders",
+  "reports",
 ]);
 
 
@@ -260,6 +270,8 @@ export const consoleFor = (role) => (role === SUPERVISOR ? "/supervisor" : "/adm
 export const NAV = [
   // First, so it is where a role that has it lands - see homePathFor.
   { view: "dashboard", label: "Dashboard", path: "dashboard", icon: LayoutDashboard },
+  // Second, so the GM still lands on the Dashboard.
+  { view: "reports", label: "Reports", path: "reports", icon: PieChart },
   { view: "engineeringStock", label: "Engineering Stock", path: "products", icon: Boxes },
   { view: "goodsReceipts", label: "Goods Receipts", path: "goods-receipts", icon: ClipboardCheck },
   { view: "purchaseRequests", label: "Purchase Requests", path: "purchase-requests", icon: ShoppingCart },

@@ -8,7 +8,7 @@ import { useErpRefresh } from "../../hooks/useErpRefresh";
 import useStockRooms from "../../hooks/useStockRooms";
 import { formatCurrency } from "../../utils/currency";
 import { reorderCostOf, severityOf, shortageOf } from "../../utils/lowStock";
-import { maySeeItemValue } from "../../config/access";
+import { maySee, maySeeItemValue } from "../../config/access";
 import PurchaseRequestModal from "./PurchaseRequestModal";
 import Pagination from "../../components/Pagination";
 import { pageSlice } from "../../utils/pageSlice";
@@ -567,9 +567,12 @@ const LowStockReport = () => {
               {chosen.length > 0 && ` (${chosen.length})`}
             </button>
           )}
-          <Link to="/admin/products" className="btn btn-neutral flex-1 sm:flex-none">
-            Open Catalog
-          </Link>
+          {/* Not for the GM, who reads this on Reports and has no catalog. */}
+          {maySee(user?.role, "engineeringStock") && (
+            <Link to="/admin/products" className="btn btn-neutral flex-1 sm:flex-none">
+              Open Catalog
+            </Link>
+          )}
         </div>
       </div>
 
