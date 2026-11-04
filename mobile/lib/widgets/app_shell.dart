@@ -381,12 +381,17 @@ class AppDrawer extends StatelessWidget {
                 icon: Icons.logout_rounded,
                 label: 'Logout',
                 color: const Color(0xFFFF7A59),
+                // Asked with the drawer still open, and the provider read up
+                // front: closing the drawer first unmounted this context, so
+                // `context.mounted` was false after the dialog and a confirmed
+                // sign-out did nothing (4 Nov 2026).
                 onTap: () async {
-                  Navigator.of(context).pop();
+                  final auth = context.read<AuthProvider>();
+                  final navigator = Navigator.of(context);
                   final confirmed = await confirmSignOut(context);
-                  if (confirmed && context.mounted) {
-                    await context.read<AuthProvider>().logout();
-                  }
+                  if (!confirmed) return;
+                  navigator.pop();
+                  await auth.logout();
                 },
               ),
             ),

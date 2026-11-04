@@ -40,6 +40,12 @@ export const MAINTENANCE_MEMBER = "Maintenance Member";
  * buy, and have no use for the catalog or the asset register.
  */
 export const PURCHASE_MANAGER = "Purchase Manager";
+/**
+ * A maintenance hand who follows breakdowns, requests and the miscellaneous
+ * purchases on the phone, with the alerts, and keeps no attendance (4 Nov
+ * 2026; Sunny). Not in `ROLES`: no catalog, no asset register.
+ */
+export const MAINTENANCE_ENGINEER = "Maintenance Engineer";
 
 export const ROLES = [
   MANAGER,
@@ -138,6 +144,7 @@ export const VIEWS = {
     VP_OPERATIONS,
     HIGHER_MANAGEMENT,
     PURCHASE_MANAGER,
+    MAINTENANCE_ENGINEER,
   ],
 
   /**
@@ -158,7 +165,14 @@ export const VIEWS = {
   itemNaming: [MAINTENANCE_MANAGER, VP_OPERATIONS],
 
   /** Machines that have stopped. Plant-scoped for a plant head. */
-  breakdowns: [MANAGER, MAINTENANCE_MANAGER, HIGHER_MANAGEMENT, PRODUCTION_MANAGER, SUPERVISOR],
+  breakdowns: [
+    MANAGER,
+    MAINTENANCE_MANAGER,
+    HIGHER_MANAGEMENT,
+    PRODUCTION_MANAGER,
+    SUPERVISOR,
+    MAINTENANCE_ENGINEER,
+  ],
 
   /** The asset register. Plant-scoped for a plant head. */
   assets: [
@@ -195,7 +209,14 @@ export const VIEWS = {
    * on is decided per stage in maintenanceRequestStages.js, and raising one is
    * the plant's - routes/maintenanceRequestRoutes.js.
    */
-  maintenanceRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR, HIGHER_MANAGEMENT],
+  maintenanceRequests: [
+    MANAGER,
+    MAINTENANCE_MANAGER,
+    PRODUCTION_MANAGER,
+    SUPERVISOR,
+    HIGHER_MANAGEMENT,
+    MAINTENANCE_ENGINEER,
+  ],
   /**
    * The maintenance team register - who may be named on a repair.
    *

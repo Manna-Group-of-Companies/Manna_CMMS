@@ -45,6 +45,8 @@ const _breakdownRoles = {
   'Higher Management',
   'Production Manager',
   'Supervisor',
+  // Sunny, 4 Nov 2026: follows the work on the phone, with no attendance.
+  'Maintenance Engineer',
 };
 
 const _requestRoles = {
@@ -54,6 +56,7 @@ const _requestRoles = {
   'Supervisor',
   // Reading only, since 3 Nov 2026, so the GM can open what they are notified of.
   'Higher Management',
+  'Maintenance Engineer',
 };
 
 /// Low value purchase requests: every manager and the plant heads raise them,
@@ -71,6 +74,7 @@ const _lowValueRoles = {
   'VP Operations',
   'Higher Management',
   'Purchase Manager',
+  'Maintenance Engineer',
 };
 
 /// Attendance and leave, brought across from the field-sales app.
@@ -104,7 +108,10 @@ bool hasDashboard(String role) => canSeeBreakdowns(role) || canSeeRequests(role)
 ///
 /// Not applied to low value purchases, which they raise and receive like any
 /// other manager.
-bool isViewOnly(String role) => role == 'Maintenance Manager';
+///
+/// The Maintenance Engineer the same, since 4 Nov 2026: the server lets them
+/// move nothing on either.
+bool isViewOnly(String role) => role == 'Maintenance Manager' || role == 'Maintenance Engineer';
 
 /// Whether this role has anything to do in the app at all.
 bool worksInMaintenance(String role) =>

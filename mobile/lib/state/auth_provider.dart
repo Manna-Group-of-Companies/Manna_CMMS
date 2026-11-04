@@ -124,8 +124,11 @@ class AuthProvider extends ChangeNotifier {
     if (_loggingOut) return;
     _loggingOut = true;
     try {
+      // Withdrawing the phone from push waits on the server, which can take
+      // 90 s to wake; the sign-out does not. The request already carries the
+      // token and finishes on its own after this gives up on it.
       try {
-        await beforeLogout?.call();
+        await beforeLogout?.call().timeout(const Duration(seconds: 3));
       } catch (error) {
         debugPrint('Before sign-out: $error');
       }

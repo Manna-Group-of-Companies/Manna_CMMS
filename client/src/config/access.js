@@ -55,6 +55,11 @@ export const MAINTENANCE_MEMBER = "Maintenance Member";
  * asset register.
  */
 export const PURCHASE_MANAGER = "Purchase Manager";
+/**
+ * Follows breakdowns, requests and the miscellaneous purchases, with no
+ * attendance (4 Nov 2026; Sunny). Not in `ROLES` either.
+ */
+export const MAINTENANCE_ENGINEER = "Maintenance Engineer";
 
 export const ROLES = [
   MANAGER,
@@ -126,11 +131,19 @@ export const VIEWS = {
     VP_OPERATIONS,
     HIGHER_MANAGEMENT,
     PURCHASE_MANAGER,
+    MAINTENANCE_ENGINEER,
   ],
   // itemNaming (the "New Items" page, /requests) removed 10 Oct 2026: it was the VP Operations'
   // approval queue for new items, and since 9 Oct 2026 items go straight to SAP with no approval.
   // The server keeps its entry, which still guards the /naming-requests read API.
-  breakdowns: [MANAGER, MAINTENANCE_MANAGER, HIGHER_MANAGEMENT, PRODUCTION_MANAGER, SUPERVISOR],
+  breakdowns: [
+    MANAGER,
+    MAINTENANCE_MANAGER,
+    HIGHER_MANAGEMENT,
+    PRODUCTION_MANAGER,
+    SUPERVISOR,
+    MAINTENANCE_ENGINEER,
+  ],
   assets: ROLES,
   breakdownReport: [MANAGER, MAINTENANCE_MANAGER, VP_OPERATIONS],
   scrap: [MANAGER, PRODUCTION_MANAGER, HIGHER_MANAGEMENT],
@@ -150,7 +163,14 @@ export const VIEWS = {
    * still confined to their own plant on both.
    */
   /** Higher Management reads them since 3 Nov 2026, for the GM's notifications. */
-  maintenanceRequests: [MANAGER, MAINTENANCE_MANAGER, PRODUCTION_MANAGER, SUPERVISOR, HIGHER_MANAGEMENT],
+  maintenanceRequests: [
+    MANAGER,
+    MAINTENANCE_MANAGER,
+    PRODUCTION_MANAGER,
+    SUPERVISOR,
+    HIGHER_MANAGEMENT,
+    MAINTENANCE_ENGINEER,
+  ],
   /**
    * The maintenance team register - who may be named on a repair.
    *

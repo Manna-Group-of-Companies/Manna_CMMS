@@ -99,6 +99,14 @@ const ROLE_MAP = [
   ["Stock Manager", "Supervisor"],
   ["Stock User", "Supervisor"],
   /**
+   * A maintenance hand who follows the work rather than clocking in (4 Nov
+   * 2026; Sunny): breakdowns, requests and the miscellaneous purchases on the
+   * phone, with the alerts, and no attendance. Not the Maintenance Manager -
+   * moving a breakdown or request on is still decided per stage, and this
+   * role is on none. Above the Member so it wins for someone holding both.
+   */
+  ["Store Maintenance Engineer", "Maintenance Engineer"],
+  /**
    * The hands on the maintenance team, who clock in and out and apply for
    * leave on the phone and do nothing else in the CMMS. Last on purpose:
    * anybody who also holds a store or plant role keeps the more capable view,
@@ -261,7 +269,8 @@ export const describe = async (email, { as } = {}) => {
     throw new ErpError(
       "That account holds no CMMS role in ERPNext. Ask an administrator to give it " +
         "Store Manager, Store Maintenance Manager, Store Supervisor, Plant Manager, " +
-        "Higher Management, VP Operations, Store Purchase Manager or Store Maintenance Member.",
+        "Higher Management, VP Operations, Store Purchase Manager, Store Maintenance Engineer " +
+        "or Store Maintenance Member.",
       { status: 403 }
     );
   }
