@@ -101,7 +101,7 @@ const ROLE_MAP = [
   /**
    * A maintenance hand who follows the work rather than clocking in (4 Nov
    * 2026; Sunny): breakdowns, requests and the miscellaneous purchases on the
-   * phone, with the alerts, and no attendance. Not the Maintenance Manager -
+   * phone, status only - no alerts, no attendance. Not the Maintenance Manager -
    * moving a breakdown or request on is still decided per stage, and this
    * role is on none. Above the Member so it wins for someone holding both.
    */

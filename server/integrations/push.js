@@ -27,10 +27,10 @@ import { devicesForRole, forgetDevices } from "../repository/devices.js";
 /**
  * The roles the phones are rung for; the app registers only these
  * (`canSeeIncoming` in mobile/lib/data/incoming_feed.dart). The GM's since
- * 3 Nov 2026: Higher Management is told of every breakdown and request too,
- * and the Maintenance Engineer since 4 Nov 2026.
+ * 3 Nov 2026: Higher Management is told of every breakdown and request too.
+ * Not the Maintenance Engineer, who follows the status only (4 Nov 2026).
  */
-export const PUSH_ROLES = ["Maintenance Manager", "Higher Management", "Maintenance Engineer"];
+export const PUSH_ROLES = ["Maintenance Manager", "Higher Management"];
 
 /**
  * The service account, from `FIREBASE_SERVICE_ACCOUNT_FILE` (a path) or

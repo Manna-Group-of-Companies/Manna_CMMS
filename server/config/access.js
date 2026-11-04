@@ -42,8 +42,8 @@ export const MAINTENANCE_MEMBER = "Maintenance Member";
 export const PURCHASE_MANAGER = "Purchase Manager";
 /**
  * A maintenance hand who follows breakdowns, requests and the miscellaneous
- * purchases on the phone, with the alerts, and keeps no attendance (4 Nov
- * 2026; Sunny). Not in `ROLES`: no catalog, no asset register.
+ * purchases on the phone - their status only, with no alerts - and keeps no
+ * attendance (4 Nov 2026; Sunny). Not in `ROLES`: no catalog, no asset register.
  */
 export const MAINTENANCE_ENGINEER = "Maintenance Engineer";
 

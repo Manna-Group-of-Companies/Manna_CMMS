@@ -13,11 +13,11 @@ import 'maintenance_repository.dart';
 /// combined screen.
 
 /// The roles this queue is for: the Maintenance Manager, and since 3 Nov 2026
-/// Higher Management (the GM), who is told of the same breakdowns and requests,
-/// and since 4 Nov 2026 the Maintenance Engineer.
+/// Higher Management (the GM), who is told of the same breakdowns and requests.
+/// Not the Maintenance Engineer, who follows the status only (4 Nov 2026).
 /// The server gives both every plant - neither is on `PLANT_SCOPED_ROLES` - so
 /// nothing here narrows the list. Mirrors PUSH_ROLES in server/integrations/push.js.
-const incomingRoles = {'Maintenance Manager', 'Higher Management', 'Maintenance Engineer'};
+const incomingRoles = {'Maintenance Manager', 'Higher Management'};
 
 bool canSeeIncoming(String role) => incomingRoles.contains(role);
 
