@@ -282,6 +282,29 @@ export const getQuotation = async (id) => {
 export const quotableRequests = async () =>
   (await Promise.all(QUOTING.map((status) => listRequests({ status, limit: 300 })))).flat().filter((r) => r.mayQuote);
 
+/** SAP's placeholder units: in its unit list, but not units a vendor sells by. */
+const PLACEHOLDER_UNITS = new Set(["MANUAL", "UOM1"]);
+
+/**
+ * The vendor units a quotation may use (11 Nov 2026): SAP's unit list together
+ * with the units items are created with. Some companies' SAP unit list holds
+ * only placeholders, which left UOM1 as the one choice. SAP never checks the
+ * vendor unit against that list: the sync posts it as free text (MeasureUnit)
+ * on Manual-group items only, so any unit here is safe. SAP's spelling wins
+ * where both lists have a unit.
+ */
+export const quotationUnits = (options = {}) => {
+  const seen = new Map();
+  for (const list of [options.sap_units, options.units]) {
+    for (const raw of Array.isArray(list) ? list : []) {
+      const unit = String(raw ?? "").trim();
+      const key = unit.toUpperCase();
+      if (unit && !PLACEHOLDER_UNITS.has(key) && !seen.has(key)) seen.set(key, unit);
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+};
+
 /**
  * What the quotation form offers for one company: SAP's suppliers, tax codes and
  * units - and the company itself as SAP holds it (name, address, phones, email),
@@ -293,8 +316,8 @@ export const optionsFor = async (company) => {
   const info = options.company_info || null;
   return {
     ...published,
-    // SAP's whole unit list once the sync has published it; until then the units items are created with.
-    units: Array.isArray(options.sap_units) && options.sap_units.length ? options.sap_units : Array.isArray(options.units) ? options.units : [],
+    // SAP's unit list and the units items are created with, together (quotationUnits).
+    units: quotationUnits(options),
     // Set against each supplier's state to choose CGST+SGST or IGST (gstKindFor) - on the goods receipt now.
     companyState: info?.state || "",
     companyInfo: info
