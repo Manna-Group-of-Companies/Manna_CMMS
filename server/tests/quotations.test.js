@@ -9,7 +9,7 @@ import { describe, it } from "node:test";
 
 import { maySee } from "../config/access.js";
 import { checkDrop, mayQuote } from "../repository/purchaseRequests.js";
-import { checkQuotation, checkTaxCode, gstKindFor, isExpired, mayEdit, mayMakeOrder, taxCodesFor } from "../repository/purchaseQuotations.js";
+import { checkQuotation, checkTaxCode, gstKindFor, isExpired, mayEdit, mayMakeOrder, quotationUnits, taxCodesFor } from "../repository/purchaseQuotations.js";
 import { checkOrder, nextOrderName } from "../repository/purchaseOrders.js";
 import { billTaxes } from "../repository/goodsReceipts.js";
 
@@ -259,5 +259,20 @@ describe("a PO made from a quotation", () => {
     assert.equal(nextOrderName("2026", ["PO-2026-00341", "PO-2026-00342"], ["PR-2026-00340"]), "PO-2026-00343");
     assert.equal(nextOrderName("2027", ["PO-2026-00342"], ["PR-2026-00340"]), "PO-2027-00001", "a new year starts again");
     assert.equal(nextOrderName("2026"), "PO-2026-00001");
+  });
+});
+
+describe("quotation vendor units", () => {
+  it("offers the item units when SAP's unit list holds only placeholders", () => {
+    assert.deepEqual(quotationUnits({ sap_units: ["UOM1"], units: ["NOS", "KGS"] }), ["KGS", "NOS"]);
+  });
+
+  it("merges SAP's list with the item units, SAP's spelling first, no duplicates", () => {
+    assert.deepEqual(quotationUnits({ sap_units: ["Nos", "BAG", "Manual"], units: ["NOS", "KGS", " ", null] }), ["BAG", "KGS", "Nos"]);
+  });
+
+  it("is empty when neither list is published", () => {
+    assert.deepEqual(quotationUnits({}), []);
+    assert.deepEqual(quotationUnits(), []);
   });
 });
