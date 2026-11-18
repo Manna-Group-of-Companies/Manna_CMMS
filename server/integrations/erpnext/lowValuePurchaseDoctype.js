@@ -53,14 +53,15 @@ export const PURCHASE_STATUSES = [
  *
  * The sheet names companies its own way, and one of them differently from the
  * plant: Manna Treads' rows are "Hi-tech Pretreads" (every one of Ajith's 88
- * rows on the sheet). Soorya Rubbers has no plant in the CMMS, so only the
- * roles that see every company see it.
+ * rows on the sheet). The sheet spells Suriya Rubber "Soorya Rubbers"; that
+ * plant was added on 18 Nov 2026.
  */
 export const PLANT_COMPANIES = {
   "Manna Rubber Products": ["Manna Rubber Products"],
   "Hi-Tech Rubber Industries": ["Hi-tech Rubber Industries"],
   "Manna Treads": ["Hi-tech Pretreads"],
   "Manna Tyre Retreads": ["Manna Tyre Retreading"],
+  "Suriya Rubber": ["Soorya Rubbers"],
 };
 
 /** The sheet companies a scope allows: every one, or a plant head's own (null = every one). */
