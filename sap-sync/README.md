@@ -44,6 +44,7 @@ Read `C:\Users\eldhose\sap-tools\BRIEFING.md` before changing anything here.
 | `HITECH_PRETREADS_LIVE` | Manna Treads | `MT-` | 110 TOOLS AND EQUIPMENTS |
 | `HITECH_RUBBER_LIVE` | Hi-Tech Rubber Industries | `HRI-` | 106 SPARE PARTS, 108 Engineering Tools, 109 Electrical Items |
 | `MANNA_TYRE_LIVE` | Manna Tyre Retreads | `MTR-` | 115 Engineering Toools, 116 Electrical Items |
+| `SOORYA_RUBBER_LIVE` | Suriya Rubber | `SR-` | 102 Engineering Stocks (added 18 Nov 2026; created from Manna Rubber's 108, with account 505005 Consumables Issue; SAP warehouse `01`, item series 3, PR series 62) |
 
 `MANNA_TYRE_LIVE` has its own SAP password (`sap.password_overrides` in `config.json`).
 
@@ -270,6 +271,7 @@ The Single starts with **`dry_run = 1`**: the sync reads SAP and reports what it
 | `revalue_nil_stock` | revalue nil-valued stock to the GR price first | off |
 | `post_purchase_requests` | SAP Purchase Requests from the CMMS | off |
 | `post_issues` | SAP Goods Issues (+ ERPNext Material Issues) for spares used on breakdowns | off |
+| `issue_account` | GL account each goods-issue line is expensed to (`AccountCode`); `""` lets SAP fall back to the warehouse's default offset account (500510 Stock Difference Losses - wrong for repair spares, found 2 Nov 2026) | `505005` (Consumables Issue in all five live companies; created in Suriya Rubber 18 Nov 2026) |
 | `post_purchase_orders` | SAP Purchase Orders the purchase manager makes from purchase requests in the CMMS; publishes each company's suppliers and tax codes for the PO form | off |
 | `pull_from_sap` | fetch engineering items and their stock from SAP (writes ERPNext only) | off |
 | `pr_requester` | SAP user code the requests are raised under | the SAP login |

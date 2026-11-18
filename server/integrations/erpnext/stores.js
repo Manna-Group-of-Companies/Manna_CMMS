@@ -64,8 +64,9 @@ export const STORES = [
   // 28 Oct 2026: a company to demonstrate the CMMS in, on the live site. Its own ERPNext company, and SAP's test
   // database HITECH_RUBBER (a copy of Hi-Tech Rubber Industries) - the sync refuses it any other database.
   { key: "hi-tech-rubber-demo", label: "Hi-Tech Rubber DEMO", warehouse: "Stores - HRD", company: "Hi-Tech Rubber DEMO", abbr: "HRD", isDemo: true },
-  // 18 Nov 2026: Suriya Rubber, its own ERPNext company (SR) with the CMMS Plant of the same name. It has no
-  // SAP company, so no SAP item carries the SR prefix and the SAP syncs leave it alone.
+  // 18 Nov 2026: Suriya Rubber, its own ERPNext company (SR) with the CMMS Plant of the same name. The same day it
+  // was added to the SAP sync on SAP SOORYA_RUBBER_LIVE (item group 102 Engineering Stocks, warehouse 01): its
+  // engineering items are SR-ENG-<n>, like the other live companies (see sap-sync/README.md).
   { key: "suriya-rubber", label: "Suriya Rubber", warehouse: "Stores - SR", company: "Suriya Rubber", abbr: "SR" },
 ];
 

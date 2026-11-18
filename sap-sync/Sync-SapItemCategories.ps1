@@ -52,10 +52,12 @@
   PASS F - SPARES ISSUED TO BREAKDOWNS (post_issues). Every "CMMS Goods Issue" Queued - the spares picked
   from the plant's store when a breakdown was marked "Machine running again" (10 Oct 2026; the CMMS checked
   each quantity against what the store had available): a SAP Goods Issue (InventoryGenExits) from the line's
-  warehouse (the company's engineering warehouse), Reference2 = "GI<yy>-<n>" so a re-run adopts it, the
-  breakdown in Comments; then the same quantity out of the company's ERPNext store (Material Issue) and the
-  issue marked Posted (or Failed with the reason). Runs right after PASS C. SAP refuses an issue that would
-  take the warehouse below zero.
+  warehouse (the company's engineering warehouse), every line expensed to the consumables account
+  (issue_account, 505005 "Consumables Issue" in all four live companies; without it SAP booked the issue to
+  the warehouse's default offset, 500510 "Stock Difference Losses" - wrong, found 2 Nov 2026), Reference2 =
+  "GI<yy>-<n>" so a re-run adopts it, the breakdown in Comments; then the same quantity out of the company's
+  ERPNext store (Material Issue) and the issue marked Posted (or Failed with the reason). Runs right after
+  PASS C. SAP refuses an issue that would take the warehouse below zero.
 
   PASS E - FETCH FROM SAP (pull_from_sap). The items of this company's engineering item groups only: new
   ones are added to ERPNext, SAP-side changes (name, groups, HSN, tax, minimum, active) copied unless the
@@ -196,8 +198,9 @@ function Save-LoginBlocked {
 function Login-Reason([string] $Db) { "SAP login refused for $Db - not retried; a person must check the password and delete logs\login-blocked.json" }
 
 # The company's CMMS store = the ERPNext copy's default warehouse (see Manna_CMMS server stores.js).
-$storeByAbbr = @{ MRPPL = 'Manna Rubber Products Store - MRPPL'; MT = 'Stores - MT'; HRI = 'Stores - HRI'; MTR = 'Stores - MTR'; HRD = 'Stores - HRD' }
-$companyByAbbr = @{ MRPPL = 'Manna Rubber Products Private Limited'; MT = 'Manna Treads'; HRI = 'Hi-Tech Rubber Industries'; MTR = 'Manna Tyre Retreads'; HRD = 'Hi-Tech Rubber DEMO' }
+$storeByAbbr = @{ MRPPL = 'Manna Rubber Products Store - MRPPL'; MT = 'Stores - MT'; HRI = 'Stores - HRI'; MTR = 'Stores - MTR'; HRD = 'Stores - HRD'; SR = 'Stores - SR' }
+$companyByAbbr = @{ MRPPL = 'Manna Rubber Products Private Limited'; MT = 'Manna Treads'; HRI = 'Hi-Tech Rubber Industries'; MTR = 'Manna Tyre Retreads'; HRD = 'Hi-Tech Rubber DEMO'; SR = 'Suriya Rubber' }
+# 18 Nov 2026: SR = Suriya Rubber on SAP SOORYA_RUBBER_LIVE (group 102 Engineering Stocks, warehouse 01).
 # The demo company (28 Oct 2026) and SAP's test database belong to each other and to nothing else: HRD posts only to
 # HITECH_RUBBER, and no other company may name it. A mismatch is skipped with an error, before any SAP login.
 $demoAbbr = 'HRD'; $demoDb = 'HITECH_RUBBER'
@@ -260,6 +263,11 @@ try {
     $pullFromSap = Cfg-On 'pull_from_sap'
     # The SAP employee a purchase request is raised under (ReqType 171 = employee); the CMMS raiser goes in its remarks.
     $prRequester = if ($cfg.PSObject.Properties['pr_requester'] -and "$($cfg.pr_requester)".Trim()) { "$($cfg.pr_requester)".Trim() } else { "$($cfg.sap.username)" }
+    # The GL account a goods issue's lines are expensed to: 505005 "Consumables Issue" (the same code in all
+    # four live companies, checked 2 Nov 2026). Without an explicit AccountCode SAP books the issue to the
+    # warehouse's default offset account - 500510 "Stock Difference Losses" - which is wrong for spares
+    # consumed on a repair. issue_account in config.json overrides; set it to "" for SAP's default again.
+    $issueAccount = if ($cfg.PSObject.Properties['issue_account']) { "$($cfg.issue_account)".Trim() } else { '505005' }
     # Companies left out entirely - no SAP login, their CMMS work stays Queued (13 Oct 2026: MANNA_TYRE_LIVE refused
     # its password twice, and SAP locks a user after 3 wrong passwords, so the watcher must not keep trying it).
     $skipDbs = @(@($SkipCompany) + @(if ($cfg.PSObject.Properties['skip_companies']) { @($cfg.skip_companies) }) | ForEach-Object { "$_".Trim().ToUpper() } | Where-Object { $_ })
@@ -1701,7 +1709,9 @@ try {
 
             # ---------------- PASS F: spares issued to breakdowns (post_issues)
             # A SAP Goods Issue (InventoryGenExits) per CMMS issue, from the line's warehouse (the company's
-            # engineering warehouse); Reference2 = "GI<yy>-<n>" (the CMMS issue number) makes a re-run adopt it.
+            # engineering warehouse), each line expensed to $issueAccount (505005 Consumables Issue; without
+            # it SAP used the warehouse default, 500510 Stock Difference Losses - fixed 2 Nov 2026);
+            # Reference2 = "GI<yy>-<n>" (the CMMS issue number) makes a re-run adopt it.
             # Then the same quantity out of the company's ERPNext store (Material Issue). After PASS C, so stock
             # received this run is on the shelf first.
             foreach ($gi in $w.issues) {
@@ -1717,7 +1727,11 @@ try {
                     else {
                         $comments = ("CMMS {0}: spares for breakdown {1} ({2}), by {3}." -f $gi.name, $gi.breakdown, $gi.machine, $gi.raised_by)
                         if ($comments.Length -gt 254) { $comments = $comments.Substring(0, 254) }
-                        $docLines = @(foreach ($l in $lines) { [ordered]@{ ItemCode = "$($l.sap_item_code)"; Quantity = [double]$l.qty; WarehouseCode = $(if ("$($l.warehouse)".Trim()) { "$($l.warehouse)".Trim() } else { $whOf }) } })
+                        $docLines = @(foreach ($l in $lines) {
+                            $ln = [ordered]@{ ItemCode = "$($l.sap_item_code)"; Quantity = [double]$l.qty; WarehouseCode = $(if ("$($l.warehouse)".Trim()) { "$($l.warehouse)".Trim() } else { $whOf }) }
+                            if ($issueAccount) { $ln.AccountCode = $issueAccount }
+                            $ln
+                        })
                         $payload = [ordered]@{ DocDate = $today; Reference2 = $stamp; Comments = $comments; DocumentLines = $docLines }
                         if ($DryRun) { $entry.action = 'would post InventoryGenExits'; $entry.payload = $payload }
                         else {
@@ -2115,7 +2129,10 @@ try {
                         try { $stale = ((Get-Date) - [datetime]::ParseExact("$($opt.vendors_refreshed_at)", 'yyyy-MM-dd HH:mm:ss', $null)).TotalMinutes -ge 60 } catch { $stale = $true }
                     }
                     # A list published before supplier states were (24 Oct 2026) is read again at once, not in an hour.
-                    $noStates = @($opt.vendors).Count -gt 0 -and -not @(@($opt.vendors) | Where-Object { $_.PSObject.Properties['state'] }).Count
+                    # 18 Nov 2026: a company with no list yet (Suriya Rubber) gave @($null), one null row, and failed here
+                    # ("Cannot index into a null array") on every run, so its suppliers were never published. Nulls are dropped.
+                    $vendList = @(@($opt.vendors) | Where-Object { $_ })
+                    $noStates = $vendList.Count -gt 0 -and -not @($vendList | Where-Object { $_.PSObject.Properties['state'] }).Count
                     if ($stale -or $noStates -or $w.orders.Count -or $w.quotes.Count) {
                         # Each supplier's state, from its default bill-to address (else its first bill-to, else any): with the
                         # company's state it decides GST - the same state takes CGST+SGST, another state IGST (SAP refused
