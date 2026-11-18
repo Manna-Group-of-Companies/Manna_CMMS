@@ -97,9 +97,10 @@ bool canSeeLowValuePurchases(String role) => _lowValueRoles.contains(role);
 bool canApproveAttendance(String role) => _attendanceApproverRoles.contains(role);
 bool isMaintenanceMember(String role) => role == 'Maintenance Member';
 
-/// The dashboard sums up breakdowns and requests, so it is for the roles that
-/// see at least one of them.
-bool hasDashboard(String role) => canSeeBreakdowns(role) || canSeeRequests(role);
+/// The dashboard was taken off the phone on 29 Oct 2026: managers open the
+/// app on Breakdowns (or Requests) and reach their profile from the top bar.
+/// The screen is kept for now, unreachable, in case it comes back.
+bool hasDashboard(String role) => false;
 
 /// The Maintenance Manager follows breakdowns and requests on the phone but
 /// moves none of them on from it: Start Repair, Machine Running, rejecting and
@@ -136,14 +137,14 @@ final rootNavigatorKey = GlobalKey<NavigatorState>();
 /// on, or the no-access page when they are on none.
 ///
 /// A team member's whole app is Attendance, so that is where they land; every
-/// manager lands on the Dashboard, which sums up the breakdowns and requests
-/// they open the app for. Low
+/// manager lands on Breakdowns, or Requests when they do not see breakdowns. Low
 /// value purchases come after the maintenance screens, so they are home only
 /// for the roles that have nothing else here - VP Operations and the purchase
 /// manager.
 String homePathFor(String role) {
   if (isMaintenanceMember(role)) return attendanceHome;
-  if (hasDashboard(role)) return dashboardHome;
+  if (canSeeBreakdowns(role)) return breakdownsHome;
+  if (canSeeRequests(role)) return requestsHome;
   if (canSeeLowValuePurchases(role)) return lowValueHome;
   if (canSeeAttendance(role)) return attendanceHome;
   return noAccessHome;

@@ -30,8 +30,6 @@ List<NavLink> _tabsFor(AuthProvider auth) {
   final role = auth.user?.role;
   if (role == null) return const [];
   return [
-    if (hasDashboard(role))
-      const NavLink('Dashboard', dashboardHome, Icons.space_dashboard_outlined),
     if (canSeeBreakdowns(role))
       const NavLink('Breakdowns', breakdownsHome, Icons.build_outlined),
     if (canSeeRequests(role))
@@ -40,14 +38,14 @@ List<NavLink> _tabsFor(AuthProvider auth) {
       const NavLink('Miscellaneous', lowValueHome, Icons.shopping_cart_outlined),
     if (canSeeAttendance(role))
       const NavLink('Attendance', attendanceHome, Icons.how_to_reg_outlined),
-    const NavLink('Profile', '/maintenance/settings', Icons.person_outline),
   ];
 }
 
 /// Chrome shared by every authenticated screen: the app bar with the drawer
 /// button and the notification bell (Navbar.jsx), the dark side drawer, and
-/// the bottom tab bar for the working screens. Profile and sign-out are the
-/// last tab, and the foot of the drawer.
+/// the bottom tab bar for the working screens. Profile is the round button at
+/// the top right (29 Oct 2026; it was the last tab), sign-out the foot of the
+/// drawer.
 class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
@@ -118,7 +116,8 @@ class _AppShellState extends State<AppShell> {
               actions: [
                 ...?widget.actions,
                 const NotificationBell(),
-                const SizedBox(width: 4),
+                const _ProfileButton(),
+                const SizedBox(width: 8),
               ],
               shape: const Border(bottom: BorderSide(color: AppColors.border)),
             )
@@ -478,8 +477,21 @@ class _DrawerItem extends StatelessWidget {
   }
 }
 
-/// The orange disc with a person in it, used in the drawer, the dashboard
-/// header and the Profile screen.
+/// Opens the Profile screen from the top bar.
+class _ProfileButton extends StatelessWidget {
+  const _ProfileButton();
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+        tooltip: 'Profile',
+        padding: EdgeInsets.zero,
+        onPressed: () => context.push('/maintenance/settings'),
+        icon: const AccountAvatar(size: 32),
+      );
+}
+
+/// The orange disc with a person in it, used in the drawer, the top bar's
+/// profile button and the Profile screen.
 class AccountAvatar extends StatelessWidget {
   const AccountAvatar({super.key, this.size = 44});
 

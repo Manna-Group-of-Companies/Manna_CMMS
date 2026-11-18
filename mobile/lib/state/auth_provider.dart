@@ -64,6 +64,11 @@ class AuthProvider extends ChangeNotifier {
         // An Admin session left over from an older build — drop it.
         if (cached.isAdmin) throw ApiException(kAdminNotSupported);
         _user = cached;
+        // Open on the cached session now. The check below can wait up to
+        // 90 s for the cloud server to wake, and holding the splash for it
+        // left the app looking frozen (28 Oct 2026). An invalid token still
+        // clears the session, and the router then sends the user to login.
+        _loading = false;
         notifyListeners();
 
         // Validate the token and refresh the cached profile.

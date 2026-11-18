@@ -11,6 +11,7 @@ void main() {
     Product.fromJson(const {
       '_id': 'p1',
       'code': 'PRD-593021',
+      'sap': {'status': 'Created', 'code': 'MRPPL-I-593021'},
       'name': 'Dell UltraSharp 27 Monitor (U2723QE)',
       'category': 'Electronics',
       'quantity': 8,
@@ -67,7 +68,9 @@ void main() {
         reason: '$header must fit the screen, not sit off the right edge',
       );
     }
-    expect(find.text('PRD-593021'), findsOneWidget);
+    // SAP's code only; ERPNext's own item code is not shown.
+    expect(find.text('MRPPL-I-593021'), findsOneWidget);
+    expect(find.text('PRD-593021'), findsNothing);
     expect(find.text('Engineer Room'), findsOneWidget);
     // Rows open the product rather than unfolding, so no chevrons at all.
     expect(find.byIcon(Icons.keyboard_arrow_down), findsNothing);

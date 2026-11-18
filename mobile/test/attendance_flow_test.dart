@@ -109,7 +109,8 @@ void main() {
 
   Future<void> signIn(WidgetTester tester) async {
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'you@mannarubber.com'),
+      // The email box has no example text since the 23 Oct redesign.
+      find.byType(TextFormField).first,
       'sunny@mannarubber.com',
     );
     await tester.enterText(
