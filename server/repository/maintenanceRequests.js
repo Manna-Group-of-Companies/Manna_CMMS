@@ -57,6 +57,22 @@ const REQUEST_FIELDS = [
   "modified",
 ];
 
+/**
+ * The only requests the CMMS shows (26 Nov 2026).
+ *
+ * While the maintenance team does the stock taking, the web and the phone show
+ * these two requests and hide every other one. Nothing is deleted or changed in
+ * ERPNext: the rest are only left out of the list and the detail. Matched on the
+ * title, ignoring case and spacing. Set to null to show everything again.
+ */
+export const VISIBLE_REQUEST_TITLES = ["Engineering Store Stock Taking", "Workshop Stock Taking"];
+
+const titleKey = (title) => String(title || "").trim().replace(/\s+/g, " ").toLowerCase();
+const VISIBLE_KEYS = VISIBLE_REQUEST_TITLES ? new Set(VISIBLE_REQUEST_TITLES.map(titleKey)) : null;
+
+/** True when this request is one the CMMS shows. */
+export const isVisibleRequest = (title) => !VISIBLE_KEYS || VISIBLE_KEYS.has(titleKey(title));
+
 /** What each stage is waiting for, in the words the screen shows. */
 const WAITING_ON = {
   Requested: "Maintenance to attend to it",
@@ -167,7 +183,10 @@ export const listRequests = async ({
     limit,
   });
 
-  return rows.map(toSummary).sort((a, b) => {
+  return rows
+    .filter((row) => isVisibleRequest(row.title))
+    .map(toSummary)
+    .sort((a, b) => {
     const settled = (r) => (["Closed", "Cancelled"].includes(r.state) ? 1 : 0);
     // Finished work sinks below live work whatever its priority: a closed
     // High from March is not the next thing anybody should pick up.
@@ -184,7 +203,7 @@ export const getRequest = async (id) => {
     if (error?.status === 404) return null;
     throw error;
   });
-  if (!doc) return null;
+  if (!doc || !isVisibleRequest(doc.title)) return null;
 
   const nextAction = nextRequestActionFor(doc.workflow_state);
   const sapCodes = await sapCodesFor((doc.materials_used || []).map((m) => m.item_code));
@@ -285,7 +304,9 @@ export const raiseRequest = async ({
     requested_at: erpNow(),
   });
 
-  return getRequest(created.name);
+  // A request outside VISIBLE_REQUEST_TITLES is saved but not shown, so it is
+  // answered from what was just saved rather than as "not found".
+  return (await getRequest(created.name)) || toSummary(created);
 };
 
 /** Materials, normalised for ERPNext's child table. */

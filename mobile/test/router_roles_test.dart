@@ -2,18 +2,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stockmaster/router.dart';
 
 void main() {
-  test('manager@mannarubber.com (Production Manager) lands on Breakdowns; the dashboard is gone', () {
-    expect(homePathFor('Production Manager'), breakdownsHome);
+  // Breakdowns are hidden on the phone since 26 Nov 2026, so everybody who had
+  // them lands on Requests (the two stock-taking requests).
+  test('manager@mannarubber.com (Production Manager) lands on Requests; the dashboard is gone', () {
+    expect(homePathFor('Production Manager'), requestsHome);
     expect(hasDashboard('Production Manager'), isFalse);
   });
 
   test('every role the server matrix names is served by the app', () {
+    // Hidden for every role since 26 Nov 2026.
     const expectBreakdowns = {
-      'Manager': true,
-      'Maintenance Manager': true,
-      'Higher Management': true,
-      'Production Manager': true,
-      'Supervisor': true,
+      'Manager': false,
+      'Maintenance Manager': false,
+      'Higher Management': false,
+      'Production Manager': false,
+      'Supervisor': false,
       'VP Operations': false,
       'Maintenance Member': false,
       'Purchase Manager': false,
@@ -68,8 +71,8 @@ void main() {
     expect(worksInMaintenance('Store Keeper'), isFalse);
   });
 
-  test('Higher Management sees Breakdowns only, so that is home', () {
-    expect(homePathFor('Higher Management'), breakdownsHome);
+  test('Higher Management lands on Requests while Breakdowns are hidden', () {
+    expect(homePathFor('Higher Management'), requestsHome);
   });
 
   test('a Maintenance Member lands on Attendance, which is their whole app', () {
@@ -80,11 +83,11 @@ void main() {
         reason: 'a member asks; they do not decide their own request');
   });
 
-  test('the managers phones are Breakdowns and Requests only', () {
+  test('the managers phones are Requests only while Breakdowns are hidden', () {
     for (final role in ['Maintenance Manager', 'Manager']) {
       expect(canSeeAttendance(role), isFalse, reason: role);
       expect(isMaintenanceMember(role), isFalse, reason: role);
-      expect(homePathFor(role), breakdownsHome, reason: role);
+      expect(homePathFor(role), requestsHome, reason: role);
     }
     for (final role in ['Supervisor', 'Production Manager', 'Higher Management', 'VP Operations']) {
       expect(canApproveAttendance(role), isFalse, reason: role);
