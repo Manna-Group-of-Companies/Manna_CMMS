@@ -90,12 +90,7 @@ const _lowValueRoles = {
 const _attendanceRoles = {'Maintenance Member'};
 const _attendanceApproverRoles = {'Maintenance Manager', 'Manager'};
 
-/// Breakdowns are hidden on the phone for everybody (26 Nov 2026), as on the
-/// web (`HIDDEN` in client/src/config/access.js): only the two stock-taking
-/// maintenance requests are shown. Set back to true to bring them back.
-const _breakdownsShown = false;
-
-bool canSeeBreakdowns(String role) => _breakdownsShown && _breakdownRoles.contains(role);
+bool canSeeBreakdowns(String role) => _breakdownRoles.contains(role);
 bool canSeeRequests(String role) => _requestRoles.contains(role);
 bool canSeeAttendance(String role) => _attendanceRoles.contains(role);
 bool canSeeLowValuePurchases(String role) => _lowValueRoles.contains(role);

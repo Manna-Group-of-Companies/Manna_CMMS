@@ -246,21 +246,9 @@ export const RELEASED = new Set([
  */
 const RELEASE_EXEMPT = [MAINTENANCE_MANAGER];
 
-/**
- * Screens switched off for everybody, the exempt roles included (26 Nov 2026).
- *
- * Breakdowns are hidden while the maintenance team does the stock taking: the
- * CMMS shows the two stock-taking maintenance requests and nothing else of
- * Module 2. The breakdown API stays up - the request screens still read their
- * machines, plants and lookups from it. Deleting a name here brings it back.
- */
-export const HIDDEN = new Set(["breakdowns", "breakdownReport"]);
-
 /** One screen of the matrix, given the release. */
 const maySeeOne = (role, view) =>
-  !HIDDEN.has(view) &&
-  (RELEASED.has(view) || RELEASE_EXEMPT.includes(role)) &&
-  (VIEWS[view] || []).includes(role);
+  (RELEASED.has(view) || RELEASE_EXEMPT.includes(role)) && (VIEWS[view] || []).includes(role);
 
 /**
  * Settings (23 Oct 2026): the category tree and the maintenance team on one

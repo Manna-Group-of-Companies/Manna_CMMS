@@ -1,5 +1,6 @@
 import { getDoc, listAll } from "../integrations/erpnext/client.js";
 import { erpNow } from "../integrations/erpnext/time.js";
+import { shownFilters } from "../integrations/erpnext/showFrom.js";
 
 /**
  * The reliability figures, worked out from the breakdown records.
@@ -207,6 +208,8 @@ export const buildReport = async ({ from, to, plant = "" } = {}) => {
     // A cancelled report was not a breakdown. Counting one would inflate the
     // failure count and depress every mean that divides by it.
     ["CMMS Breakdown", "workflow_state", "!=", "Cancelled"],
+    // Breakdowns raised before SHOW_FROM are hidden - see showFrom.js.
+    ...shownFilters("CMMS Breakdown"),
   ];
   if (plant) filters.push(["CMMS Breakdown", "plant", "=", plant]);
 

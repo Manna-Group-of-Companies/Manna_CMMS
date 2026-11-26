@@ -8,6 +8,7 @@ import {
   listDocs,
   updateDoc,
 } from "../integrations/erpnext/client.js";
+import { isShown, shownFilters } from "../integrations/erpnext/showFrom.js";
 import { STAGES, fromStatesOf, mayTake, missingFor, nextActionFor } from "../integrations/erpnext/breakdownStages.js";
 import { listTechnicians } from "./technicians.js";
 import { plantsFor } from "./plantScope.js";
@@ -149,7 +150,8 @@ const toSummary = (row) => {
  * plant rather than a security boundary — the boundary is in ERPNext.
  */
 export const listBreakdowns = async ({ plant = "", state = "", open = false, limit = 100, onlyPlants = null } = {}) => {
-  const filters = [];
+  // Breakdowns raised before SHOW_FROM are hidden - see showFrom.js.
+  const filters = [...shownFilters("CMMS Breakdown")];
   if (plant) filters.push(["CMMS Breakdown", "plant", "=", plant]);
   // A production manager sees their own site and no other. Applied even when
   // they also passed a `plant` filter, so narrowing cannot be used to widen.
@@ -213,7 +215,7 @@ export const getBreakdown = async (id) => {
     if (error?.status === 404) return null;
     throw error;
   });
-  if (!doc) return null;
+  if (!doc || !isShown(doc.creation)) return null;
 
   const sapCodes = await sapCodesFor((doc.spares_required || []).map((s) => s.item_code));
 

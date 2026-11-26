@@ -2,7 +2,6 @@ import { useSearchParams } from "react-router-dom";
 import { AlertTriangle, BarChart3 } from "lucide-react";
 import BreakdownReport from "./BreakdownReport";
 import LowStockReport from "./LowStockReport";
-import { HIDDEN } from "../../config/access";
 
 /**
  * Reports (3 Nov 2026): every report the GM reads, on one screen - the MD, the
@@ -19,8 +18,7 @@ import { HIDDEN } from "../../config/access";
 const TABS = [
   { key: "breakdowns", label: "Breakdowns & Downtime", icon: BarChart3, Page: BreakdownReport },
   { key: "low-stock", label: "Low Stock", icon: AlertTriangle, Page: LowStockReport },
-  // The breakdown tab goes with the Breakdowns screen while that is hidden.
-].filter((t) => !(t.key === "breakdowns" && HIDDEN.has("breakdownReport")));
+];
 
 const Reports = () => {
   const [params, setParams] = useSearchParams();
